@@ -1,2 +1,2 @@
-# l2yback
-Backend for Fitness MVP
+# Backends
+Generic repo for different backend work
