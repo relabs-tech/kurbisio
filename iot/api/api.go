@@ -290,7 +290,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 		func(w http.ResponseWriter, r *http.Request) {
 			params := mux.Vars(r)
 			equipmentID := params["equipment_id"]
-			log.Println("handle authorization of ", equipmentID)
+			log.Println("authorization request of", equipmentID)
 
 			var deviceID uuid.UUID
 			var authorizationStatus string

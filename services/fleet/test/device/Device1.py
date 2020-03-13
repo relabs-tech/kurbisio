@@ -33,17 +33,16 @@ def on_connect(client, userdata, flags, rc):
 
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
-    client.subscribe("kurbisio/twin/"+device_id+"/requests/configuration")
-    client.subscribe("kurbisio/twin/"+device_id+"/requests/gregory")
-    client.publish("kurbisio/twin/"+device_id+"/get", json.dumps(["configuration","gregory"]))
+    client.subscribe("kurbisio/"+device_id+"/twin/requests/configuration")
+    client.subscribe("kurbisio/"+device_id+"/twin/requests/software")
+    client.publish("kurbisio/"+device_id+"/twin/get", json.dumps(["configuration","software"]))
 
 
 # The callback for when a PUBLISH message is received from the server.
 def on_message(client, userdata, msg):
     print("received data on " + msg.topic + " (" + str(len(msg.payload)) + " bytes) " + str(msg.payload))
-    if msg.topic == "kurbisio/twin/"+device_id+"/requests/configuration":
-        client.publish("kurbisio/twin/"+device_id+"/reports/configuration", msg.payload, qos=0) 
-
+    if msg.topic == "kurbisio/"+device_id+"/twin/requests/configuration":
+        client.publish("kurbisio/"+device_id+"/twin/reports/configuration", msg.payload, qos=0)
 
 client = mqtt.Client(client_id=device_id, clean_session=True)
 client.tls_set(ca_certs="../../ca.crt", tls_version=ssl.PROTOCOL_TLSv1_2, certfile=imei+".crt", keyfile=imei+".key")

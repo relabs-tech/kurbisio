@@ -206,10 +206,10 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 	return func(ctx context.Context, client gmqtt.Client, msg packets.Message) (valid bool) {
 		deviceID := client.OptionsReader().ClientID()
 		topic := msg.Topic()
-		log.Println("OnMsgArrived", deviceID, topic)
+		log.Println("OnMsgArrived", topic)
 		if strings.HasPrefix(topic, "kurbisio/") {
-			if strings.HasPrefix(topic, "kurbisio/twin/"+deviceID+"/reports/") {
-				key := strings.TrimPrefix(topic, "kurbisio/twin/"+deviceID+"/reports/")
+			if strings.HasPrefix(topic, "kurbisio/"+deviceID+"/twin/reports/") {
+				key := strings.TrimPrefix(topic, "kurbisio/"+deviceID+"/twin/reports/")
 				if strings.Contains(key, "/") {
 					log.Println("invalid twin key")
 					return false
@@ -230,7 +230,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				if err != nil {
 					log.Println(err)
 				}
-			} else if strings.HasPrefix(topic, "kurbisio/twin/"+deviceID+"/get") {
+			} else if strings.HasPrefix(topic, "kurbisio/"+deviceID+"/twin/get") {
 				body := msg.Payload()
 				keys := []string{}
 				err := json.Unmarshal(body, &keys)
@@ -239,15 +239,15 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 					return false
 				}
 				for _, key := range keys {
-					fmt.Println("sending twin request for key=", key)
-					payload := []byte{}
+					payload := []byte("{}")
 					err = p.db.QueryRow(
 						`SELECT request FROM `+p.schema+`.twin WHERE device_id=$1 AND key=$2;`,
 						deviceID, key).Scan(&payload)
-					if err != nil {
+					if err != nil && err != sql.ErrNoRows {
 						log.Println(err)
 					} else {
-						msg := gmqtt.NewMessage("kurbisio/twin/"+deviceID+"/requests/"+key, payload, packets.QOS_0)
+						log.Println("send twin request for", deviceID, key)
+						msg := gmqtt.NewMessage("kurbisio/"+deviceID+"/twin/requests/"+key, payload, packets.QOS_0)
 						p.service.PublishService().Publish(msg)
 					}
 				}
@@ -268,7 +268,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 func (p *plugin) OnSubscribeWrapper(subscribe gmqtt.OnSubscribe) gmqtt.OnSubscribe {
 	return func(ctx context.Context, client gmqtt.Client, topic packets.Topic) (qos uint8) {
 		deviceID := client.OptionsReader().ClientID()
-		if !strings.HasPrefix(topic.Name, "kurbisio/twin/"+deviceID+"/requests/") {
+		if !strings.HasPrefix(topic.Name, "kurbisio/"+deviceID+"/twin/requests/") {
 			log.Println("OnSubscribe", deviceID, topic.Name, "denied!")
 			return packets.SUBSCRIBE_FAILURE
 		}

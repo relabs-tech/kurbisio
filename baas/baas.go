@@ -614,7 +614,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
 	}
 
-	log.Println("  handle routes:", allRoute, "GET,POST")
+	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
 	// GET all
