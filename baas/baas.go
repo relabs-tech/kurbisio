@@ -89,9 +89,11 @@ type backendConfiguration struct {
 
 // resourceConfiguration is one single resource table
 type resourceConfiguration struct {
-	Resource        string   `json:"resource"`
-	ExternalIndices []string `json:"external_indices"`
-	ExtraProperties []string `json:"extra_properties"`
+	Resource              string   `json:"resource"`
+	Single                bool     `json:"single"`
+	ExternalUniqueIndices []string `json:"external_unique_indices"`
+	ExternalIndices       []string `json:"external_indices"`
+	ExtraProperties       []string `json:"extra_properties"`
 }
 
 // relationConfiguration is a n:m relation from a resource table or another relation
@@ -141,15 +143,15 @@ func compareString(s []string, extra ...string) string {
 func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceConfiguration) {
 	schema := b.schema
 	resource := rc.Resource
+	log.Println("create resource:", resource)
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
 	dependencies := resources[:len(resources)-1]
 
-	log.Println("create resource:", resource)
-
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 	createColumns := []string{
 		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
+		"created_at timestamp NOT NULL DEFAULT now()",
 	}
 
 	columns := []string{this + "_id"}
@@ -177,6 +179,14 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
 	propertiesIndex := len(columns)
 	columns = append(columns, "properties")
+
+	for _, index := range rc.ExternalUniqueIndices {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
+		uniqueColumn := fmt.Sprintf("UNIQUE(\"%s\")", index)
+		createColumns = append(createColumns, createColumn)
+		createColumns = append(createColumns, uniqueColumn)
+		columns = append(columns, index)
+	}
 
 	createExternalIndicesQuery := ""
 	for _, index := range rc.ExternalIndices {
@@ -218,10 +228,10 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	if propertiesIndex > 1 {
 		sqlWhereAll += "WHERE " + compareString(columns[1:propertiesIndex])
 	}
-	sqlWhereAll += ";"
+	sqlWhereAll += " ORDER BY created_at;"
 	sqlWhereAllPlusOneExternalIndex := ""
 	sqlWhereAllPlusOneExternalIndex += "WHERE " + compareString(columns[1:propertiesIndex], "%s") + ";"
-	deleteQuery := fmt.Sprintf("DELETE FROM \"%s\"", resource)
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns))
@@ -262,15 +272,16 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		values := make([]interface{}, len(columns)-1)
 		for i, k := range columns {
 			if i < propertiesIndex {
-				if i > 0 { // skip ID, we get it generated from database
-					param, _ := params[k]
-					value, ok := bodyJSON[k]
-					if ok && param != value.(string) {
-						http.Error(w, "illegal "+k, http.StatusBadRequest)
-						return
-					}
-					values[i-1] = param
+				if i == 0 { // skip ID, we get it generated from database
+					continue
 				}
+				param, _ := params[k]
+				value, ok := bodyJSON[k]
+				if ok && param != value.(string) {
+					http.Error(w, "illegal "+k, http.StatusBadRequest)
+					return
+				}
+				values[i-1] = param
 
 			} else if i > propertiesIndex {
 				value, ok := bodyJSON[k]
@@ -479,7 +490,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			queryParameters[propertiesIndex-1] = externalIndex
 		}
 
-		log.Println("the query is: ", sqlQuery)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			if err != nil {
@@ -536,13 +546,317 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	}).Methods(http.MethodDelete)
 }
 
+func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc resourceConfiguration) {
+
+	schema := b.schema
+	resource := rc.Resource
+	log.Println("create single resource:", resource)
+
+	resources := strings.Split(rc.Resource, "/")
+	this := resources[len(resources)-1]
+	owner := resources[len(resources)-2]
+	dependencies := resources[:len(resources)-1]
+
+	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
+	createColumns := []string{
+		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
+	}
+
+	columns := []string{this + "_id"}
+
+	for i := range dependencies {
+		that := dependencies[i]
+		createColumn := fmt.Sprintf("%s_id uuid", that)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, that+"_id")
+	}
+
+	if len(dependencies) > 0 {
+		foreignColumns := strings.Join(columns[1:], ",")
+		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
+			"REFERENCES " + schema + ".\"" + strings.Join(dependencies, "/") + "\" " +
+			"(" + foreignColumns + ") ON DELETE CASCADE"
+		createColumns = append(createColumns, createColumn)
+	}
+
+	if len(columns) > 1 {
+		createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
+		createColumns = append(createColumns, createColumn)
+	}
+	createColumn := "UNIQUE (" + owner + "_id )" // force the resource to be single
+	createColumns = append(createColumns, createColumn)
+
+	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
+	propertiesIndex := len(columns)
+	columns = append(columns, "properties")
+
+	for _, index := range rc.ExternalUniqueIndices {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
+		uniqueColumn := fmt.Sprintf("UNIQUE(\"%s\")", index)
+		createColumns = append(createColumns, createColumn)
+		createColumns = append(createColumns, uniqueColumn)
+		columns = append(columns, index)
+	}
+
+	createExternalIndicesQuery := ""
+	for _, index := range rc.ExternalIndices {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
+		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"external_index_"+this+"_"+index,
+			schema, resource, index)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, index)
+	}
+
+	for _, property := range rc.ExtraProperties {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, property)
+	}
+
+	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createExternalIndicesQuery
+
+	_, err := b.db.Query(createQuery)
+	if err != nil {
+		panic(err)
+	}
+
+	allRoute := ""
+	oneRoute := ""
+	for _, o := range resources {
+		allRoute = oneRoute + "/" + o
+		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
+	}
+
+	log.Println("  handle single routes:", allRoute, "GET,PUT,DELETE")
+
+	sqlValues := "VALUES(" + parameterString(len(columns)-1) + ") "
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(" FROM %s.\"%s\" ", schema, resource)
+	sqlWhereSingle := ""
+	if propertiesIndex > 1 {
+		sqlWhereSingle += "WHERE " + compareString(columns[1:propertiesIndex])
+	}
+	sqlWhereSingle += ";"
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+
+	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns))
+		object := map[string]interface{}{}
+		for i, k := range columns {
+			if i < propertiesIndex {
+				values[i] = &uuid.UUID{}
+			} else if i > propertiesIndex {
+				str := ""
+				values[i] = &str
+			} else {
+				values[i] = &json.RawMessage{}
+			}
+			object[k] = values[i]
+		}
+		return values, object
+	}
+
+	// store scan values function and read query for later use in relations
+	b.scanValueFunctions[this] = createScanValuesAndObject
+	b.readQuery[this] = readQuery
+
+	// PUT single
+	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		body, _ := ioutil.ReadAll(r.Body)
+		params := mux.Vars(r)
+
+		var bodyJSON map[string]interface{}
+		err := json.Unmarshal(body, &bodyJSON)
+		if err != nil {
+			http.Error(w, "invalid json data", http.StatusBadRequest)
+			return
+		}
+
+		// build insert query and validate that we have all parameters
+		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
+		values := make([]interface{}, 2*len(columns)-2)
+		for i, k := range columns {
+			if i < propertiesIndex {
+				if i == 0 { // skip ID, we get it generated from database
+					continue
+				}
+				param, _ := params[k]
+				value, ok := bodyJSON[k]
+				if ok && param != value.(string) {
+					http.Error(w, "illegal "+k, http.StatusBadRequest)
+					return
+				}
+				values[i-1] = param
+
+			} else if i > propertiesIndex {
+				value, ok := bodyJSON[k]
+				if !ok {
+					http.Error(w, "missing property "+k, http.StatusBadRequest)
+					return
+				}
+				values[i-1] = value
+			} else {
+				properties, ok := bodyJSON[k]
+				if ok {
+					propertiesJSON, _ := json.Marshal(properties)
+					values[i-1] = propertiesJSON
+				} else {
+					values[i-1] = []byte("{}")
+				}
+			}
+		}
+		query += "(" + strings.Join(columns[1:], ", ") + ")" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
+		sets := make([]string, len(columns)-1)
+
+		offset := len(columns) - 1
+		// now build the update query
+		for i, k := range columns {
+			if i < propertiesIndex {
+				if i == 0 { // skip ID, we get it generated from database
+					continue
+				}
+				param, _ := params[k]
+				value, ok := bodyJSON[k]
+				if ok && param != value.(string) {
+					http.Error(w, "illegal "+k, http.StatusBadRequest)
+					return
+				}
+				values[offset+i-1] = param
+
+			} else if i > propertiesIndex {
+				value, ok := bodyJSON[k]
+				if !ok {
+					http.Error(w, "missing property "+k, http.StatusBadRequest)
+					return
+				}
+				values[offset+i-1] = value
+			} else {
+				properties, ok := bodyJSON[k]
+				if ok {
+					propertiesJSON, _ := json.Marshal(properties)
+					values[offset+i-1] = propertiesJSON
+				} else {
+					values[offset+i-1] = []byte("{}")
+				}
+			}
+			sets[i-1] = k + " = $" + strconv.Itoa(offset+i)
+		}
+		query += strings.Join(sets, ", ") + ";"
+
+		res, err := b.db.Exec(query, values...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if count != 1 {
+			http.Error(w, "no such "+this, http.StatusBadRequest)
+			return
+		}
+
+		// re-read data and return as json
+		sqlQuery := readQuery + sqlWhereSingle
+		queryParameters := make([]interface{}, propertiesIndex-1)
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
+
+		values, response := createScanValuesAndObject()
+		err = b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
+		if err == sql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent("", "  ")
+		encoder.Encode(response)
+
+	}).Methods(http.MethodPut)
+
+	// GET single
+	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		params := mux.Vars(r)
+		sqlQuery := readQuery + sqlWhereSingle
+		queryParameters := make([]interface{}, propertiesIndex-1)
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
+
+		values, response := createScanValuesAndObject()
+		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
+		if err == sql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent("", "  ")
+		encoder.Encode(response)
+
+	}).Methods(http.MethodGet)
+
+	// DELETE single
+	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		params := mux.Vars(r)
+
+		queryParameters := make([]interface{}, propertiesIndex-1)
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
+
+		fmt.Println("query:", deleteQuery+sqlWhereSingle, queryParameters)
+
+		res, err := b.db.Exec(deleteQuery+sqlWhereSingle, queryParameters...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if count > 0 {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+
+	}).Methods(http.MethodDelete)
+}
+
 // HandleRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleRoutes(router *mux.Router) {
 
 	log.Println("backend: HandleRoutes")
 
-	for _, tc := range b.config.Resources {
-		b.createBackendHandlerResource(router, tc)
+	for _, rc := range b.config.Resources {
+		if rc.Single {
+			b.createBackendHandlerSingleResource(router, rc)
+		} else {
+			b.createBackendHandlerResource(router, rc)
+		}
 	}
 
 	for _, rc := range b.config.Relations {

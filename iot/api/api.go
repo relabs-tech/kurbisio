@@ -44,12 +44,6 @@ func (s *Service) WithSchema(schema string) *Service {
 	return s
 }
 
-// WithMessagePublisher adds an IoT Message Publisher for twin requests
-func (s *Service) WithMessagePublisher(publisher iot.MessagePublisher) *Service {
-	s.publisher = publisher
-	return s
-}
-
 // Create creates the sql relations (if they do not exist) and adds routes to the passed router
 func (s *Service) Create(db *sql.DB, router *mux.Router) *Service {
 
@@ -72,6 +66,12 @@ PRIMARY KEY(device_id, key)
 
 	s.handleRoutes(router)
 
+	return s
+}
+
+// WithMessagePublisher adds an IoT Message Publisher for twin requests
+func (s *Service) WithMessagePublisher(publisher iot.MessagePublisher) *Service {
+	s.publisher = publisher
 	return s
 }
 
