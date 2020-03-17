@@ -30,19 +30,34 @@ type Service struct {
 }
 
 // MustNewService returns a new API service
-func MustNewService(db *sql.DB, schema string, publisher iot.MessagePublisher, router *mux.Router) *Service {
-
-	t := &Service{
-		db:        db,
-		schema:    schema,
-		publisher: publisher,
+func MustNewService() *Service {
+	s := &Service{
+		schema: "public",
 	}
+	return s
+}
+
+// WithSchema sets a database schema name for the generated sql relations. The default
+// schema is "public".
+func (s *Service) WithSchema(schema string) *Service {
+	s.schema = schema
+	return s
+}
+
+// WithMessagePublisher adds an IoT Message Publisher for twin requests
+func (s *Service) WithMessagePublisher(publisher iot.MessagePublisher) *Service {
+	s.publisher = publisher
+	return s
+}
+
+// Create creates the sql relations (if they do not exist) and adds routes to the passed router
+func (s *Service) Create(db *sql.DB, router *mux.Router) *Service {
 
 	// poor man's database migrations
-	_, err := t.db.Query(
+	_, err := s.db.Query(
 		`CREATE extension IF NOT EXISTS "uuid-ossp";
-CREATE table IF NOT EXISTS ` + t.schema + `.twin 
-(device_id uuid references ` + t.schema + `.device(device_id) ON DELETE CASCADE, 
+CREATE table IF NOT EXISTS ` + s.schema + `.twin 
+(device_id uuid references ` + s.schema + `.device(device_id) ON DELETE CASCADE, 
 key varchar NOT NULL, 
 request json NOT NULL, 
 report json NOT NULL, 
@@ -55,9 +70,9 @@ PRIMARY KEY(device_id, key)
 		panic(err)
 	}
 
-	t.handleRoutes(router)
+	s.handleRoutes(router)
 
-	return t
+	return s
 }
 
 type twin struct {
@@ -101,11 +116,10 @@ func (s *Service) handleRoutes(router *mux.Router) {
 			response = append(response, t)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -125,11 +139,10 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(t)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -149,11 +162,10 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(t.Request)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -173,11 +185,10 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(t.Report)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -222,7 +233,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 			w.WriteHeader(http.StatusBadRequest)
 		}
 
-	}).Methods("PUT")
+	}).Methods(http.MethodPut)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -263,7 +274,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 			w.WriteHeader(http.StatusBadRequest)
 		}
 
-	}).Methods("PUT")
+	}).Methods(http.MethodPut)
 
 	caCertData, err := ioutil.ReadFile("ca.crt")
 	if err != nil {
@@ -311,7 +322,6 @@ WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDE
 
 			if authorizationStatus == "authorized" {
 				w.Header().Set("Content-Type", "application/json")
-				// w.WriteHeader(http.StatusCreated)
 				json.NewEncoder(w).Encode(
 					struct {
 						DeviceID uuid.UUID `json:"device_id"`
@@ -388,5 +398,5 @@ WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDE
 					Key:         certPrivKeyPEM.String(),
 				})
 
-		}).Methods("GET")
+		}).Methods(http.MethodGet)
 }

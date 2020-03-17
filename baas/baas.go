@@ -37,43 +37,52 @@ import (
 // Backend is the generic rest backend
 type Backend struct {
 	db                 *sql.DB
+	schema             string
 	config             backendConfiguration
 	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
 	readQuery          map[string]string
 }
 
 // MustNewBackend creates a new backend
-func MustNewBackend(db *sql.DB, configurationJSON string, router *mux.Router) *Backend {
+func MustNewBackend(configurationJSON string) *Backend {
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(configurationJSON), &config)
 	if err != nil {
 		panic(err)
 	}
-	if config.Schema == "" {
-		config.Schema = "public"
-	}
-
-	createSchemaQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", config.Schema)
-	_, err = db.Exec(createSchemaQuery)
-	if err != nil {
-		panic(err)
-	}
 
 	b := &Backend{
-		db:                 db,
+		schema:             "public",
 		config:             config,
 		readQuery:          make(map[string]string),
 		scanValueFunctions: make(map[string]func() ([]interface{}, map[string]interface{})),
 	}
 
-	b.handleRoutes(router)
+	return b
+}
 
+// WithSchema sets a database schema name for the generated sql relations. The default
+// schema is "public".
+func (b *Backend) WithSchema(schema string) *Backend {
+	b.schema = schema
+	return b
+}
+
+// Create creates the sql relations (if they do not exist) and adds routes to the passed router
+func (b *Backend) Create(db *sql.DB, router *mux.Router) *Backend {
+	b.db = db
+	initQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\";CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", b.schema)
+	_, err := b.db.Exec(initQuery)
+	if err != nil {
+		panic(err)
+	}
+
+	b.handleRoutes(router)
 	return b
 }
 
 // backendConfiguration holds a complete backend configuration
 type backendConfiguration struct {
-	Schema    string                  `json:"schema"`
 	Resources []resourceConfiguration `json:"resources"`
 	Relations []relationConfiguration `json:"relations"`
 }
@@ -130,7 +139,7 @@ func compareString(s []string, extra ...string) string {
 }
 
 func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceConfiguration) {
-	schema := b.config.Schema
+	schema := b.schema
 	resource := rc.Resource
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
@@ -199,7 +208,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
 	}
 
-	log.Println("  handle routes:", allRoute, "GET,PUT")
+	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
 	sqlValues := "VALUES(" + parameterString(len(columns)-1) + ") RETURNING " + this + "_id"
@@ -304,7 +313,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
 
-	}).Methods("POST")
+	}).Methods(http.MethodPost)
 
 	// PUT
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +415,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
 
-	}).Methods("PUT")
+	}).Methods(http.MethodPut)
 
 	// GET one
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -435,7 +444,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
 
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	// GET all
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -494,7 +503,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
 
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	// DELETE one
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -524,7 +533,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			w.WriteHeader(http.StatusNotFound)
 		}
 
-	}).Methods("DELETE")
+	}).Methods(http.MethodDelete)
 }
 
 // HandleRoutes adds all necessary handlers for the specified configuration
@@ -542,7 +551,7 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 }
 
 func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationConfiguration) {
-	schema := b.config.Schema
+	schema := b.schema
 	resource := rc.Resource
 	resources := strings.Split(resource, "/")
 	this := resources[len(resources)-1]
@@ -649,7 +658,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	// GET one
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -676,7 +685,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)
-	}).Methods("GET")
+	}).Methods(http.MethodGet)
 
 	// PUT one
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -703,7 +712,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
-	}).Methods("PUT")
+	}).Methods(http.MethodPut)
 
 	// DELETE one
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -730,6 +739,6 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}).Methods("DELETE")
+	}).Methods(http.MethodDelete)
 
 }

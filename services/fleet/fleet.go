@@ -16,7 +16,6 @@ import (
 )
 
 var configurationJSON string = `{
-	"schema":"fleet_example",
 	"resources": [
 	  {
 		"resource": "device",
@@ -84,9 +83,9 @@ func main() {
 
 	schema := "fleet_example"
 	router := mux.NewRouter()
-	baas.MustNewBackend(db, configurationJSON, router)
+	baas.MustNewBackend(configurationJSON).WithSchema(schema).Create(db, router)
 	iotBroker := broker.MustNewBroker(db, schema, "server.crt", "server.key")
-	api.MustNewService(db, schema, iotBroker, router)
+	api.MustNewService().WithSchema(schema).WithMessagePublisher(iotBroker).Create(db, router)
 
 	log.Println("listen on port :3000")
 	go http.ListenAndServe(":3000", router)
