@@ -47,6 +47,7 @@ func (s *Service) WithSchema(schema string) *Service {
 // Create creates the sql relations (if they do not exist) and adds routes to the passed router
 func (s *Service) Create(db *sql.DB, router *mux.Router) *Service {
 
+	s.db = db
 	// poor man's database migrations
 	_, err := s.db.Query(
 		`CREATE extension IF NOT EXISTS "uuid-ossp";
