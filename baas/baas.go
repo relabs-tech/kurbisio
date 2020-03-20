@@ -11,6 +11,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	// "fmt"
 	"io/ioutil"
@@ -221,8 +222,8 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
-	sqlValues := "VALUES(" + parameterString(len(columns)-1) + ") RETURNING " + this + "_id"
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(" FROM %s.\"%s\" ", schema, resource)
+	sqlValues := "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id"
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
 	sqlWhereAll := ""
 	if propertiesIndex > 1 {
@@ -234,7 +235,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns))
+		values := make([]interface{}, len(columns)+1)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -247,6 +248,8 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			}
 			object[k] = values[i]
 		}
+		values[len(columns)] = &time.Time{}
+		object["created_at"] = values[len(columns)]
 		return values, object
 	}
 
@@ -269,10 +272,15 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		// build insert query and validate that we have all parameters
 		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		values := make([]interface{}, len(columns)-1)
+		values := make([]interface{}, len(columns))
 		for i, k := range columns {
 			if i < propertiesIndex {
 				if i == 0 { // skip ID, we get it generated from database
+					_, ok := bodyJSON[k]
+					if ok {
+						http.Error(w, "must not specify "+k, http.StatusBadRequest)
+						return
+					}
 					continue
 				}
 				param, _ := params[k]
@@ -300,8 +308,21 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 				}
 			}
 		}
+
+		// last value is created_at
+		createdAt := time.Now().UTC()
+		if value, ok := bodyJSON["created_at"]; ok {
+			t, err := time.Parse(time.RFC3339, value.(string))
+			if err != nil {
+				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			createdAt = t.UTC()
+		}
+		values[len(columns)-1] = &createdAt
+
 		var id uuid.UUID
-		query += "(" + strings.Join(columns[1:], ", ") + ")" + sqlValues + ";"
+		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + ";"
 		log.Println("QUERY:", query)
 
 		err = b.db.QueryRow(query, values...).Scan(&id)
@@ -341,7 +362,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		query := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 		sets := make([]string, len(columns))
-		values := make([]interface{}, len(columns)+propertiesIndex)
+		values := make([]interface{}, len(columns)+propertiesIndex+1)
 
 		// minor trick. We add the primary id form the json to the parameters. This is because the route does
 		// not contain the primary ID for convenience
@@ -385,7 +406,20 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			}
 			sets[i] = k + " = $" + strconv.Itoa(propertiesIndex+1+i)
 		}
-		query += strings.Join(sets, ", ") + " " + sqlWhereOne
+
+		// last value is created_at
+		createdAt := time.Now().UTC()
+		if value, ok := bodyJSON["created_at"]; ok {
+			t, err := time.Parse(time.RFC3339, value.(string))
+			if err != nil {
+				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			createdAt = t.UTC()
+		}
+		values[len(values)-1] = &createdAt
+
+		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(propertiesIndex+1+len(columns)) + " " + sqlWhereOne
 		log.Println("QUERY:", query)
 		res, err := b.db.Exec(query, values...)
 		if err != nil {
@@ -560,6 +594,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 	createColumns := []string{
 		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
+		"created_at timestamp NOT NULL DEFAULT now()",
 	}
 
 	columns := []string{this + "_id"}
@@ -631,7 +666,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	log.Println("  handle single routes:", allRoute, "GET,PUT,DELETE")
 
 	sqlValues := "VALUES(" + parameterString(len(columns)-1) + ") "
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(" FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereSingle := ""
 	if propertiesIndex > 1 {
 		sqlWhereSingle += "WHERE " + compareString(columns[1:propertiesIndex])
@@ -675,10 +710,15 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 
 		// build insert query and validate that we have all parameters
 		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		values := make([]interface{}, 2*len(columns)-2)
+		values := make([]interface{}, 2*len(columns)-1)
 		for i, k := range columns {
 			if i < propertiesIndex {
 				if i == 0 { // skip ID, we get it generated from database
+					_, ok := bodyJSON[k]
+					if ok {
+						http.Error(w, "must not specify "+k, http.StatusBadRequest)
+						return
+					}
 					continue
 				}
 				param, _ := params[k]
@@ -706,6 +746,19 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 				}
 			}
 		}
+
+		// last value is created_at
+		createdAt := time.Now().UTC()
+		if value, ok := bodyJSON["created_at"]; ok {
+			t, err := time.Parse(time.RFC3339, value.(string))
+			if err != nil {
+				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			createdAt = t.UTC()
+		}
+		values[len(columns)-2] = &createdAt
+
 		query += "(" + strings.Join(columns[1:], ", ") + ")" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
 		sets := make([]string, len(columns)-1)
 
@@ -742,7 +795,11 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			}
 			sets[i-1] = k + " = $" + strconv.Itoa(offset+i)
 		}
-		query += strings.Join(sets, ", ") + ";"
+
+		// and created_at as last value
+		values[len(values)-1] = &createdAt
+
+		query += strings.Join(sets, ", ") + "created_at = $" + strconv.Itoa(offset+len(columns)) + ";"
 
 		res, err := b.db.Exec(query, values...)
 		if err != nil {
