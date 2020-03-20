@@ -38,6 +38,7 @@ import (
 // Backend is the generic rest backend
 type Backend struct {
 	db                 *sql.DB
+	router             *mux.Router
 	schema             string
 	config             backendConfiguration
 	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
@@ -72,6 +73,7 @@ func (b *Backend) WithSchema(schema string) *Backend {
 // Create creates the sql relations (if they do not exist) and adds routes to the passed router
 func (b *Backend) Create(db *sql.DB, router *mux.Router) *Backend {
 	b.db = db
+	b.router = router
 	initQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\";CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", b.schema)
 	_, err := b.db.Exec(initQuery)
 	if err != nil {
@@ -484,7 +486,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent("", "  ")
 		encoder.Encode(response)

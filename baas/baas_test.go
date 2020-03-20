@@ -3,7 +3,6 @@ package baas
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"testing"
@@ -120,7 +119,6 @@ func TestResourceA(t *testing.T) {
 		t.Fatal("no id")
 	}
 
-	fmt.Println(asJSON(aNew.Properties))
 	if asJSON(a.Properties) != asJSON(aNew.Properties) ||
 		a.ExternalID != aNew.ExternalID ||
 		a.ExtraProp != aNew.ExtraProp ||
@@ -162,4 +160,65 @@ func TestResourceA(t *testing.T) {
 	if status != http.StatusNotFound {
 		t.Fatal("not deleted")
 	}
+}
+
+type Empty struct{}
+
+type B struct {
+	BID uuid.UUID `json:"b_id"`
+}
+
+type C struct {
+	B
+	CID uuid.UUID `json:"c_id"`
+}
+
+type D struct {
+	C
+	DID uuid.UUID `json:"d_id"`
+}
+
+func TestResourceBCD(t *testing.T) {
+
+	empty := Empty{}
+	b := B{}
+
+	_, err := testService.admin.Post("/bs", &empty, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := C{}
+	_, err = testService.admin.Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := D{}
+	_, err = testService.admin.Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d.BID != b.BID || d.CID != c.CID {
+		t.Fatal("properties do not match:", asJSON(d))
+	}
+
+	status, err := testService.admin.Delete("/bs/" + b.BID.String())
+	if status != http.StatusNoContent {
+		t.Fatal("delete failed")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// cross check that the cascade worked: deleting b has also deleted c and d
+	dGet := D{}
+	status, err = testService.admin.Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	if status != http.StatusNotFound {
+		t.Fatal("cascade delete failed")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 }

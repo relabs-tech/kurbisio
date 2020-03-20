@@ -68,7 +68,7 @@ func (a *Admin) Post(path string, body interface{}, result interface{}) (int, er
 
 	status := rec.Code
 	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
 	}
 
 	err = json.Unmarshal(rec.Body.Bytes(), result)
