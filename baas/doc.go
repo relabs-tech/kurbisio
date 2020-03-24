@@ -159,7 +159,7 @@ Static Properties
 
 In the example above, we have extended the user and the device resource with external indices. Likewise it is possible to extend
 resource with static string properties, using an array "static_properties". The main purpose of this is to enable easier SQL queries
-against generated tables, for example we use it to store the activation_status for IoT devices. In the regular case, properties
+against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
 of resource should go into the dynamic JSON object for maximum flexibility.
 
 Notifications
