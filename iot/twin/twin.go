@@ -1,18 +1,10 @@
-package api
+package twin
 
 import (
-	"bytes"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/json"
-	"encoding/pem"
-	"fmt"
 	"io/ioutil"
 	"log"
-	"math/big"
 	"net/http"
 	"time"
 
@@ -22,57 +14,52 @@ import (
 	"github.com/relabs-tech/backends/iot"
 )
 
-// Service is a REST interface for the digital iot API
-type Service struct {
+// API is the IoT appliance RESTful interface for the device twin.
+type API struct {
 	schema    string
 	db        *sql.DB
 	publisher iot.MessagePublisher
 }
 
-// MustNewService returns a new API service
-func MustNewService() *Service {
-	s := &Service{
-		schema: "public",
-	}
-	return s
+// Builder is a builder helper for the IoT API
+type Builder struct {
+	// Schema is optional. When set, the backend uses the data schema name for
+	// generated sql relations. The default schema is "public"
+	Schema string
+	// DB is a postgres database. This is mandatory.
+	DB *sql.DB
+	// Router is a mux router. This is mandatory.
+	Router *mux.Router
+	// Publisher is an iot.MessagePublisher
+	Publisher iot.MessagePublisher
 }
 
-// WithSchema sets a database schema name for the generated sql relations. The default
-// schema is "public".
-func (s *Service) WithSchema(schema string) *Service {
-	s.schema = schema
-	return s
-}
+// MustNewAPI realizes the actual API. It creates the sql relations for the device twin
+// (if they do not exist) and adds actual routes to router
+func MustNewAPI(b *Builder) *API {
 
-// Create creates the sql relations (if they do not exist) and adds routes to the passed router
-func (s *Service) Create(db *sql.DB, router *mux.Router) *Service {
-
-	s.db = db
-	// poor man's database migrations
-	_, err := s.db.Query(
-		`CREATE extension IF NOT EXISTS "uuid-ossp";
-CREATE table IF NOT EXISTS ` + s.schema + `.twin 
-(device_id uuid references ` + s.schema + `.device(device_id) ON DELETE CASCADE, 
-key varchar NOT NULL, 
-request json NOT NULL, 
-report json NOT NULL, 
-requested_at timestamp NOT NULL, 
-reported_at timestamp NOT NULL,
-PRIMARY KEY(device_id, key)
-);`)
-
-	if err != nil {
-		panic(err)
+	schema := b.Schema
+	if len(schema) == 0 {
+		schema = "public"
 	}
 
-	s.handleRoutes(router)
+	if b.DB == nil {
+		panic("DB is missing")
+	}
 
-	return s
-}
+	if b.Router == nil {
+		panic("Router is missing")
+	}
 
-// WithMessagePublisher adds an IoT Message Publisher for twin requests
-func (s *Service) WithMessagePublisher(publisher iot.MessagePublisher) *Service {
-	s.publisher = publisher
+	iot.MustCreateTwinTableIfNotExists(b.DB, b.Schema)
+
+	s := &API{
+		schema:    b.Schema,
+		db:        b.DB,
+		publisher: b.Publisher,
+	}
+	s.handleRoutes(b.Router)
+
 	return s
 }
 
@@ -85,7 +72,7 @@ type twin struct {
 }
 
 // HandleRoutes adds handlers for routes for the twin service
-func (s *Service) handleRoutes(router *mux.Router) {
+func (s *API) handleRoutes(router *mux.Router) {
 	log.Println("twin: handle route /devices/{device_id}/twin GET")
 	log.Println("twin: handle route /devices/{device_id}/twin/{key} GET")
 	log.Println("twin: handle route /devices/{device_id}/twin/{key}/request GET,PUT")
@@ -117,9 +104,8 @@ func (s *Service) handleRoutes(router *mux.Router) {
 			response = append(response, t)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
@@ -140,9 +126,8 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(t)
+		jsonData, _ := json.MarshalIndent(t, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
@@ -163,9 +148,8 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(t.Request)
+		jsonData, _ := json.MarshalIndent(t.Request, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
@@ -186,9 +170,8 @@ func (s *Service) handleRoutes(router *mux.Router) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(t.Report)
+		jsonData, _ := json.MarshalIndent(t.Report, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +208,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 		}
 
 		if s.publisher != nil {
-			s.publisher.PublishMessageQ1("kurbisio/twin/"+deviceID.String()+"/requests/"+key, body)
+			s.publisher.PublishMessageQ1("kurbisio/"+deviceID.String()+"/twin/requests/"+key, body)
 		}
 
 		if count > 0 {
@@ -277,127 +260,4 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 
 	}).Methods(http.MethodPut)
 
-	caCertData, err := ioutil.ReadFile("ca.crt")
-	if err != nil {
-		panic(err)
-	}
-	caKeyData, err := ioutil.ReadFile("ca.key")
-	if err != nil {
-		panic(err)
-	}
-	caCertDataPEM, _ := pem.Decode(caCertData)
-	caCert, err := x509.ParseCertificate(caCertDataPEM.Bytes)
-	if err != nil {
-		panic(err)
-	}
-	caKeyDataPEM, _ := pem.Decode(caKeyData)
-	caPrivKey, err := x509.ParsePKCS8PrivateKey(caKeyDataPEM.Bytes)
-	if err != nil {
-		panic(err)
-	}
-
-	log.Println("device authorization: handle route /authorizations/{equipment_id} GET")
-
-	router.HandleFunc("/authorizations/{equipment_id}",
-		func(w http.ResponseWriter, r *http.Request) {
-			params := mux.Vars(r)
-			equipmentID := params["equipment_id"]
-			log.Println("authorization request of", equipmentID)
-
-			var deviceID uuid.UUID
-			var authorizationStatus string
-			err := s.db.QueryRow(
-				`SELECT device_id, authorization_status FROM `+s.schema+`.device 
-WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDER BY authorization_status;`,
-				equipmentID).Scan(&deviceID, &authorizationStatus)
-
-			if err == sql.ErrNoRows {
-				http.Error(w, "device not registered", http.StatusBadRequest)
-				return
-			}
-
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if authorizationStatus == "authorized" {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(
-					struct {
-						DeviceID uuid.UUID `json:"device_id"`
-					}{
-						DeviceID: deviceID,
-					})
-				return
-			}
-
-			// authorization status is waiting, we generate a new certificate and set the status to authorized
-
-			cert := &x509.Certificate{
-				SerialNumber: big.NewInt(1658),
-				Subject: pkix.Name{
-					CommonName: deviceID.String(),
-				},
-				NotBefore:    time.Now(),
-				NotAfter:     time.Now().AddDate(1, 0, 0), // one year later. TODO, why not quicker? Or longer?
-				SubjectKeyId: []byte{1, 2, 3, 4, 6},
-				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-				KeyUsage:     x509.KeyUsageDigitalSignature,
-			}
-
-			// this is the part that takes time
-			certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			certBytes, err := x509.CreateCertificate(rand.Reader, cert, caCert, &certPrivKey.PublicKey, caPrivKey)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			certPEM := new(bytes.Buffer)
-			pem.Encode(certPEM, &pem.Block{
-				Type:  "CERTIFICATE",
-				Bytes: certBytes,
-			})
-
-			certPrivKeyPEM := new(bytes.Buffer)
-			pem.Encode(certPrivKeyPEM, &pem.Block{
-				Type:  "RSA PRIVATE KEY",
-				Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
-			})
-
-			query := fmt.Sprintf("UPDATE %s.device SET authorization_status='authorized' WHERE device_id=$1", s.schema)
-			res, err := s.db.Exec(query, deviceID)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			count, err := res.RowsAffected()
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if count != 1 {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(
-				struct {
-					DeviceID    uuid.UUID `json:"device_id"`
-					Certificate string    `json:"cert"`
-					Key         string    `json:"key"`
-				}{
-					DeviceID:    deviceID,
-					Certificate: certPEM.String(),
-					Key:         certPrivKeyPEM.String(),
-				})
-
-		}).Methods(http.MethodGet)
 }

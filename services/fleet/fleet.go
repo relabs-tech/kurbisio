@@ -11,8 +11,9 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/relabs-tech/backends/baas"
-	"github.com/relabs-tech/backends/iot/api"
-	"github.com/relabs-tech/backends/iot/broker"
+	"github.com/relabs-tech/backends/iot/authorization"
+	"github.com/relabs-tech/backends/iot/mqtt"
+	"github.com/relabs-tech/backends/iot/twin"
 )
 
 var configurationJSON string = `{
@@ -20,7 +21,7 @@ var configurationJSON string = `{
 	  {
 		"resource": "device",
 		"external_indices": ["equipment_id"],
-		"extra_properties": ["authorization_status"]
+		"static_properties": ["authorization_status"]
 	  },
 	  {
 		"resource": "device/data"
@@ -63,7 +64,6 @@ type Service struct {
 }
 
 func main() {
-
 	service := &Service{}
 	if err := envdecode.Decode(service); err != nil {
 		panic(err)
@@ -73,19 +73,39 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	defer db.Close()
 
-	err = db.Ping()
-	if err != nil {
-		panic(err)
-	}
-
-	schema := "fleet_example"
+	schema := "fleet"
 	router := mux.NewRouter()
-	baas.MustNewBackend(configurationJSON).WithSchema(schema).Create(db, router)
-	iotBroker := broker.MustNewBroker(db, schema, "server.crt", "server.key")
-	api.MustNewService().WithSchema(schema).WithMessagePublisher(iotBroker).Create(db, router)
+	baas.MustNewBackend(&baas.Builder{
+		Config: configurationJSON,
+		Schema: schema,
+		DB:     db,
+		Router: router,
+	})
+
+	iotBroker := mqtt.MustNewBroker(&mqtt.Builder{
+		DB:         db,
+		Schema:     schema,
+		CertFile:   "server.crt",
+		KeyFile:    "server.key",
+		CACertFile: "ca.crt",
+	})
+
+	twin.MustNewAPI(&twin.Builder{
+		Schema:    schema,
+		DB:        db,
+		Publisher: iotBroker,
+		Router:    router,
+	})
+
+	authorization.MustNewAPI(&authorization.Builder{
+		Schema:     schema,
+		DB:         db,
+		Router:     router,
+		CACertFile: "ca.crt",
+		CAKeyFile:  "ca.key",
+	})
 
 	log.Println("listen on port :3000")
 	go http.ListenAndServe(":3000", router)

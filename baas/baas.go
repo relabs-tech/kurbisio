@@ -18,6 +18,8 @@ import (
 	// "log"
 	// "net"
 	"net/http"
+	"net/url"
+
 	// _ "net/http/pprof"
 
 	// "os"
@@ -37,50 +39,75 @@ import (
 
 // Backend is the generic rest backend
 type Backend struct {
+	config             backendConfiguration
+	schema             string
+	notifier           Notifier
 	db                 *sql.DB
 	router             *mux.Router
-	schema             string
-	config             backendConfiguration
 	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
 	readQuery          map[string]string
 }
 
-// MustNewBackend creates a new backend
-func MustNewBackend(configurationJSON string) *Backend {
+// Builder is a builder helper for the Backend
+type Builder struct {
+	// Config is the JSON description of all resources and relations. This is mandatory.
+	Config string
+	// DB is a postgres database. This is mandatory.
+	DB *sql.DB
+	// Schema is optional. When set, the backend uses the data schema name for
+	// generated sql relations. The default schema is "public"
+	Schema string
+	// Router is a mux router. This is mandatory.
+	Router *mux.Router
+	// Notifier inserts a database notifier to the backend. If the configuration requests
+	// notifications, they will be sent to the notifier. This is optional.
+	Notifier Notifier
+}
+
+// MustNewBackend realizes the actual backend. It creates the sql relations (if they
+// do not exist) and adds actual routes to router
+func MustNewBackend(bb *Builder) *Backend {
+
 	var config backendConfiguration
-	err := json.Unmarshal([]byte(configurationJSON), &config)
+	err := json.Unmarshal([]byte(bb.Config), &config)
 	if err != nil {
 		panic(err)
 	}
+	schema := bb.Schema
+	if len(schema) == 0 {
+		schema = "public"
+	}
+
+	if bb.DB == nil {
+		panic("DB is missing")
+	}
+
+	if bb.Router == nil {
+		panic("Router is missing")
+	}
 
 	b := &Backend{
-		schema:             "public",
+		schema:             schema,
 		config:             config,
+		notifier:           bb.Notifier,
+		db:                 bb.DB,
+		router:             bb.Router,
 		readQuery:          make(map[string]string),
 		scanValueFunctions: make(map[string]func() ([]interface{}, map[string]interface{})),
 	}
 
-	return b
-}
-
-// WithSchema sets a database schema name for the generated sql relations. The default
-// schema is "public".
-func (b *Backend) WithSchema(schema string) *Backend {
-	b.schema = schema
-	return b
-}
-
-// Create creates the sql relations (if they do not exist) and adds routes to the passed router
-func (b *Backend) Create(db *sql.DB, router *mux.Router) *Backend {
-	b.db = db
-	b.router = router
-	initQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\";CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", b.schema)
-	_, err := b.db.Exec(initQuery)
+	err = b.db.Ping()
 	if err != nil {
 		panic(err)
 	}
 
-	b.handleRoutes(router)
+	initQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\";CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", b.schema)
+	_, err = b.db.Exec(initQuery)
+	if err != nil {
+		panic(err)
+	}
+
+	b.handleRoutes(b.router)
 	return b
 }
 
@@ -94,9 +121,11 @@ type backendConfiguration struct {
 type resourceConfiguration struct {
 	Resource              string   `json:"resource"`
 	Single                bool     `json:"single"`
+	LoggedInRoutes        bool     `json:"logged_in_routes"`
 	ExternalUniqueIndices []string `json:"external_unique_indices"`
 	ExternalIndices       []string `json:"external_indices"`
-	ExtraProperties       []string `json:"extra_properties"`
+	StaticProperties      []string `json:"static_properties"`
+	Notifications         []string `json:"notifications"`
 }
 
 // relationConfiguration is a n:m relation from a resource table or another relation
@@ -147,6 +176,23 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	schema := b.schema
 	resource := rc.Resource
 	log.Println("create resource:", resource)
+
+	hasNotificationCreate := false
+	hasNotificationUpdate := false
+	hasNotificationDelete := false
+	for _, operation := range rc.Notifications {
+		switch operation {
+		case string(OperationCreate):
+			hasNotificationCreate = true
+		case string(OperationUpdate):
+			hasNotificationUpdate = true
+		case string(OperationDelete):
+			hasNotificationDelete = true
+		default:
+			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
+		}
+	}
+
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
 	dependencies := resources[:len(resources)-1]
@@ -201,7 +247,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		columns = append(columns, index)
 	}
 
-	for _, property := range rc.ExtraProperties {
+	for _, property := range rc.StaticProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
@@ -216,9 +262,9 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 	allRoute := ""
 	oneRoute := ""
-	for _, o := range resources {
-		allRoute = oneRoute + "/" + plural(o)
-		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
+	for _, r := range resources {
+		allRoute = oneRoute + "/" + plural(r)
+		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
@@ -268,7 +314,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		var bodyJSON map[string]interface{}
 		err := json.Unmarshal(body, &bodyJSON)
 		if err != nil {
-			http.Error(w, "invalid json data", http.StatusBadRequest)
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -325,7 +371,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		var id uuid.UUID
 		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + ";"
-		log.Println("QUERY:", query)
 
 		err = b.db.QueryRow(query, values...).Scan(&id)
 		if err != nil {
@@ -341,11 +386,14 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		if hasNotificationCreate && b.notifier != nil {
+			b.notifier.Notify(resource, OperationCreate, jsonData)
+		}
+
 		w.WriteHeader(http.StatusCreated)
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonData)
 
 	}).Methods(http.MethodPost)
 
@@ -358,7 +406,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		var bodyJSON map[string]interface{}
 		err := json.Unmarshal(body, &bodyJSON)
 		if err != nil {
-			http.Error(w, "invalid json data", http.StatusBadRequest)
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -422,7 +470,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		values[len(values)-1] = &createdAt
 
 		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(propertiesIndex+1+len(columns)) + " " + sqlWhereOne
-		log.Println("QUERY:", query)
 		res, err := b.db.Exec(query, values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -445,7 +492,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			queryParameters[i] = params[columns[i]]
 		}
 		values, response := createScanValuesAndObject()
-		fmt.Println("query:", readQuery+sqlWhereOne)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -456,12 +502,14 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		if hasNotificationUpdate && b.notifier != nil {
+			b.notifier.Notify(resource, OperationUpdate, jsonData)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
-
+		w.Write(jsonData)
 	}).Methods(http.MethodPut)
 
 	// GET one
@@ -474,7 +522,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		}
 
 		values, response := createScanValuesAndObject()
-		fmt.Println("query:", readQuery+sqlWhereOne)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -485,12 +532,10 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
+		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
-
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	// GET all
@@ -544,11 +589,9 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			response = append(response, object)
 		}
 
+		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
-
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	// DELETE one
@@ -559,8 +602,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
-
-		fmt.Println("query:", deleteQuery+sqlWhereOne, queryParameters)
 
 		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
 		if err != nil {
@@ -573,13 +614,47 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
-		if count > 0 {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
+		if count == 0 {
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 
+		if hasNotificationDelete && b.notifier != nil {
+			notification := make(map[string]interface{})
+			for i := 0; i < propertiesIndex; i++ {
+				notification[columns[i]] = params[columns[i]]
+			}
+			jsonData, _ := json.MarshalIndent(notification, "", " ")
+			b.notifier.Notify(resource, OperationDelete, jsonData)
+		}
+		w.WriteHeader(http.StatusNoContent)
+
 	}).Methods(http.MethodDelete)
+
+	if rc.LoggedInRoutes {
+		prefix := "/" + resource
+		log.Println("  handle logged-in routes: "+prefix+"[/...]", "GET,POST,PUT,DELETE")
+
+		replaceHandler := func(w http.ResponseWriter, r *http.Request) {
+			log.Println("called logged-in route for", r.URL, r.Method)
+			auth := AuthorizationFromContext(r.Context())
+			newPrefix := ""
+			for _, s := range resources {
+				log.Println("FOO", s)
+				id, ok := auth.Identifier(s + "_id")
+				if !ok {
+					http.Error(w, resource+" not authorized", http.StatusUnauthorized)
+					return
+				}
+				newPrefix += "/" + plural(s) + "/" + id.String()
+			}
+			r.URL, _ = url.Parse(newPrefix + strings.TrimPrefix(r.URL.Path, prefix))
+			log.Println("redirect logged-in route to:", r.URL)
+			router.ServeHTTP(w, r)
+		}
+		router.HandleFunc(prefix, replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete)
+		router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete)
+	}
 }
 
 func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc resourceConfiguration) {
@@ -587,6 +662,22 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	schema := b.schema
 	resource := rc.Resource
 	log.Println("create single resource:", resource)
+
+	hasNotificationCreate := false
+	hasNotificationUpdate := false
+	hasNotificationDelete := false
+	for _, operation := range rc.Notifications {
+		switch operation {
+		case string(OperationCreate):
+			hasNotificationCreate = true
+		case string(OperationUpdate):
+			hasNotificationUpdate = true
+		case string(OperationDelete):
+			hasNotificationDelete = true
+		default:
+			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
+		}
+	}
 
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
@@ -645,7 +736,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		columns = append(columns, index)
 	}
 
-	for _, property := range rc.ExtraProperties {
+	for _, property := range rc.StaticProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
@@ -660,14 +751,14 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 
 	allRoute := ""
 	oneRoute := ""
-	for _, o := range resources {
-		allRoute = oneRoute + "/" + o
-		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
+	for _, r := range resources {
+		allRoute = oneRoute + "/" + r
+		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
 	log.Println("  handle single routes:", allRoute, "GET,PUT,DELETE")
 
-	sqlValues := "VALUES(" + parameterString(len(columns)-1) + ") "
+	sqlValues := "VALUES(" + parameterString(len(columns)) + ") "
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereSingle := ""
 	if propertiesIndex > 1 {
@@ -677,7 +768,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns))
+		values := make([]interface{}, len(columns)+1)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -690,6 +781,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			}
 			object[k] = values[i]
 		}
+		values[len(columns)] = &time.Time{}
+		object["created_at"] = values[len(columns)]
 		return values, object
 	}
 
@@ -706,21 +799,16 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		var bodyJSON map[string]interface{}
 		err := json.Unmarshal(body, &bodyJSON)
 		if err != nil {
-			http.Error(w, "invalid json data", http.StatusBadRequest)
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		// build insert query and validate that we have all parameters
 		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		values := make([]interface{}, 2*len(columns)-1)
+		values := make([]interface{}, 2*len(columns))
 		for i, k := range columns {
 			if i < propertiesIndex {
 				if i == 0 { // skip ID, we get it generated from database
-					_, ok := bodyJSON[k]
-					if ok {
-						http.Error(w, "must not specify "+k, http.StatusBadRequest)
-						return
-					}
 					continue
 				}
 				param, _ := params[k]
@@ -759,12 +847,11 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			}
 			createdAt = t.UTC()
 		}
-		values[len(columns)-2] = &createdAt
-
-		query += "(" + strings.Join(columns[1:], ", ") + ")" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
+		values[len(columns)-1] = &createdAt
+		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
 		sets := make([]string, len(columns)-1)
 
-		offset := len(columns) - 1
+		offset := len(columns)
 		// now build the update query
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -801,21 +888,13 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		// and created_at as last value
 		values[len(values)-1] = &createdAt
 
-		query += strings.Join(sets, ", ") + "created_at = $" + strconv.Itoa(offset+len(columns)) + ";"
+		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(offset+len(columns))
+		query += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
-		res, err := b.db.Exec(query, values...)
+		var inserted bool
+		err = b.db.QueryRow(query, values...).Scan(&inserted)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count != 1 {
-			http.Error(w, "no such "+this, http.StatusBadRequest)
 			return
 		}
 
@@ -837,11 +916,21 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		if b.notifier != nil {
+			if inserted {
+				if hasNotificationCreate {
+					b.notifier.Notify(resource, OperationCreate, jsonData)
+				}
+			} else {
+				if hasNotificationUpdate {
+					b.notifier.Notify(resource, OperationUpdate, jsonData)
+				}
+			}
+		}
 
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonData)
 	}).Methods(http.MethodPut)
 
 	// GET single
@@ -867,10 +956,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
-
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	// DELETE single
@@ -883,8 +970,6 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		fmt.Println("query:", deleteQuery+sqlWhereSingle, queryParameters)
-
 		res, err := b.db.Exec(deleteQuery+sqlWhereSingle, queryParameters...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -896,10 +981,19 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			return
 		}
 
-		if count > 0 {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
+		if count == 0 {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+		if hasNotificationDelete && b.notifier != nil {
+			notification := make(map[string]interface{})
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				notification[columns[i]] = params[columns[i]]
+			}
+			jsonData, _ := json.MarshalIndent(notification, "", " ")
+			b.notifier.Notify(resource, OperationDelete, jsonData)
 		}
 
 	}).Methods(http.MethodDelete)
@@ -941,17 +1035,17 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 	log.Println("create relation:", resource)
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 
-	for _, s := range resources {
-		resourceColumns = append(resourceColumns, s+"_id")
-		columns[s] = s
+	for _, r := range resources {
+		resourceColumns = append(resourceColumns, r+"_id")
+		columns[r] = r
 	}
-	for _, s := range origins {
-		originColumns = append(originColumns, s+"_id")
-		columns[s] = s
+	for _, o := range origins {
+		originColumns = append(originColumns, o+"_id")
+		columns[o] = o
 	}
 
-	for s := range columns {
-		createColumn := s + "_id uuid"
+	for c := range columns {
+		createColumn := c + "_id uuid"
 		createColumns = append(createColumns, createColumn)
 	}
 
@@ -991,9 +1085,9 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 
 	allRoute := ""
 	oneRoute := ""
-	for _, o := range resources {
-		allRoute = oneRoute + "/" + plural(o)
-		oneRoute = oneRoute + "/" + plural(o) + "/{" + o + "_id}"
+	for _, r := range resources {
+		allRoute = oneRoute + "/" + plural(r)
+		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
@@ -1028,9 +1122,8 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	// GET one
@@ -1055,9 +1148,8 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		encoder := json.NewEncoder(w)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(response)
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
 	// PUT one

@@ -20,18 +20,25 @@ var configurationJSON string = `{
 	  {
 		"resource": "a",
 		"external_indices": ["external_id"],
-		"extra_properties": ["extra_prop"]
+		"static_properties": ["static_prop"]
 	  },
 	  {
-		"resource": "b"
+		"resource": "b",
+		"logged_in_routes": true
 	  },
 	  {
 		"resource": "b/c"
 	  },
 	  {
 		"resource": "b/c/d"
+	  },
+	  {
+		"resource": "o"
+	  },
+	  {
+		"resource": "o/s",
+		"single": true
 	  }
-
 	],
 	"relations": [
 	]
@@ -44,7 +51,6 @@ var configurationJSON string = `{
 type TestService struct {
 	Postgres string `env:"POSTGRES,required" description:"the connection string for the Postgres DB"`
 	backend  *Backend
-	admin    *Admin
 }
 
 var testService TestService
@@ -70,8 +76,12 @@ func TestMain(m *testing.M) {
 	db.Exec("drop schema " + schema + " cascade;")
 
 	router := mux.NewRouter()
-	testService.backend = MustNewBackend(configurationJSON).WithSchema(schema).Create(db, router)
-	testService.admin = testService.backend.Admin()
+	testService.backend = MustNewBackend(&Builder{
+		Config: configurationJSON,
+		Schema: schema,
+		DB:     db,
+		Router: router,
+	})
 
 	code := m.Run()
 	os.Exit(code)
@@ -85,7 +95,7 @@ func asJSON(object interface{}) string {
 type ANew struct {
 	Properties map[string]string `json:"properties"`
 	ExternalID string            `json:"external_id"`
-	ExtraProp  string            `json:"extra_prop"`
+	StaticProp string            `json:"static_prop"`
 	CreatedAt  time.Time         `json:"created_at"`
 }
 
@@ -103,13 +113,13 @@ func TestResourceA(t *testing.T) {
 	aNew := ANew{
 		Properties: someJSON,
 		ExternalID: "external",
-		ExtraProp:  "extra",
+		StaticProp: "static",
 		CreatedAt:  time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	a := A{}
 
-	_, err := testService.admin.Post("/as", &aNew, &a)
+	_, err := testService.backend.Client().Post("/as", &aNew, &a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,42 +131,42 @@ func TestResourceA(t *testing.T) {
 
 	if asJSON(a.Properties) != asJSON(aNew.Properties) ||
 		a.ExternalID != aNew.ExternalID ||
-		a.ExtraProp != aNew.ExtraProp ||
+		a.StaticProp != aNew.StaticProp ||
 		a.CreatedAt != aNew.CreatedAt {
 		t.Fatal("unexpected result:", asJSON(a), "expected:", asJSON(aNew))
 	}
 
 	aGet := A{}
-	_, err = testService.admin.Get("/as/"+a.AID.String(), &aGet)
+	_, err = testService.backend.Client().Get("/as/"+a.AID.String(), &aGet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if asJSON(a.Properties) != asJSON(aGet.Properties) ||
 		a.ExternalID != aGet.ExternalID ||
-		a.ExtraProp != aGet.ExtraProp ||
+		a.StaticProp != aGet.StaticProp ||
 		a.CreatedAt != aGet.CreatedAt {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
 	aPut := aGet
 	aRes := A{}
-	aPut.ExtraProp = "new value for extra"
-	_, err = testService.admin.Put("/as", &aPut, &aRes)
+	aPut.StaticProp = "new value for static property"
+	_, err = testService.backend.Client().Put("/as", &aPut, &aRes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if asJSON(aPut.Properties) != asJSON(aRes.Properties) ||
 		aPut.ExternalID != aRes.ExternalID ||
-		aPut.ExtraProp != aRes.ExtraProp ||
+		aPut.StaticProp != aRes.StaticProp ||
 		aPut.CreatedAt != aRes.CreatedAt {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
-	_, err = testService.admin.Delete("/as/" + a.AID.String())
+	_, err = testService.backend.Client().Delete("/as/" + a.AID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := testService.admin.Get("/as/"+a.AID.String(), &aGet)
+	status, err := testService.backend.Client().Get("/as/"+a.AID.String(), &aGet)
 	if status != http.StatusNotFound {
 		t.Fatal("not deleted")
 	}
@@ -183,19 +193,19 @@ func TestResourceBCD(t *testing.T) {
 	empty := Empty{}
 	b := B{}
 
-	_, err := testService.admin.Post("/bs", &empty, &b)
+	_, err := testService.backend.Client().Post("/bs", &empty, &b)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := C{}
-	_, err = testService.admin.Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
+	_, err = testService.backend.Client().Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	d := D{}
-	_, err = testService.admin.Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
+	_, err = testService.backend.Client().Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +214,8 @@ func TestResourceBCD(t *testing.T) {
 		t.Fatal("properties do not match:", asJSON(d))
 	}
 
-	status, err := testService.admin.Delete("/bs/" + b.BID.String())
+	// delete the root object b, this should cascade to all child objects
+	status, err := testService.backend.Client().Delete("/bs/" + b.BID.String())
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -213,7 +224,173 @@ func TestResourceBCD(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.admin.Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, err = testService.backend.Client().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	if status != http.StatusNotFound {
+		t.Fatal("cascade delete failed")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+}
+
+func TestResourceBCD_LoggedInRoutes(t *testing.T) {
+
+	empty := Empty{}
+	b := B{}
+
+	_, err := testService.backend.Client().Post("/bs", &empty, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	auth := Authorization{
+		Identifiers: map[string]uuid.UUID{"b_id": b.BID},
+	}
+
+	loggedInClient := testService.backend.ClientWithAuthorization(&auth)
+
+	bl := B{}
+	_, err = loggedInClient.Get("/b", &bl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bl.BID != b.BID {
+		t.Fatal("id does not match:", asJSON(bl))
+	}
+
+	c := C{}
+	_, err = loggedInClient.Post("/b/cs", &empty, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := D{}
+	_, err = loggedInClient.Post("/b/cs/"+c.CID.String()+"/ds", &empty, &d)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d.BID != b.BID || d.CID != c.CID {
+		t.Fatal("properties do not match:", asJSON(d))
+	}
+
+	// delete the root object b, this should cascade to all child objects
+	status, err := loggedInClient.Delete("/b")
+	if status != http.StatusNoContent {
+		t.Fatal("delete failed")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// cross check that the cascade worked: deleting b has also deleted c and d
+	dGet := D{}
+	status, err = testService.backend.Client().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	if status != http.StatusNotFound {
+		t.Fatal("cascade delete failed")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+}
+
+type O struct {
+	OID uuid.UUID `json:"o_id"`
+}
+
+type S struct {
+	SID        uuid.UUID         `json:"s_id"`
+	Properties map[string]string `json:"properties"`
+}
+
+func TestResourceOS(t *testing.T) {
+
+	empty := Empty{}
+
+	// create o instance
+	o := O{}
+	_, err := testService.backend.Client().Post("/os", &empty, &o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create single s with initial name
+	s := S{
+		Properties: map[string]string{
+			"name": "initial",
+		},
+	}
+	sResult := S{}
+	_, err = testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &s, &sResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if name, ok := sResult.Properties["name"]; !ok || name != "initial" {
+		t.Fatal("properties not as expected:", asJSON(sResult))
+	}
+
+	// update single s to have updated name, the object's id (sid) remains the same
+	sUpdate := S{
+		Properties: map[string]string{
+			"name": "updated",
+		},
+	}
+	sUpdateResult := S{}
+
+	status, err := testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, ok := sUpdateResult.Properties["name"]; !ok || name != "updated" {
+		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
+	}
+	if sUpdateResult.SID != sResult.SID {
+		t.Fatal("got a new object, should have gotten the same object")
+	}
+
+	// delete single s
+	status, err = testService.backend.Client().Delete("/os/" + o.OID.String() + "/s")
+	if status != http.StatusNoContent {
+		t.Fatal("delete failed")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// cross check that the delete worked
+	sGet := S{}
+	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
+	if status != http.StatusNotFound {
+		t.Fatal("delete failed")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// re-create single s, now the sid should be different
+	sResult2 := S{}
+	_, err = testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &s, &sResult2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sResult2.SID == sResult.SID {
+		t.Fatal("recreation did not work, still same ID")
+
+	}
+
+	// delete the owner o, this should also delete the single s
+	status, err = testService.backend.Client().Delete("/os/" + o.OID.String())
+	if status != http.StatusNoContent {
+		t.Fatal("delete failed")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// cross check that the cascade worked: deleting o has also deleted s
+	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {

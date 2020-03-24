@@ -14,4 +14,7 @@ require (
 	github.com/lib/pq v1.3.0
 	github.com/nats-io/nats-streaming-server v0.17.0 // indirect
 	github.com/nats-io/stan.go v0.6.0
+	golang.org/x/net v0.0.0-20200320220750-118fecf932d8 // indirect
+	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a // indirect
+	golang.org/x/tools v0.0.0-20200321224714-0d839f3cf2ed // indirect
 )

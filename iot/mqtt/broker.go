@@ -1,4 +1,4 @@
-package broker
+package mqtt
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"
+	"github.com/relabs-tech/backends/iot"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq" // for the postgres database
@@ -27,6 +28,22 @@ import (
 // Broker is a MQTT broker for IoT.
 type Broker struct {
 	p *plugin
+}
+
+// Builder is a builder helper for the Broker
+type Builder struct {
+	// DB is a postgres database. This is mandatory.
+	DB *sql.DB
+	// Schema is optional. When set, the backend uses the data schema name for
+	// generated sql relations. The default schema is "public"	Schema   string
+	Schema string
+	// CACertFile is the file path to the X509 certificate of the certificate authority.
+	// This is mandatory
+	CACertFile string
+	// CertFile is the file path to the X509 certificate file. This is mandatory.
+	CertFile string
+	// KeyFile is the file path to the X509 private key file. This is mandatory.
+	KeyFile string
 }
 
 // plugin is the plugin for GMQTT
@@ -41,14 +58,37 @@ type plugin struct {
 	db *sql.DB
 }
 
-// MustNewBroker returns a new broker
-func MustNewBroker(db *sql.DB, schema, certfile, keyfile string) *Broker {
-	crt, err := tls.LoadX509KeyPair(certfile, keyfile)
+// MustNewBroker returns a new broker. The broker will not
+// actually run until you call Run()
+func MustNewBroker(bb *Builder) *Broker {
+	schema := bb.Schema
+	if len(schema) == 0 {
+		schema = "public"
+	}
+
+	caCertFile := bb.CACertFile
+	if len(caCertFile) == 0 {
+		panic("ca-cert file misssing")
+	}
+
+	if len(bb.CertFile) == 0 {
+		panic("cert file missing")
+	}
+
+	if len(bb.KeyFile) == 0 {
+		panic("key file missing")
+	}
+
+	if bb.DB == nil {
+		panic("DB is missing")
+	}
+
+	crt, err := tls.LoadX509KeyPair(bb.CertFile, bb.KeyFile)
 	if err != nil {
 		panic(err)
 	}
 
-	caCert, _ := ioutil.ReadFile("ca.crt")
+	caCert, _ := ioutil.ReadFile(caCertFile)
 	caCertPool := x509.NewCertPool()
 	ok := caCertPool.AppendCertsFromPEM(caCert)
 	log.Println("certs OK = ", ok)
@@ -64,11 +104,13 @@ func MustNewBroker(db *sql.DB, schema, certfile, keyfile string) *Broker {
 		panic(err)
 	}
 
+	iot.MustCreateTwinTableIfNotExists(bb.DB, schema)
+
 	b := &Broker{
 		p: &plugin{
 			tlsln:     tlsln,
 			deviceIds: make(map[net.Conn]uuid.UUID),
-			db:        db,
+			db:        bb.DB,
 			schema:    schema,
 		},
 	}
@@ -80,27 +122,11 @@ func MustNewBroker(db *sql.DB, schema, certfile, keyfile string) *Broker {
 	// }
 	// k.stanConn = stanConn
 
-	// poor man's database migrations
-	_, err = b.p.db.Query(
-		`CREATE extension IF NOT EXISTS "uuid-ossp";
-CREATE table IF NOT EXISTS ` + b.p.schema + `.twin 
-(device_id uuid references ` + b.p.schema + `.device(device_id) ON DELETE CASCADE, 
-key varchar NOT NULL, 
-request json NOT NULL, 
-report json NOT NULL, 
-requested_at timestamp NOT NULL, 
-reported_at timestamp NOT NULL,
-PRIMARY KEY(device_id, key)
-);`)
-
-	if err != nil {
-		panic(err)
-	}
-
 	return b
 }
 
-// Run is blocking and runs the server
+// Run is blocking and runs the server. It listens on syscall.SIGTERM and
+// a gracefully shutdown.
 func (b *Broker) Run() {
 
 	s := gmqtt.NewServer(
@@ -121,6 +147,7 @@ func (b *Broker) Run() {
 
 // PublishMessageQ1 publishes an MQTT messsage with quality level 1
 func (b *Broker) PublishMessageQ1(topic string, payload []byte) {
+	log.Printf("PublishMessageQ1 on %s (%d bytes)", topic, len(payload))
 	msg := gmqtt.NewMessage(topic, payload, packets.QOS_1)
 	b.p.service.PublishService().Publish(msg)
 }
