@@ -81,6 +81,10 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
+		if err != nil {
+			http.Error(w, "invalid device id", http.StatusBadRequest)
+			return
+		}
 
 		rows, err := s.db.Query(
 			`SELECT key,request,report,requested_at,reported_at FROM `+s.schema+`.twin WHERE device_id=$1;`,
@@ -111,6 +115,10 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
+		if err != nil {
+			http.Error(w, "invalid device id", http.StatusBadRequest)
+			return
+		}
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
@@ -133,6 +141,10 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
+		if err != nil {
+			http.Error(w, "invalid device id", http.StatusBadRequest)
+			return
+		}
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
@@ -155,6 +167,10 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
+		if err != nil {
+			http.Error(w, "invalid device id", http.StatusBadRequest)
+			return
+		}
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
@@ -177,12 +193,12 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
-		key := params["key"]
-		body, _ := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "invalid device id", http.StatusBadRequest)
 			return
 		}
+		key := params["key"]
+		body, _ := ioutil.ReadAll(r.Body)
 
 		if !json.Valid(body) {
 			http.Error(w, "invalid json data", http.StatusBadRequest)
@@ -222,13 +238,12 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
-		key := params["key"]
-		body, _ := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "invalid device id", http.StatusBadRequest)
 			return
 		}
-
+		key := params["key"]
+		body, _ := ioutil.ReadAll(r.Body)
 		if !json.Valid(body) {
 			http.Error(w, "invalid json data", http.StatusBadRequest)
 			return

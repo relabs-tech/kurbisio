@@ -13,11 +13,8 @@ import (
 
 // Client provides easy access to the REST API.
 //
-// By default the client works with a normal background context, but client supports
-// WithContext() to specify a different one. For convenience, WithAuthorization() adds
-// a ContextKeyAuthorization to the request context. This means that a
-// client().WithAuthorization(MustNewAdminAuthorization())
-// gives you an admin interface to the API.
+// For convenience, ClientWithAuthorization() adds
+// a ContextKeyAuthorization to the request context.
 type Client struct {
 	router        *mux.Router
 	authorization *Authorization

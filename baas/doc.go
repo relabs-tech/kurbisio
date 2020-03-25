@@ -162,6 +162,14 @@ resource with static string properties, using an array "static_properties". The 
 against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
 of resource should go into the dynamic JSON object for maximum flexibility.
 
+Sorting and Creation Time
+
+Collections of resources are sorted by the created_at timestamp, with latest first. For additional flexibility, it is possible
+to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
+use the starte time of each activity as created_at time.
+
+In the future it should also be possible to change the sorting order and to query collection with a specific time-range.
+
 Notifications
 
 The backend supports notifications via the WithNotifier() modifier and the Notifier interface.

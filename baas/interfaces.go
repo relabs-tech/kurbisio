@@ -2,6 +2,7 @@ package baas
 
 import (
 	"context"
+	"sync"
 
 	"github.com/google/uuid"
 )
@@ -89,4 +90,27 @@ func AuthorizationFromContext(ctx context.Context) *Authorization {
 		return a
 	}
 	return nil
+}
+
+var cacheMutex sync.RWMutex
+var cache map[string]*Authorization = make(map[string]*Authorization)
+
+// AuthorizationFromCache returns an authorization from cache.
+// This function is go-route safe
+func AuthorizationFromCache(key string) *Authorization {
+	cacheMutex.RLock()
+	auth, ok := cache[key]
+	cacheMutex.RUnlock()
+	if ok {
+		return auth
+	}
+	return nil
+}
+
+// AuthorizationToCache store an authorization in the cache.
+// This function is go-route safe
+func AuthorizationToCache(key string, auth *Authorization) {
+	cacheMutex.Lock()
+	cache[key] = auth
+	cacheMutex.Unlock()
 }

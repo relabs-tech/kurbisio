@@ -33,7 +33,8 @@ var configurationJSON string = `{
 		"resource": "fleet/user"
 	  },
 	  {
-		"resource": "fleet/user/profile"
+		"resource": "fleet/user/profile",
+		"single": true
 	  },
 	  {
 		"resource": "fleet/location"

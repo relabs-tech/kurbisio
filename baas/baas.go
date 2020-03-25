@@ -277,7 +277,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	if propertiesIndex > 1 {
 		sqlWhereAll += "WHERE " + compareString(columns[1:propertiesIndex])
 	}
-	sqlWhereAll += " ORDER BY created_at;"
+	sqlWhereAll += " ORDER BY created_at DESC;"
 	sqlWhereAllPlusOneExternalIndex := ""
 	sqlWhereAllPlusOneExternalIndex += "WHERE " + compareString(columns[1:propertiesIndex], "%s") + ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
@@ -640,7 +640,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			auth := AuthorizationFromContext(r.Context())
 			newPrefix := ""
 			for _, s := range resources {
-				log.Println("FOO", s)
 				id, ok := auth.Identifier(s + "_id")
 				if !ok {
 					http.Error(w, resource+" not authorized", http.StatusUnauthorized)
