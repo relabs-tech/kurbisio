@@ -805,7 +805,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 
 		// build insert query and validate that we have all parameters
 		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		values := make([]interface{}, 2*len(columns))
+		values := make([]interface{}, len(columns))
 		for i, k := range columns {
 			if i < propertiesIndex {
 				if i == 0 { // skip ID, we get it generated from database
@@ -851,44 +851,14 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
 		sets := make([]string, len(columns)-1)
 
-		offset := len(columns)
 		// now build the update query
 		for i, k := range columns {
-			if i < propertiesIndex {
-				if i == 0 { // skip ID, we get it generated from database
-					continue
-				}
-				param, _ := params[k]
-				value, ok := bodyJSON[k]
-				if ok && param != value.(string) {
-					http.Error(w, "illegal "+k, http.StatusBadRequest)
-					return
-				}
-				values[offset+i-1] = param
-
-			} else if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property "+k, http.StatusBadRequest)
-					return
-				}
-				values[offset+i-1] = value
-			} else {
-				properties, ok := bodyJSON[k]
-				if ok {
-					propertiesJSON, _ := json.Marshal(properties)
-					values[offset+i-1] = propertiesJSON
-				} else {
-					values[offset+i-1] = []byte("{}")
-				}
+			if i == 0 {
+				continue // skip ID
 			}
-			sets[i-1] = k + " = $" + strconv.Itoa(offset+i)
+			sets[i-1] = k + " = $" + strconv.Itoa(i)
 		}
-
-		// and created_at as last value
-		values[len(values)-1] = &createdAt
-
-		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(offset+len(columns))
+		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
 		query += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
 		var inserted bool

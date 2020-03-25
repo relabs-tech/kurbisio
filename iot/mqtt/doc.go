@@ -25,6 +25,8 @@ then report the result by posting
 to /twin/reports/software_version.
 
 The REST API for twin also contains the time stamps when a request or a report was published.
+Multiple equal updates from the device do not change the reported_at timestamp. The
+reported_at timestamp stores the time when a report was received the first time.
 
 Retrieving Requests
 

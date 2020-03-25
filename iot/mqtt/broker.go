@@ -252,7 +252,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				_, err := p.db.Query(
 					`INSERT INTO `+p.schema+`.twin(device_id,key,request,report,requested_at,reported_at)
 					VALUES($1,$2,$3,$4,$5,$6)
-					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;
+					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE twin.report::jsonb<>$4::jsonb;
 					`, deviceID, key, "{}", string(body), never, now)
 				if err != nil {
 					log.Println(err)

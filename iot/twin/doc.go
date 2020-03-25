@@ -30,11 +30,17 @@ information with GET /devices/{device_id}/twin/{key}. Example:
 	"requested_at": "2020-03-24T16:39:49.581168Z",
 	"reported_at": "2020-03-24T17:32:49.09863Z"
   }
+
+Multiple equal updates from the device via MQTT do not change the reported_at timestamp. The
+reported_at timestamp stores the time when a report was received the first time.
+
+
 A GET on /devices{device_id}/twin returns a list of twin objects for all available keys.
 
 Database Requirements
 
 The service assumes that the database manages a resource "device". It creates an additional
 table "twin" to store the device twin.
+
 */
 package twin
