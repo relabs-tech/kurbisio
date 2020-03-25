@@ -270,7 +270,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
-	sqlValues := "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id"
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
 	sqlWhereAll := ""
@@ -281,6 +280,9 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	sqlWhereAllPlusOneExternalIndex := ""
 	sqlWhereAllPlusOneExternalIndex += "WHERE " + compareString(columns[1:propertiesIndex], "%s") + ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns[1:], ", ") + ", created_at)"
+	insertQuery += "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id;"
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
@@ -319,7 +321,6 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		}
 
 		// build insert query and validate that we have all parameters
-		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
 		values := make([]interface{}, len(columns))
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -370,9 +371,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		values[len(columns)-1] = &createdAt
 
 		var id uuid.UUID
-		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + ";"
-
-		err = b.db.QueryRow(query, values...).Scan(&id)
+		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -757,7 +756,6 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 
 	log.Println("  handle single routes:", allRoute, "GET,PUT,DELETE")
 
-	sqlValues := "VALUES(" + parameterString(len(columns)) + ") "
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereSingle := ""
 	if propertiesIndex > 1 {
@@ -765,6 +763,16 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	}
 	sqlWhereSingle += ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
+	insertQuery += "(" + strings.Join(columns[1:], ", ") + ", created_at)"
+	insertQuery += " VALUES(" + parameterString(len(columns)) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
+	sets := make([]string, len(columns)-1)
+	for i := 1; i < len(columns); i++ {
+		sets[i-1] = columns[i] + " = $" + strconv.Itoa(i)
+	}
+	insertQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
+	insertQuery += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
@@ -803,7 +811,6 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		}
 
 		// build insert query and validate that we have all parameters
-		query := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
 		values := make([]interface{}, len(columns))
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -847,21 +854,9 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			createdAt = t.UTC()
 		}
 		values[len(columns)-1] = &createdAt
-		query += "(" + strings.Join(columns[1:], ", ") + ", created_at)" + sqlValues + " ON CONFLICT (" + owner + "_id) DO UPDATE SET "
-		sets := make([]string, len(columns)-1)
-
-		// now build the update query
-		for i, k := range columns {
-			if i == 0 {
-				continue // skip ID
-			}
-			sets[i-1] = k + " = $" + strconv.Itoa(i)
-		}
-		query += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
-		query += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
 		var inserted bool
-		err = b.db.QueryRow(query, values...).Scan(&inserted)
+		err = b.db.QueryRow(insertQuery, values...).Scan(&inserted)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
