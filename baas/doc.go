@@ -187,6 +187,8 @@ Query Parameters
 The GET request on single resources - i.e. not on collections - can be customized with the "children" query parameter. It makes
 it possible to add child resources to the response, avoiding unnecessary rest calls. For example. if you want to retrieve
 a specific user, the user's profile and the user's devices, you can do all that with a single request to
+	GET /user?children=profile,devices
+or
 	GET /user?children=profile&children=devices
 
 The GET request on collections can be customized with any of the static properties or external indices. In our example,

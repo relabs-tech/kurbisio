@@ -995,8 +995,12 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 
 func (b *Backend) maybeAddChildrenToGetResponse(r *http.Request, response map[string]interface{}) (int, error) {
 	if children, ok := r.URL.Query()["children"]; ok {
-		client := b.ClientWithContext(r.Context())
+		var all []string
 		for _, child := range children {
+			all = append(all, strings.Split(child, ",")...)
+		}
+		client := b.ClientWithContext(r.Context())
+		for _, child := range all {
 			if strings.ContainsRune(child, '/') {
 				return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
 			}
