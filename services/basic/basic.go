@@ -18,9 +18,7 @@ var configurationJSON string = `
 	"resources": [
 	  {
 		"resource": "user",
-		"static_properties": ["name"],
-		"external_unique_indices": ["email"],
-		"logged_in_routes" : true
+		"external_unique_indices": ["email"]
 	  },
 	  {
 		"resource": "user/profile",

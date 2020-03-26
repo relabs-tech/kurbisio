@@ -12,8 +12,7 @@ Example:
 	"resources": [
 	  {
 		"resource": "user",
-		"external_unique_indices": ["email"],
-		"logged_in_routes" : true
+		"external_unique_indices": ["email"]
 	  },
 	  {
 		"resource": "user/profile",
@@ -59,22 +58,6 @@ This configuration creates the following REST routes:
 	GET /users/{user_id}/devices/{device_id}
 	DELETE /users/{user_id}/devices/{device_id}
 
-And because the resource "user" has requested "logged_in_routes", these additional REST routes are created for
-the logged-in user:
-	GET /user
-	PUT /user
-	DELETE /user
-	GET /user/profile
-	PUT /user/profile
-	DELETE /user/profile
-	GET /user/devices
-	PUT /user/devices/{device_id} - with empty request body
-	GET /user/devices/{device_id}
-	DELETE /user/devices/{device_id}
-
-The path segement /user is replaced with /users/{user_id}, where user_id comes from the Authorization object of
-the request context.
-
 
 The models look like this:
 
@@ -104,7 +87,7 @@ The models look like this:
 
 
 We can now create a user with a simple POST:
-  curl http://localhost:3000/users -d'{"email":"test@test.com", "properties":{"name":"Test"}}'
+  curl http://localhost:3000/users -d'{"email":"test@test.com", "properties":{"name":"Jonathan Test"}}'
   {
 	"created_at": "2020-03-23T16:01:08.138302Z",
  	"email": "test@test.com",
@@ -148,6 +131,35 @@ This adds a profile to the user, or updates the user's profile:
  	},
 	 "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
   }
+
+Logged-In Routes
+
+In the above example it would also be possible to request "logged_in_routes" for the resource "user":
+
+  	...
+	"resources": [
+	  {
+		"resource": "user",
+		"logged_in_routes" : true
+		...
+	  },
+	...
+
+This would create these additional REST routes for the logged-in user:
+	GET /user
+	PUT /user
+	DELETE /user
+	GET /user/profile
+	PUT /user/profile
+	DELETE /user/profile
+	GET /user/devices
+	PUT /user/devices/{device_id} - with empty request body
+	GET /user/devices/{device_id}
+	DELETE /user/devices/{device_id}
+
+Effectively, the path segement /user is replaced with /users/{user_id}, where user_id comes from the Authorization
+object of the request context. For this to work, you need an authorization middleware which looks at the
+authorization bearer token and adds the necessary Authorization object with user_id to the request context.
 
 Dynamic Properties
 
