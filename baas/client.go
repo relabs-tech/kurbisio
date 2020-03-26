@@ -16,8 +16,9 @@ import (
 // For convenience, ClientWithAuthorization() adds
 // a ContextKeyAuthorization to the request context.
 type Client struct {
-	router        *mux.Router
-	authorization *Authorization
+	router *mux.Router
+	auth   *Authorization
+	ctx    context.Context
 }
 
 // Client creates a client to make pseudo-REST requests to the backend.
@@ -29,16 +30,28 @@ func (b *Backend) Client() *Client {
 
 // ClientWithAuthorization creates a client with specific authorizations to make
 // pseudo-REST requests to the backend.
-func (b *Backend) ClientWithAuthorization(authorization *Authorization) *Client {
+func (b *Backend) ClientWithAuthorization(auth *Authorization) *Client {
 	return &Client{
-		router:        b.router,
-		authorization: authorization,
+		router: b.router,
+		auth:   auth,
+	}
+}
+
+// ClientWithContext creates a client with specific context to make
+// pseudo-REST requests to the backend.
+func (b *Backend) ClientWithContext(ctx context.Context) *Client {
+	return &Client{
+		router: b.router,
+		ctx:    ctx,
 	}
 }
 
 func (c *Client) context() context.Context {
-	if c.authorization != nil {
-		return context.WithValue(context.Background(), contextKeyAuthorization, c.authorization)
+	if c.ctx != nil {
+		return c.ctx
+	}
+	if c.auth != nil {
+		return context.WithValue(context.Background(), contextKeyAuthorization, c.auth)
 	}
 	return context.Background()
 }
@@ -51,16 +64,13 @@ func (c *Client) Get(path string, result interface{}) (int, error) {
 	c.router.ServeHTTP(rec, r)
 
 	status := rec.Code
+	if status == http.StatusNoContent {
+		return status, nil
+
+	}
 	if status != http.StatusOK {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
 	}
-
-	// role, _ := r.Context().Value(ContextKeyRole).(string)
-	// log.Println("role=", role)
-
-	// encoder := json.NewEncoder(w)
-	// encoder.SetIndent("", "  ")
-	// encoder.Encode(response)
 
 	err := json.Unmarshal(rec.Body.Bytes(), result)
 	return status, err

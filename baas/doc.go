@@ -182,6 +182,17 @@ use the starte time of each activity as created_at time.
 
 In the future it should also be possible to change the sorting order and to query collection with a specific time-range.
 
+Query Parameters
+
+The GET request on single resources - i.e. not on collections - can be customized with the "children" query parameter. It makes
+it possible to add child resources to the response, avoiding unnecessary rest calls. For example. if you want to retrieve
+a specific user, the user's profile and the user's devices, you can do all that with a single request to
+	GET /user?children=profile&children=devices
+
+The GET request on collections can be customized with any of the static properties or external indices. In our example,
+the resource "user" has an external index "email", hence we can query all users for a specific email with
+	GET /users?email=test@test.com
+
 Notifications
 
 The backend supports notifications via the WithNotifier() modifier and the Notifier interface.

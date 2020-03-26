@@ -18,7 +18,6 @@ import (
 	// "log"
 	// "net"
 	"net/http"
-	"net/url"
 
 	// _ "net/http/pprof"
 
@@ -531,6 +530,12 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
+		status, err := b.maybeAddChildrenToGetResponse(r, response)
+		if err != nil {
+			http.Error(w, err.Error(), status)
+			return
+		}
+
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -646,7 +651,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 				}
 				newPrefix += "/" + plural(s) + "/" + id.String()
 			}
-			r.URL, _ = url.Parse(newPrefix + strings.TrimPrefix(r.URL.Path, prefix))
+			r.URL.Path = newPrefix + strings.TrimPrefix(r.URL.Path, prefix)
 			log.Println("redirect logged-in route to:", r.URL)
 			router.ServeHTTP(w, r)
 		}
@@ -911,11 +916,18 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		values, response := createScanValuesAndObject()
 		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
+			// not an error, single resource are always conceptually there
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		status, err := b.maybeAddChildrenToGetResponse(r, response)
+		if err != nil {
+			http.Error(w, err.Error(), status)
 			return
 		}
 
@@ -979,6 +991,24 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 	for _, rc := range b.config.Relations {
 		b.createBackendHandlerRelation(router, rc)
 	}
+}
+
+func (b *Backend) maybeAddChildrenToGetResponse(r *http.Request, response map[string]interface{}) (int, error) {
+	if children, ok := r.URL.Query()["children"]; ok {
+		client := b.ClientWithContext(r.Context())
+		for _, child := range children {
+			if strings.ContainsRune(child, '/') {
+				return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
+			}
+			var childJSON interface{}
+			status, err := client.Get(r.URL.Path+"/"+child, &childJSON)
+			if err != nil {
+				return status, err
+			}
+			response[child] = &childJSON
+		}
+	}
+	return http.StatusOK, nil
 }
 
 func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationConfiguration) {
