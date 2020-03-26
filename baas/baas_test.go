@@ -362,7 +362,7 @@ func TestResourceOS(t *testing.T) {
 	// cross check that the delete worked
 	sGet := S{}
 	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
-	if status != http.StatusNotFound {
+	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 		if err != nil {
 			t.Fatal(err)
@@ -391,7 +391,7 @@ func TestResourceOS(t *testing.T) {
 
 	// cross check that the cascade worked: deleting o has also deleted s
 	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
-	if status != http.StatusNotFound {
+	if status != http.StatusNoContent {
 		t.Fatal("cascade delete failed")
 		if err != nil {
 			t.Fatal(err)
