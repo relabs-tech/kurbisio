@@ -30,10 +30,10 @@ import (
 
 	// "github.com/DrmagicE/gmqtt"
 	// "github.com/DrmagicE/gmqtt/pkg/packets"
-
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq" // load database driver for postgres
+	"github.com/relabs-tech/backends/core/registry"
 )
 
 // Backend is the generic rest backend
@@ -45,6 +45,8 @@ type Backend struct {
 	router             *mux.Router
 	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
 	readQuery          map[string]string
+	// Registry is the JSON object registry for this backend's schema
+	Registry *registry.Registry
 }
 
 // BackendBuilder is a builder helper for the Backend
@@ -85,6 +87,11 @@ func MustNewBackend(bb *BackendBuilder) *Backend {
 		panic("Router is missing")
 	}
 
+	err = bb.DB.Ping()
+	if err != nil {
+		panic(err)
+	}
+
 	b := &Backend{
 		schema:             schema,
 		config:             config,
@@ -93,14 +100,9 @@ func MustNewBackend(bb *BackendBuilder) *Backend {
 		router:             bb.Router,
 		readQuery:          make(map[string]string),
 		scanValueFunctions: make(map[string]func() ([]interface{}, map[string]interface{})),
+		Registry:           registry.MustNewRegistry(bb.DB, schema),
 	}
 
-	err = b.db.Ping()
-	if err != nil {
-		panic(err)
-	}
-
-	b.mustInitializeRegistry()
 	b.handleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
 	return b

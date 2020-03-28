@@ -22,9 +22,9 @@ type Client struct {
 }
 
 // NewClient creates a client to make pseudo-REST requests to the backend.
-func (b *Backend) NewClient() *Client {
+func NewClient(router *mux.Router) *Client {
 	return &Client{
-		router: b.router,
+		router: router,
 	}
 }
 

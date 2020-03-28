@@ -23,9 +23,9 @@ type JwtMiddlewareBuilder struct {
 // MustNewJwtMiddelware returns a middleware handler
 func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
-	registry := b.NewRegistry("_jwt_")
+	jwtRegistry := b.Registry.Accessor("_jwt_")
 	var wellKnownCertificates map[string]string
-	createdAt, err := registry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
+	createdAt, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +42,7 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 		if err != nil {
 			panic(err)
 		}
-		registry.Write(jmb.PublicKeyDownloadURL, wellKnownCertificates)
+		jwtRegistry.Write(jmb.PublicKeyDownloadURL, wellKnownCertificates)
 	}
 	wellKnownKeys := map[string]interface{}{}
 	for kid, cert := range wellKnownCertificates {
