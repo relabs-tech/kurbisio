@@ -1,4 +1,4 @@
-package core
+package backend
 
 import (
 	"database/sql"
@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/backends/core/access"
+
 	"github.com/relabs-tech/backends/core/client"
 
 	"github.com/gorilla/mux"
@@ -395,50 +396,6 @@ func TestResourceOS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-
-}
-
-func TestRegistry(t *testing.T) {
-
-	type foo struct {
-		A string
-		B string
-	}
-
-	write := foo{
-		A: "Hello",
-		B: "World",
-	}
-
-	testRegistry := testService.backend.Registry.Accessor("_test_")
-
-	// test non-existing key
-	var something interface{}
-	createdAt, err := testRegistry.Read("key does not exist", something)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !createdAt.IsZero() {
-		t.Fatal("non existing key seems to exist")
-	}
-
-	now := time.Now()
-	err = testRegistry.Write("test", write)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var read foo
-	createdAt, err = testRegistry.Read("test", &read)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if read.A != write.A || read.B != read.B {
-		t.Fatal("could not read what I wrote")
-	}
-	if createdAt.Sub(now) > time.Second {
-		t.Fatal("created at is off")
 	}
 
 }

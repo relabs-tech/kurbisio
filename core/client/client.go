@@ -1,6 +1,6 @@
 /*Package client provides easy and fast in-process access to a REST api
 
-Instead of marshalling HTTP, the client talk directly to the mux router. The client
+Instead of marshalling HTTP, the client talks directly to the mux router. The client
 is the tool of choice if one request handler needs to call other handlers to fullfil
 its task. It is also perfectly suited for unit tests.
 */

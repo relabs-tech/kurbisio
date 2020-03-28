@@ -1,4 +1,4 @@
-package core
+package backend
 
 import (
 	// "context"
@@ -33,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq" // load database driver for postgres
+	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/registry"
@@ -42,7 +43,7 @@ import (
 type Backend struct {
 	config             backendConfiguration
 	schema             string
-	notifier           Notifier
+	notifier           core.Notifier
 	db                 *sql.DB
 	router             *mux.Router
 	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
@@ -64,7 +65,7 @@ type BackendBuilder struct {
 	Router *mux.Router
 	// Notifier inserts a database notifier to the backend. If the configuration requests
 	// notifications, they will be sent to the notifier. This is optional.
-	Notifier Notifier
+	Notifier core.Notifier
 }
 
 // MustNewBackend realizes the actual backend. It creates the sql relations (if they
@@ -181,11 +182,11 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	hasNotificationDelete := false
 	for _, operation := range rc.Notifications {
 		switch operation {
-		case string(OperationCreate):
+		case string(core.OperationCreate):
 			hasNotificationCreate = true
-		case string(OperationUpdate):
+		case string(core.OperationUpdate):
 			hasNotificationUpdate = true
-		case string(OperationDelete):
+		case string(core.OperationDelete):
 			hasNotificationDelete = true
 		default:
 			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
@@ -386,7 +387,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		if hasNotificationCreate && b.notifier != nil {
-			b.notifier.Notify(resource, OperationCreate, jsonData)
+			b.notifier.Notify(resource, core.OperationCreate, jsonData)
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -502,7 +503,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		if hasNotificationUpdate && b.notifier != nil {
-			b.notifier.Notify(resource, OperationUpdate, jsonData)
+			b.notifier.Notify(resource, core.OperationUpdate, jsonData)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -629,7 +630,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 				notification[columns[i]] = params[columns[i]]
 			}
 			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, OperationDelete, jsonData)
+			b.notifier.Notify(resource, core.OperationDelete, jsonData)
 		}
 		w.WriteHeader(http.StatusNoContent)
 
@@ -671,11 +672,11 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	hasNotificationDelete := false
 	for _, operation := range rc.Notifications {
 		switch operation {
-		case string(OperationCreate):
+		case string(core.OperationCreate):
 			hasNotificationCreate = true
-		case string(OperationUpdate):
+		case string(core.OperationUpdate):
 			hasNotificationUpdate = true
-		case string(OperationDelete):
+		case string(core.OperationDelete):
 			hasNotificationDelete = true
 		default:
 			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
@@ -889,11 +890,11 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		if b.notifier != nil {
 			if inserted {
 				if hasNotificationCreate {
-					b.notifier.Notify(resource, OperationCreate, jsonData)
+					b.notifier.Notify(resource, core.OperationCreate, jsonData)
 				}
 			} else {
 				if hasNotificationUpdate {
-					b.notifier.Notify(resource, OperationUpdate, jsonData)
+					b.notifier.Notify(resource, core.OperationUpdate, jsonData)
 				}
 			}
 		}
@@ -969,7 +970,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 				notification[columns[i]] = params[columns[i]]
 			}
 			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, OperationDelete, jsonData)
+			b.notifier.Notify(resource, core.OperationDelete, jsonData)
 		}
 
 	}).Methods(http.MethodDelete)

@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core"
+	"github.com/relabs-tech/backends/core/backend"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -58,7 +58,7 @@ func main() {
 
 	schema := "basic"
 	router := mux.NewRouter()
-	core.MustNewBackend(&core.BackendBuilder{
+	backend.MustNewBackend(&backend.BackendBuilder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,
