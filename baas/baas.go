@@ -100,12 +100,8 @@ func MustNewBackend(bb *Builder) *Backend {
 		panic(err)
 	}
 
-	initQuery := fmt.Sprintf("CREATE extension IF NOT EXISTS \"uuid-ossp\";CREATE extension IF NOT EXISTS \"uuid-ossp\"; CREATE schema IF NOT EXISTS \"%s\"", b.schema)
-	_, err = b.db.Exec(initQuery)
-	if err != nil {
-		panic(err)
-	}
-
+	b.mustInitializeRegistry()
+	b.handleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
 	return b
 }
@@ -999,7 +995,7 @@ func (b *Backend) maybeAddChildrenToGetResponse(r *http.Request, response map[st
 		for _, child := range children {
 			all = append(all, strings.Split(child, ",")...)
 		}
-		client := b.ClientWithContext(r.Context())
+		client := b.NewClientWithContext(r.Context())
 		for _, child := range all {
 			if strings.ContainsRune(child, '/') {
 				return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)

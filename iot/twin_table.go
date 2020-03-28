@@ -13,8 +13,9 @@ import (
 // The function requires that the database manages a resource "device"
 func MustCreateTwinTableIfNotExists(db *sql.DB, schema string) {
 	// poor man's database migrations
-	_, err := db.Query(
+	_, err := db.Exec(
 		`CREATE extension IF NOT EXISTS "uuid-ossp";
+CREATE schema IF NOT EXISTS ` + schema + `;
 CREATE table IF NOT EXISTS ` + schema + `.twin 
 (device_id uuid references ` + schema + `.device(device_id) ON DELETE CASCADE, 
 key varchar NOT NULL, 

@@ -201,11 +201,18 @@ The backend supports notifications via the WithNotifier() modifier and the Notif
 
 Authorization
 
-The backend mangages role based access control to its resource. TBD.
+The backend mangages role based access control to its resource. See MustNewJwtMiddleware. TBD.
 
 Client interface
 
 The backend provides a client interface, which enables a convient way to invoke any of the generated
 REST functions from within the same go process.
+
+Registry
+
+The backend provides a simple JSON registry for persisted values, see Registry().
+The data is stored in a system table "_registry_" in the backend's database schema.
+
+
 */
 package baas

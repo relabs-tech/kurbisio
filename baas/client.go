@@ -21,25 +21,25 @@ type Client struct {
 	ctx    context.Context
 }
 
-// Client creates a client to make pseudo-REST requests to the backend.
-func (b *Backend) Client() *Client {
+// NewClient creates a client to make pseudo-REST requests to the backend.
+func (b *Backend) NewClient() *Client {
 	return &Client{
 		router: b.router,
 	}
 }
 
-// ClientWithAuthorization creates a client with specific authorizations to make
+// NewClientWithAuthorization creates a client with specific authorizations to make
 // pseudo-REST requests to the backend.
-func (b *Backend) ClientWithAuthorization(auth *Authorization) *Client {
+func (b *Backend) NewClientWithAuthorization(auth *Authorization) *Client {
 	return &Client{
 		router: b.router,
 		auth:   auth,
 	}
 }
 
-// ClientWithContext creates a client with specific context to make
+// NewClientWithContext creates a client with specific context to make
 // pseudo-REST requests to the backend.
-func (b *Backend) ClientWithContext(ctx context.Context) *Client {
+func (b *Backend) NewClientWithContext(ctx context.Context) *Client {
 	return &Client{
 		router: b.router,
 		ctx:    ctx,

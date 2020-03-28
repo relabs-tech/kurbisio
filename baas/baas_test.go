@@ -2,7 +2,6 @@ package baas
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"os"
 	"testing"
@@ -87,11 +86,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func asJSON(object interface{}) string {
-	j, _ := json.MarshalIndent(object, "", "  ")
-	return string(j)
-}
-
 type ANew struct {
 	Properties map[string]string `json:"properties"`
 	ExternalID string            `json:"external_id"`
@@ -119,7 +113,7 @@ func TestResourceA(t *testing.T) {
 
 	a := A{}
 
-	_, err := testService.backend.Client().Post("/as", &aNew, &a)
+	_, err := testService.backend.NewClient().Post("/as", &aNew, &a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +131,7 @@ func TestResourceA(t *testing.T) {
 	}
 
 	aGet := A{}
-	_, err = testService.backend.Client().Get("/as/"+a.AID.String(), &aGet)
+	_, err = testService.backend.NewClient().Get("/as/"+a.AID.String(), &aGet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +145,7 @@ func TestResourceA(t *testing.T) {
 	aPut := aGet
 	aRes := A{}
 	aPut.StaticProp = "new value for static property"
-	_, err = testService.backend.Client().Put("/as", &aPut, &aRes)
+	_, err = testService.backend.NewClient().Put("/as", &aPut, &aRes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +156,11 @@ func TestResourceA(t *testing.T) {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
-	_, err = testService.backend.Client().Delete("/as/" + a.AID.String())
+	_, err = testService.backend.NewClient().Delete("/as/" + a.AID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := testService.backend.Client().Get("/as/"+a.AID.String(), &aGet)
+	status, err := testService.backend.NewClient().Get("/as/"+a.AID.String(), &aGet)
 	if status != http.StatusNotFound {
 		t.Fatal("not deleted")
 	}
@@ -193,19 +187,19 @@ func TestResourceBCD(t *testing.T) {
 	empty := Empty{}
 	b := B{}
 
-	_, err := testService.backend.Client().Post("/bs", &empty, &b)
+	_, err := testService.backend.NewClient().Post("/bs", &empty, &b)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := C{}
-	_, err = testService.backend.Client().Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
+	_, err = testService.backend.NewClient().Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	d := D{}
-	_, err = testService.backend.Client().Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
+	_, err = testService.backend.NewClient().Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +209,7 @@ func TestResourceBCD(t *testing.T) {
 	}
 
 	// delete the root object b, this should cascade to all child objects
-	status, err := testService.backend.Client().Delete("/bs/" + b.BID.String())
+	status, err := testService.backend.NewClient().Delete("/bs/" + b.BID.String())
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -224,7 +218,7 @@ func TestResourceBCD(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.backend.Client().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, err = testService.backend.NewClient().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -239,16 +233,16 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	empty := Empty{}
 	b := B{}
 
-	_, err := testService.backend.Client().Post("/bs", &empty, &b)
+	_, err := testService.backend.NewClient().Post("/bs", &empty, &b)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	auth := Authorization{
-		Identifiers: map[string]uuid.UUID{"b_id": b.BID},
+		Resources: map[string]uuid.UUID{"b_id": b.BID},
 	}
 
-	loggedInClient := testService.backend.ClientWithAuthorization(&auth)
+	loggedInClient := testService.backend.NewClientWithAuthorization(&auth)
 
 	bl := B{}
 	_, err = loggedInClient.Get("/b", &bl)
@@ -285,7 +279,7 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.backend.Client().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, err = testService.backend.NewClient().Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -310,7 +304,7 @@ func TestResourceOS(t *testing.T) {
 
 	// create o instance
 	o := O{}
-	_, err := testService.backend.Client().Post("/os", &empty, &o)
+	_, err := testService.backend.NewClient().Post("/os", &empty, &o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +316,7 @@ func TestResourceOS(t *testing.T) {
 		},
 	}
 	sResult := S{}
-	_, err = testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &s, &sResult)
+	_, err = testService.backend.NewClient().Put("/os/"+o.OID.String()+"/s", &s, &sResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +333,7 @@ func TestResourceOS(t *testing.T) {
 	}
 	sUpdateResult := S{}
 
-	status, err := testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	status, err := testService.backend.NewClient().Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +345,7 @@ func TestResourceOS(t *testing.T) {
 	}
 
 	// delete single s
-	status, err = testService.backend.Client().Delete("/os/" + o.OID.String() + "/s")
+	status, err = testService.backend.NewClient().Delete("/os/" + o.OID.String() + "/s")
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -361,7 +355,7 @@ func TestResourceOS(t *testing.T) {
 
 	// cross check that the delete worked
 	sGet := S{}
-	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
+	status, err = testService.backend.NewClient().Get("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 		if err != nil {
@@ -371,7 +365,7 @@ func TestResourceOS(t *testing.T) {
 
 	// re-create single s, now the sid should be different
 	sResult2 := S{}
-	_, err = testService.backend.Client().Put("/os/"+o.OID.String()+"/s", &s, &sResult2)
+	_, err = testService.backend.NewClient().Put("/os/"+o.OID.String()+"/s", &s, &sResult2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +375,7 @@ func TestResourceOS(t *testing.T) {
 	}
 
 	// delete the owner o, this should also delete the single s
-	status, err = testService.backend.Client().Delete("/os/" + o.OID.String())
+	status, err = testService.backend.NewClient().Delete("/os/" + o.OID.String())
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -390,12 +384,56 @@ func TestResourceOS(t *testing.T) {
 	}
 
 	// cross check that the cascade worked: deleting o has also deleted s
-	status, err = testService.backend.Client().Get("/os/"+o.OID.String()+"/s", &sGet)
+	status, err = testService.backend.NewClient().Get("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
 		t.Fatal("cascade delete failed")
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+
+}
+
+func TestRegistry(t *testing.T) {
+
+	type foo struct {
+		A string
+		B string
+	}
+
+	write := foo{
+		A: "Hello",
+		B: "World",
+	}
+
+	registry := testService.backend.NewRegistry("_test_")
+
+	// test non-existing key
+	var something interface{}
+	createdAt, err := registry.Read("key does not exist", something)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !createdAt.IsZero() {
+		t.Fatal("non existing key seems to exist")
+	}
+
+	now := time.Now()
+	err = registry.Write("test", write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read foo
+	createdAt, err = registry.Read("test", &read)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if read.A != write.A || read.B != read.B {
+		t.Fatal("could not read what I wrote")
+	}
+	if createdAt.Sub(now) > time.Second {
+		t.Fatal("created at is off")
 	}
 
 }

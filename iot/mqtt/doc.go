@@ -40,6 +40,6 @@ to /twin/get.
 Database Requirements
 
 The broker assumes that the database manages a resource "device". It creates an additional
-table "twin" to store the device twin.
+table " twin" to store the device twin.
 */
 package mqtt
