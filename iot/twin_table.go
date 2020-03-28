@@ -16,12 +16,12 @@ func MustCreateTwinTableIfNotExists(db *sql.DB, schema string) {
 	_, err := db.Exec(
 		`CREATE extension IF NOT EXISTS "uuid-ossp";
 CREATE schema IF NOT EXISTS ` + schema + `;
-CREATE table IF NOT EXISTS ` + schema + `.twin 
-(device_id uuid references ` + schema + `.device(device_id) ON DELETE CASCADE, 
-key varchar NOT NULL, 
-request json NOT NULL, 
-report json NOT NULL, 
-requested_at timestamp NOT NULL, 
+CREATE table IF NOT EXISTS ` + schema + `."_twin_"
+(device_id uuid references ` + schema + `.device(device_id) ON DELETE CASCADE,
+key varchar NOT NULL,
+request json NOT NULL,
+report json NOT NULL,
+requested_at timestamp NOT NULL,
 reported_at timestamp NOT NULL,
 PRIMARY KEY(device_id, key)
 );`)

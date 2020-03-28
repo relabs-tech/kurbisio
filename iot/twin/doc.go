@@ -40,7 +40,7 @@ A GET on /devices{device_id}/twin returns a list of twin objects for all availab
 Database Requirements
 
 The service assumes that the database manages a resource "device". It creates an additional
-table "twin" to store the device twin.
+system table "_twin_" to store the device twin.
 
 */
 package twin

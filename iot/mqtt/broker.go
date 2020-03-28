@@ -250,7 +250,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				now := time.Now().UTC()
 				never := time.Time{}
 				_, err := p.db.Query(
-					`INSERT INTO `+p.schema+`.twin(device_id,key,request,report,requested_at,reported_at)
+					`INSERT INTO `+p.schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 					VALUES($1,$2,$3,$4,$5,$6)
 					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE twin.report::jsonb<>$4::jsonb;
 					`, deviceID, key, "{}", string(body), never, now)
@@ -268,7 +268,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				for _, key := range keys {
 					payload := []byte("{}")
 					err = p.db.QueryRow(
-						`SELECT request FROM `+p.schema+`.twin WHERE device_id=$1 AND key=$2;`,
+						`SELECT request FROM `+p.schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
 						deviceID, key).Scan(&payload)
 					if err != nil && err != sql.ErrNoRows {
 						log.Println(err)
