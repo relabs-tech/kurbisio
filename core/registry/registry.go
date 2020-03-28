@@ -1,4 +1,4 @@
-/*Package registry provides a persistent registry of objects in a sql database.
+/*Package registry provides a persistent registry of objects in a SQL database
 
 The package uses JSON to serialize the data.
 */
@@ -35,8 +35,8 @@ import (
 	_ "github.com/lib/pq" // load database driver for postgres
 )
 
-// MustNewRegistry creates a new registry for the specified database and schema.
-func MustNewRegistry(db *sql.DB, schema string) *Registry {
+// MustNew creates a new registry for the specified database and schema.
+func MustNew(db *sql.DB, schema string) *Registry {
 	if len(schema) == 0 {
 		schema = "public"
 	}
@@ -82,7 +82,7 @@ func (r *Registry) Accessor(prefix string) Accessor {
 // Read reads a value from the registry. It returns the
 // time when the value was written.
 //
-// If the accessor has a prefix, the key is prepended with "prefix:"
+// If the accessor has a prefix, the key is prepended with "{prefix}:"
 func (r *Accessor) Read(key string, value interface{}) (time.Time, error) {
 	var (
 		rawValue  json.RawMessage
@@ -108,7 +108,7 @@ func (r *Accessor) Read(key string, value interface{}) (time.Time, error) {
 
 // Write writes a value into the registry.
 //
-// If the accessor has a prefix, the key is prepended with "prefix:"
+// If the accessor has a prefix, the key is prepended with "{prefix}:"
 func (r *Accessor) Write(key string, value interface{}) error {
 
 	body, err := json.MarshalIndent(value, "", "  ")

@@ -1,10 +1,16 @@
-package core
+/*Package access provides utilities for access control
+ */
+package access
 
 import (
 	"context"
+	"encoding/json"
+	"log"
+	"net/http"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 )
 
 // contextKey is the type for context keys. Go linter does not like plain strings
@@ -112,4 +118,24 @@ func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 	a.mutex.Lock()
 	a.cache[token] = auth
 	a.mutex.Unlock()
+}
+
+// HandleAuthorizationRoute adds a route /authorization GET to the router
+//
+// The route returns the current authorization for provided bearer token.
+func HandleAuthorizationRoute(router *mux.Router) {
+	log.Println("authorization")
+	log.Println("  handle route: /authorization GET")
+	router.HandleFunc("/authorization", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		response := AuthorizationFromContext(r.Context())
+		if response == nil {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			jsonData, _ := json.MarshalIndent(response, "", " ")
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jsonData)
+		}
+	}).Methods(http.MethodGet)
+
 }

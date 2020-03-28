@@ -1,4 +1,4 @@
-package core
+package access
 
 import (
 	"database/sql"
@@ -13,17 +13,20 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core/registry"
 )
 
 // JwtMiddlewareBuilder is a helper builder for JwtMiddelware
 type JwtMiddlewareBuilder struct {
 	PublicKeyDownloadURL string
+	DB                   *sql.DB
+	Schema               string
 }
 
 // MustNewJwtMiddelware returns a middleware handler
-func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
+func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
-	jwtRegistry := b.Registry.Accessor("_jwt_")
+	jwtRegistry := registry.MustNew(jmb.DB, jmb.Schema).Accessor("_jwt_")
 	var wellKnownCertificates map[string]string
 	createdAt, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
 	if err != nil {
@@ -66,14 +69,14 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 		return nil, errors.New("cannot verify token")
 	}
 
-	authQuery := fmt.Sprintf("SELECT authorization_id, properties FROM %s.authorization WHERE email=$1 AND issuer=$2;", b.schema)
+	authQuery := fmt.Sprintf("SELECT authorization_id, properties FROM %s.authorization WHERE email=$1 AND issuer=$2;", jmb.Schema)
 
 	authCache := NewAuthorizationCache()
 
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authorization := AuthorizationFromContext(r.Context())
-			if authorization != nil { // we are already authorized
+			auth := AuthorizationFromContext(r.Context())
+			if auth != nil { // we are already authorized
 				h.ServeHTTP(w, r)
 				return
 			}
@@ -122,12 +125,12 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by email, so the frontend can enforce a new database lookup with a new token.
-			auth := authCache.Read(tokenString)
+			auth = authCache.Read(tokenString)
 			if auth == nil {
 
 				var authID uuid.UUID
 				var properties json.RawMessage
-				err = b.db.QueryRow(authQuery, claims.EMail, claims.Issuer).Scan(&authID, &properties)
+				err = jmb.DB.QueryRow(authQuery, claims.EMail, claims.Issuer).Scan(&authID, &properties)
 
 				if err == sql.ErrNoRows {
 					http.Error(w, "no authorization for "+claims.EMail+" from "+claims.Issuer, http.StatusUnauthorized)
@@ -154,21 +157,4 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 func asJSON(object interface{}) string {
 	j, _ := json.MarshalIndent(object, "", "  ")
 	return string(j)
-}
-
-func (b *Backend) handleAuthorizationRoute(router *mux.Router) {
-	log.Println("authorization")
-	log.Println("  handle route: /authorization GET")
-	router.HandleFunc("/authorization", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		response := AuthorizationFromContext(r.Context())
-		if response == nil {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
-			jsonData, _ := json.MarshalIndent(response, "", " ")
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jsonData)
-		}
-	}).Methods(http.MethodGet)
-
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"os"
 	"testing"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joeshaw/envdecode"
+	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/client"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -50,7 +53,7 @@ var configurationJSON string = `{
 type TestService struct {
 	Postgres string `env:"POSTGRES,required" description:"the connection string for the Postgres DB"`
 	backend  *Backend
-	client   *Client
+	client   client.Client
 }
 
 var testService TestService
@@ -82,7 +85,7 @@ func TestMain(m *testing.M) {
 		DB:     db,
 		Router: router,
 	})
-	testService.client = NewClient(router)
+	testService.client = client.New(router)
 
 	code := m.Run()
 	os.Exit(code)
@@ -240,11 +243,11 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	auth := Authorization{
+	auth := access.Authorization{
 		Resources: map[string]uuid.UUID{"b_id": b.BID},
 	}
 
-	loggedInClient := testService.backend.NewClientWithAuthorization(&auth)
+	loggedInClient := testService.client.WithAuthorization(&auth)
 
 	bl := B{}
 	_, err = loggedInClient.Get("/b", &bl)
@@ -438,4 +441,9 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("created at is off")
 	}
 
+}
+
+func asJSON(object interface{}) string {
+	j, _ := json.MarshalIndent(object, "", "  ")
+	return string(j)
 }

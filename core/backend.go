@@ -33,6 +33,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq" // load database driver for postgres
+	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/registry"
 )
 
@@ -100,10 +102,10 @@ func MustNewBackend(bb *BackendBuilder) *Backend {
 		router:             bb.Router,
 		readQuery:          make(map[string]string),
 		scanValueFunctions: make(map[string]func() ([]interface{}, map[string]interface{})),
-		Registry:           registry.MustNewRegistry(bb.DB, schema),
+		Registry:           registry.MustNew(bb.DB, schema),
 	}
 
-	b.handleAuthorizationRoute(b.router)
+	access.HandleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
 	return b
 }
@@ -639,7 +641,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		replaceHandler := func(w http.ResponseWriter, r *http.Request) {
 			log.Println("called logged-in route for", r.URL, r.Method)
-			auth := AuthorizationFromContext(r.Context())
+			auth := access.AuthorizationFromContext(r.Context())
 			newPrefix := ""
 			for _, s := range resources {
 				id, ok := auth.Identifier(s + "_id")
@@ -997,7 +999,7 @@ func (b *Backend) maybeAddChildrenToGetResponse(r *http.Request, response map[st
 		for _, child := range children {
 			all = append(all, strings.Split(child, ",")...)
 		}
-		client := b.NewClientWithContext(r.Context())
+		client := client.New(b.router).WithContext(r.Context())
 		for _, child := range all {
 			if strings.ContainsRune(child, '/') {
 				return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)

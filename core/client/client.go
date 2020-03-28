@@ -1,4 +1,10 @@
-package core
+/*Package client provides easy and fast in-process access to a REST api
+
+Instead of marshalling HTTP, the client talk directly to the mux router. The client
+is the tool of choice if one request handler needs to call other handlers to fullfil
+its task. It is also perfectly suited for unit tests.
+*/
+package client
 
 import (
 	"bytes"
@@ -9,41 +15,37 @@ import (
 	"net/http/httptest"
 
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core/access"
 )
 
 // Client provides easy access to the REST API.
 //
-// For convenience, ClientWithAuthorization() adds
-// a ContextKeyAuthorization to the request context.
 type Client struct {
 	router *mux.Router
-	auth   *Authorization
+	auth   *access.Authorization
 	ctx    context.Context
 }
 
-// NewClient creates a client to make pseudo-REST requests to the backend.
-func NewClient(router *mux.Router) *Client {
-	return &Client{
+// New creates a client to make pseudo-REST requests to the backend.
+//
+// WithAuthorization() adds an authorization to the request context.
+// WithContext() specifies a different base context all together.
+func New(router *mux.Router) Client {
+	return Client{
 		router: router,
 	}
 }
 
-// NewClientWithAuthorization creates a client with specific authorizations to make
-// pseudo-REST requests to the backend.
-func (b *Backend) NewClientWithAuthorization(auth *Authorization) *Client {
-	return &Client{
-		router: b.router,
-		auth:   auth,
-	}
+// WithAuthorization returns a new client with specific authorizations
+func (c Client) WithAuthorization(auth *access.Authorization) Client {
+	c.auth = auth
+	return c
 }
 
-// NewClientWithContext creates a client with specific context to make
-// pseudo-REST requests to the backend.
-func (b *Backend) NewClientWithContext(ctx context.Context) *Client {
-	return &Client{
-		router: b.router,
-		ctx:    ctx,
-	}
+// WithContext returns a new client with specific request context
+func (c Client) WithContext(ctx context.Context) Client {
+	c.ctx = ctx
+	return c
 }
 
 func (c *Client) context() context.Context {
@@ -51,7 +53,7 @@ func (c *Client) context() context.Context {
 		return c.ctx
 	}
 	if c.auth != nil {
-		return context.WithValue(context.Background(), contextKeyAuthorization, c.auth)
+		return c.auth.ContextWithAuthorization(context.Background())
 	}
 	return context.Background()
 }
