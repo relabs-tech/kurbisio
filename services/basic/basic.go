@@ -58,7 +58,7 @@ func main() {
 
 	schema := "basic"
 	router := mux.NewRouter()
-	backend.MustNewBackend(&backend.BackendBuilder{
+	backend.MustNew(&backend.Builder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,

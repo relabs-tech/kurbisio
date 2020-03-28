@@ -19,7 +19,7 @@ import (
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"
-	"github.com/relabs-tech/backends/iot"
+	"github.com/relabs-tech/backends/iot/twin"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq" // for the postgres database
@@ -104,7 +104,7 @@ func MustNewBroker(bb *Builder) *Broker {
 		panic(err)
 	}
 
-	iot.MustCreateTwinTableIfNotExists(bb.DB, schema)
+	twin.MustCreateTwinTableIfNotExists(bb.DB, schema)
 
 	b := &Broker{
 		p: &plugin{

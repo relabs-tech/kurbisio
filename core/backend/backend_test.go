@@ -80,7 +80,7 @@ func TestMain(m *testing.M) {
 	db.Exec("drop schema " + schema + " cascade;")
 
 	router := mux.NewRouter()
-	testService.backend = MustNewBackend(&BackendBuilder{
+	testService.backend = MustNew(&Builder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,

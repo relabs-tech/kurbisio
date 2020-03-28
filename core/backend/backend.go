@@ -52,8 +52,8 @@ type Backend struct {
 	Registry *registry.Registry
 }
 
-// BackendBuilder is a builder helper for the Backend
-type BackendBuilder struct {
+// Builder is a builder helper for the Backend
+type Builder struct {
 	// Config is the JSON description of all resources and relations. This is mandatory.
 	Config string
 	// DB is a postgres database. This is mandatory.
@@ -68,9 +68,9 @@ type BackendBuilder struct {
 	Notifier core.Notifier
 }
 
-// MustNewBackend realizes the actual backend. It creates the sql relations (if they
+// MustNew realizes the actual backend. It creates the sql relations (if they
 // do not exist) and adds actual routes to router
-func MustNewBackend(bb *BackendBuilder) *Backend {
+func MustNew(bb *Builder) *Backend {
 
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(bb.Config), &config)
