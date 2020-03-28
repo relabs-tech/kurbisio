@@ -1,4 +1,4 @@
-package baas
+package core
 
 import (
 	// "context"

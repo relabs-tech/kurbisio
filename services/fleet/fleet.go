@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 
-	"github.com/relabs-tech/backends/baas"
+	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/iot/authorization"
 	"github.com/relabs-tech/backends/iot/mqtt"
 	"github.com/relabs-tech/backends/iot/twin"
@@ -78,7 +78,7 @@ func main() {
 
 	schema := "fleet"
 	router := mux.NewRouter()
-	baas.MustNewBackend(&baas.Builder{
+	core.MustNewBackend(&core.BackendBuilder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,

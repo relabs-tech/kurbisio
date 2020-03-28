@@ -1,4 +1,4 @@
-package baas
+package core
 
 import (
 	// "context"
@@ -47,8 +47,8 @@ type Backend struct {
 	readQuery          map[string]string
 }
 
-// Builder is a builder helper for the Backend
-type Builder struct {
+// BackendBuilder is a builder helper for the Backend
+type BackendBuilder struct {
 	// Config is the JSON description of all resources and relations. This is mandatory.
 	Config string
 	// DB is a postgres database. This is mandatory.
@@ -65,7 +65,7 @@ type Builder struct {
 
 // MustNewBackend realizes the actual backend. It creates the sql relations (if they
 // do not exist) and adds actual routes to router
-func MustNewBackend(bb *Builder) *Backend {
+func MustNewBackend(bb *BackendBuilder) *Backend {
 
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(bb.Config), &config)

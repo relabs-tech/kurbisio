@@ -1,4 +1,4 @@
-package baas
+package core
 
 import (
 	"database/sql"
@@ -71,11 +71,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	schema := "baas_unit_test"
+	schema := "_core_unit_test_"
 	db.Exec("drop schema " + schema + " cascade;")
 
 	router := mux.NewRouter()
-	testService.backend = MustNewBackend(&Builder{
+	testService.backend = MustNewBackend(&BackendBuilder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,

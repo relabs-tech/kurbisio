@@ -1,4 +1,4 @@
-package baas
+package core
 
 import (
 	"database/sql"
@@ -68,6 +68,8 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 
 	authQuery := fmt.Sprintf("SELECT authorization_id, properties FROM %s.authorization WHERE email=$1 AND issuer=$2;", b.schema)
 
+	authCache := NewAuthorizationCache()
+
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authorization := AuthorizationFromContext(r.Context())
@@ -120,7 +122,7 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by email, so the frontend can enforce a new database lookup with a new token.
-			auth := AuthorizationFromCache(tokenString)
+			auth := authCache.Read(tokenString)
 			if auth == nil {
 
 				var authID uuid.UUID
@@ -138,10 +140,10 @@ func (b *Backend) MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.Middleware
 				}
 				auth = &Authorization{}
 				json.Unmarshal(properties, auth)
-				AuthorizationToCache(tokenString, auth)
+				authCache.Write(tokenString, auth)
 			}
 
-			ctx := auth.NewContextWithAuthorization(r.Context())
+			ctx := auth.ContextWithAuthorization(r.Context())
 			r = r.WithContext(ctx)
 			h.ServeHTTP(w, r)
 		})

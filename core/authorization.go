@@ -1,4 +1,4 @@
-package baas
+package core
 
 import (
 	"context"
@@ -12,7 +12,7 @@ type contextKey string
 
 // the predefined context key
 const (
-	contextKeyAuthorization contextKey = "baas_authorization_context_key"
+	contextKeyAuthorization contextKey = "_authorization_"
 )
 
 /*Authorization is a context object which stores authorization information
@@ -23,11 +23,11 @@ resources in the backend configuration.
 
 Authorizations are added to a request context with
 
-  ctx = auth.NewContextWithAuthorization(ctx)
+  ctx = auth.ContextWithAuthorization(ctx)
 
 and retrieved with
 
-  auth := baas.AuthorizationFromContext(ctx)
+  auth := AuthorizationFromContext(ctx)
 
 The backend uses the authorization object for role based access control.
 It is added to the context by a middleware based on the passed authroization
@@ -62,8 +62,8 @@ func (a *Authorization) Identifier(resource string) (uuid.UUID, bool) {
 	return value, ok
 }
 
-// NewContextWithAuthorization returns a new context with this authorization added to it
-func (a *Authorization) NewContextWithAuthorization(ctx context.Context) context.Context {
+// ContextWithAuthorization returns a new context with this authorization added to it
+func (a *Authorization) ContextWithAuthorization(ctx context.Context) context.Context {
 	return context.WithValue(ctx, contextKeyAuthorization, a)
 
 }
@@ -77,25 +77,39 @@ func AuthorizationFromContext(ctx context.Context) *Authorization {
 	return nil
 }
 
-var cacheMutex sync.RWMutex
-var cache map[string]*Authorization = make(map[string]*Authorization)
+// AuthorizationCache is an in-memory cache for authorizations. It is used by
+// jwt middleware to cache authorization objects for bearer tokens.
+// The purpose of the cache is to reduce the number of database queries, without
+// the cache the middleware would have to lookup the authorization for every single
+// request.
+type AuthorizationCache struct {
+	mutex sync.RWMutex
+	cache map[string]*Authorization
+}
 
-// AuthorizationFromCache returns an authorization from cache.
+// NewAuthorizationCache creates a new authorization cache
+func NewAuthorizationCache() *AuthorizationCache {
+	return &AuthorizationCache{cache: make(map[string]*Authorization)}
+}
+
+// Read returns an authorization from in-process cache.
+// Token should be the temporary token the authorization was derived from, not any of the ids.
 // This function is go-route safe
-func AuthorizationFromCache(key string) *Authorization {
-	cacheMutex.RLock()
-	auth, ok := cache[key]
-	cacheMutex.RUnlock()
+func (a *AuthorizationCache) Read(token string) *Authorization {
+	a.mutex.RLock()
+	auth, ok := a.cache[token]
+	a.mutex.RUnlock()
 	if ok {
 		return auth
 	}
 	return nil
 }
 
-// AuthorizationToCache store an authorization in the cache.
+// Write stores an authorization in the in-memory cache.
+// Token should be the temporary token it was derived from, not any of the ids.
 // This function is go-route safe
-func AuthorizationToCache(key string, auth *Authorization) {
-	cacheMutex.Lock()
-	cache[key] = auth
-	cacheMutex.Unlock()
+func (a *AuthorizationCache) Write(token string, auth *Authorization) {
+	a.mutex.Lock()
+	a.cache[token] = auth
+	a.mutex.Unlock()
 }

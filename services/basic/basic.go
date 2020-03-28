@@ -6,11 +6,10 @@ import (
 	"net/http"
 
 	"github.com/joeshaw/envdecode"
+	"github.com/relabs-tech/backends/core"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
-
-	"github.com/relabs-tech/backends/baas"
 )
 
 var configurationJSON string = `  
@@ -59,7 +58,7 @@ func main() {
 
 	schema := "basic"
 	router := mux.NewRouter()
-	baas.MustNewBackend(&baas.Builder{
+	core.MustNewBackend(&core.BackendBuilder{
 		Config: configurationJSON,
 		Schema: schema,
 		DB:     db,

@@ -1,5 +1,5 @@
 /*
-Package baas implements a backend-as-a-service
+Package core implements the configurable backend and tools around it
 
 A backend manages a Postgres-SQL database and provides an auto-generated RESTful-API for it.
 
@@ -215,4 +215,4 @@ The data is stored in a system table "_registry_" in the backend's database sche
 
 
 */
-package baas
+package core

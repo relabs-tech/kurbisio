@@ -1,4 +1,4 @@
-package baas
+package core
 
 // Operation represents a database operation, one of Create,Update,Delete
 type Operation string
