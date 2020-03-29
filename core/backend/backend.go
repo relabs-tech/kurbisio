@@ -46,7 +46,7 @@ type Backend struct {
 	notifier           core.Notifier
 	db                 *sql.DB
 	router             *mux.Router
-	scanValueFunctions map[string]func() ([]interface{}, map[string]interface{})
+	scanValueFunctions map[string]func(*int) ([]interface{}, map[string]interface{})
 	readQuery          map[string]string
 	// Registry is the JSON object registry for this backend's schema
 	Registry *registry.Registry
@@ -102,7 +102,7 @@ func MustNew(bb *Builder) *Backend {
 		db:                 bb.DB,
 		router:             bb.Router,
 		readQuery:          make(map[string]string),
-		scanValueFunctions: make(map[string]func() ([]interface{}, map[string]interface{})),
+		scanValueFunctions: make(map[string]func(*int) ([]interface{}, map[string]interface{})),
 		Registry:           registry.MustNew(bb.DB, schema),
 	}
 
@@ -119,13 +119,12 @@ type backendConfiguration struct {
 
 // resourceConfiguration is one single resource table
 type resourceConfiguration struct {
-	Resource              string   `json:"resource"`
-	Single                bool     `json:"single"`
-	LoggedInRoutes        bool     `json:"logged_in_routes"`
-	ExternalUniqueIndices []string `json:"external_unique_indices"`
-	ExternalIndices       []string `json:"external_indices"`
-	StaticProperties      []string `json:"static_properties"`
-	Notifications         []string `json:"notifications"`
+	Resource         string   `json:"resource"`
+	Single           bool     `json:"single"`
+	LoggedInRoutes   bool     `json:"logged_in_routes"`
+	ExternalIndices  []string `json:"external_indices"`
+	StaticProperties []string `json:"static_properties"`
+	Notifications    []string `json:"notifications"`
 }
 
 // relationConfiguration is a n:m relation from a resource table or another relation
@@ -154,7 +153,7 @@ func parameterString(n int) string {
 }
 
 // returns s[0]=$1 AND ... AND s[n-1]=$n
-func compareString(s []string, extra ...string) string {
+func compareString(s []string) string {
 	result := ""
 	i := 0
 	for ; i < len(s); i++ {
@@ -162,12 +161,6 @@ func compareString(s []string, extra ...string) string {
 			result += " AND "
 		}
 		result += s[i] + " = $" + strconv.Itoa(i+1)
-	}
-	for j := 0; j < len(extra); j++ {
-		if i+j > 0 {
-			result += " AND "
-		}
-		result += extra[j] + " = $" + strconv.Itoa(i+j+1)
 	}
 	return result
 }
@@ -220,6 +213,8 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		createColumns = append(createColumns, createColumn)
 	}
 
+	// enforce a unique constraint on all our identifying indices. This enables child
+	// resources to have a composite foreign key on us
 	if len(columns) > 1 {
 		createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
 		createColumns = append(createColumns, createColumn)
@@ -229,28 +224,21 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	propertiesIndex := len(columns)
 	columns = append(columns, "properties")
 
-	for _, index := range rc.ExternalUniqueIndices {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		uniqueColumn := fmt.Sprintf("UNIQUE(\"%s\")", index)
-		createColumns = append(createColumns, createColumn)
-		createColumns = append(createColumns, uniqueColumn)
-		columns = append(columns, index)
-	}
-
-	createExternalIndicesQuery := ""
-	for _, index := range rc.ExternalIndices {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
-			"external_index_"+this+"_"+index,
-			schema, resource, index)
-		createColumns = append(createColumns, createColumn)
-		columns = append(columns, index)
-	}
-
 	for _, property := range rc.StaticProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
+	}
+	propertiesEndIndex := len(columns)
+
+	createExternalIndicesQuery := ""
+	for _, index := range rc.ExternalIndices {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
+		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"external_index_"+this+"_"+index,
+			schema, resource, index)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, index)
 	}
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createExternalIndicesQuery
@@ -272,20 +260,29 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
-	sqlWhereAll := ""
+
+	readQueryWithPagination := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
-		sqlWhereAll += "WHERE " + compareString(columns[1:propertiesIndex])
+		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += " ORDER BY created_at DESC;"
-	sqlWhereAllPlusOneExternalIndex := ""
-	sqlWhereAllPlusOneExternalIndex += "WHERE " + compareString(columns[1:propertiesIndex], "%s") + ";"
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<$%d) AND ($%d OR created_at>$%d) ",
+		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
+
+	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
+
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+4, propertiesIndex+5)
+	sqlWhereAll += sqlPagination
+	sqlWhereAllPlusOneExternalIndex += sqlPagination
+
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns[1:], ", ") + ", created_at)"
 	insertQuery += "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id;"
 
-	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+1)
+	createScanValuesAndObject := func(totalCount *int) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -300,6 +297,10 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		}
 		values[len(columns)] = &time.Time{}
 		object["created_at"] = values[len(columns)]
+		if totalCount == nil {
+			return values[:len(columns)+1], object
+		}
+		values[len(columns)+1] = totalCount
 		return values, object
 	}
 
@@ -378,7 +379,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err = b.db.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -490,7 +491,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -520,7 +521,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			queryParameters[i] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -549,53 +550,108 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 
 		var queryParameters []interface{}
 		var sqlQuery string
+		limit := 100
+		page := 1
+		before := time.Time{}
+		after := time.Time{}
 		externalColumn := ""
 		externalIndex := ""
 
 		urlQuery := r.URL.Query()
-		for i := propertiesIndex + 1; i < len(columns); i++ {
-			if externalIndex = urlQuery.Get(columns[i]); externalIndex != "" {
-				externalColumn = columns[i]
-				break
+		for key, array := range urlQuery {
+			if len(array) > 1 {
+				http.Error(w, "illegal paramter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+			switch key {
+			case "limit":
+				limit, err = strconv.Atoi(value)
+				if err == nil && (limit < 1 || limit > 100) {
+					err = fmt.Errorf("out of range")
+				}
+			case "page":
+				page, err = strconv.Atoi(value)
+				if err == nil && page < 1 {
+					err = fmt.Errorf("out of range")
+				}
+			case "before":
+				before, err = time.Parse(time.RFC3339, value)
+			case "after":
+				after, err = time.Parse(time.RFC3339, value)
+			default:
+				found := false
+				for i := propertiesEndIndex; i < len(columns); i++ {
+					if key == columns[i] {
+						if found {
+							err = fmt.Errorf("only one external index allowed")
+							break
+						}
+						externalIndex = value
+						externalColumn = columns[i]
+					}
+				}
+				if !found {
+					err = fmt.Errorf("uknown query parameter")
+				}
+			}
+
+			if err != nil {
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
 			}
 		}
-
 		params := mux.Vars(r)
 		if externalIndex == "" { // get entire collection
-			sqlQuery = readQuery + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1)
+			sqlQuery = readQueryWithPagination + sqlWhereAll
+			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = fmt.Sprintf(readQuery+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex)
+			sqlQuery = fmt.Sprintf(readQueryWithPagination+sqlWhereAllPlusOneExternalIndex, externalColumn)
+			queryParameters = make([]interface{}, propertiesIndex+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1] = externalIndex
+			queryParameters[propertiesIndex-1+6] = externalIndex
 		}
 
+		// add before and after and pagination
+		queryParameters[propertiesIndex-1+0] = before.IsZero()
+		queryParameters[propertiesIndex-1+1] = before.UTC()
+		queryParameters[propertiesIndex-1+2] = after.IsZero()
+		queryParameters[propertiesIndex-1+3] = after.UTC()
+		queryParameters[propertiesIndex-1+4] = limit
+		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+
+		log.Println("QUERY", sqlQuery)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest) // TODO when is this StatusInternalServerError?
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
 		response := []interface{}{}
 		defer rows.Close()
+		var totalCount int
 		for rows.Next() {
-			values, object := createScanValuesAndObject()
+			values, object := createScanValuesAndObject(&totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
-				log.Println("error when scanning: ", err.Error())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
 			response = append(response, object)
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
+		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+		w.Header().Set("Pagination-Page-Count", strconv.Itoa(totalCount/limit))
+		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
@@ -711,39 +767,35 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		createColumns = append(createColumns, createColumn)
 	}
 
+	// enforce a unique constraint on all our identifying indices. This enables child
+	// resources to have a composite foreign key on us
 	if len(columns) > 1 {
 		createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
 		createColumns = append(createColumns, createColumn)
 	}
-	createColumn := "UNIQUE (" + owner + "_id )" // force the resource to be single
+
+	// force the resource itself to be single resource
+	createColumn := "UNIQUE (" + owner + "_id )"
 	createColumns = append(createColumns, createColumn)
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
 	propertiesIndex := len(columns)
 	columns = append(columns, "properties")
 
-	for _, index := range rc.ExternalUniqueIndices {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		uniqueColumn := fmt.Sprintf("UNIQUE(\"%s\")", index)
+	for _, property := range rc.StaticProperties {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
 		createColumns = append(createColumns, createColumn)
-		createColumns = append(createColumns, uniqueColumn)
-		columns = append(columns, index)
+		columns = append(columns, property)
 	}
 
 	createExternalIndicesQuery := ""
 	for _, index := range rc.ExternalIndices {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"external_index_"+this+"_"+index,
 			schema, resource, index)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, index)
-	}
-
-	for _, property := range rc.StaticProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
-		createColumns = append(createColumns, createColumn)
-		columns = append(columns, property)
 	}
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createExternalIndicesQuery
@@ -780,8 +832,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	insertQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
 	insertQuery += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
-	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+1)
+	createScanValuesAndObject := func(totalCount *int) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -796,6 +848,10 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		}
 		values[len(columns)] = &time.Time{}
 		object["created_at"] = values[len(columns)]
+		if totalCount == nil {
+			return values[:len(columns)+1], object
+		}
+		values[len(columns)+1] = totalCount
 		return values, object
 	}
 
@@ -875,7 +931,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err = b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -914,7 +970,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			// not an error, single resource are always conceptually there
@@ -1092,7 +1148,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
-	// GET all
+	// GET all nase
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
@@ -1112,7 +1168,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		response := []interface{}{}
 		defer rows.Close()
 		for rows.Next() {
-			values, object := createScanValuesAndObject()
+			values, object := createScanValuesAndObject(nil)
 			err := rows.Scan(values...)
 			if err != nil {
 				log.Println("error when scanning: ", err.Error())
@@ -1135,7 +1191,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 			queryParameters[i] = params[resourceColumns[i]]
 		}
 
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(nil)
 		err := b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)

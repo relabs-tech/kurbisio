@@ -100,7 +100,7 @@ func main() {
 		Router:    router,
 	})
 
-	authorization.MustNewAPI(&authorization.Builder{
+	authorization.MustNewAPI(&authorization.APIBuilder{
 		Schema:     schema,
 		DB:         db,
 		Router:     router,

@@ -11,7 +11,7 @@ imei = os.path.basename(__file__).split('.')[0]
 
 # Authorize with backend.
 print("authorize with backend: " + imei)
-r = requests.get("http://localhost:3000/authorizations/"+imei).json()
+r = requests.get("http://localhost:3000/device-authorizations/"+imei, headers={"Kurbisio-Equipment-Key":"secret"}).json()
 device_id = r["device_id"]
 print("received kurbisio device_id: " + device_id)
 

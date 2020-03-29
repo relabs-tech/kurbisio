@@ -12,7 +12,7 @@ Example:
 	"resources": [
 	  {
 		"resource": "user",
-		"external_unique_indices": ["email"]
+		"index": ["identity"]
 	  },
 	  {
 		"resource": "user/profile",
@@ -180,9 +180,8 @@ Collections of resources are sorted by the created_at timestamp, with latest fir
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
 use the starte time of each activity as created_at time.
 
-In the future it should also be possible to change the sorting order and to query collection with a specific time-range.
 
-Query Parameters
+Query Parameters and Pagination
 
 The GET request on single resources - i.e. not on collections - can be customized with the "children" query parameter. It makes
 it possible to add child resources to the response, avoiding unnecessary rest calls. For example. if you want to retrieve
@@ -191,9 +190,25 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
-The GET request on collections can be customized with any of the static properties or external indices. In our example,
-the resource "user" has an external index "email", hence we can query all users for a specific email with
-	GET /users?email=test@test.com
+The GET request on collections can be customized with any of the external indices. In our example,
+the resource "user" has an external index "identity", hence we can query all users for a specific email with
+	GET /users?identity=test@test.com
+
+The system supports pagination and filtering of responses by creation time
+	  ?limit=n  sets a page limit of n items
+	  ?page=n   selects page number n
+	  ?before=t selects items created before timestamp t
+	  ?after=t  selects items created after timestamp t
+
+The response carries the following custom headers for pagination:
+	  "Pagination-Limit"        the page limit
+	  "Pagination-Total-Count"  the total number of items in the collection
+	  "Pagination-Page-Count"   the total number of pages in the collection
+	  "Pagination-Current-Page" the currently selected page
+
+The maximum allowed limit is 100, which is also the default limit.
+Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
+if the requested page is out of range.
 
 Notifications
 
