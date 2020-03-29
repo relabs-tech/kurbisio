@@ -41,13 +41,12 @@ import (
 
 // Backend is the generic rest backend
 type Backend struct {
-	config             backendConfiguration
-	schema             string
-	notifier           core.Notifier
-	db                 *sql.DB
-	router             *mux.Router
-	scanValueFunctions map[string]func(*int) ([]interface{}, map[string]interface{})
-	readQuery          map[string]string
+	config           backendConfiguration
+	schema           string
+	notifier         core.Notifier
+	db               *sql.DB
+	router           *mux.Router
+	collectionHelper map[string]*collectionHelper
 	// Registry is the JSON object registry for this backend's schema
 	Registry *registry.Registry
 }
@@ -96,19 +95,30 @@ func MustNew(bb *Builder) *Backend {
 	}
 
 	b := &Backend{
-		schema:             schema,
-		config:             config,
-		notifier:           bb.Notifier,
-		db:                 bb.DB,
-		router:             bb.Router,
-		readQuery:          make(map[string]string),
-		scanValueFunctions: make(map[string]func(*int) ([]interface{}, map[string]interface{})),
-		Registry:           registry.MustNew(bb.DB, schema),
+		schema:           schema,
+		config:           config,
+		notifier:         bb.Notifier,
+		db:               bb.DB,
+		router:           bb.Router,
+		collectionHelper: make(map[string]*collectionHelper),
+		Registry:         registry.MustNew(bb.DB, schema),
 	}
 
 	access.HandleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
 	return b
+}
+
+type relationInjection struct {
+	subquery        string
+	columns         []string
+	queryParameters []interface{}
+}
+
+type collectionHelper struct {
+	createScanValuesAndObject func(*int) ([]interface{}, map[string]interface{})
+	getAll                    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	readQuery                 string
 }
 
 // backendConfiguration holds a complete backend configuration
@@ -161,6 +171,19 @@ func compareString(s []string) string {
 			result += " AND "
 		}
 		result += s[i] + " = $" + strconv.Itoa(i+1)
+	}
+	return result
+}
+
+// returns s[0]=$(offset+1) AND ... AND s[n-1]=$(offset+n)
+func compareStringWithOffset(offset int, s []string) string {
+	result := ""
+	i := 0
+	for ; i < len(s); i++ {
+		if i > 0 {
+			result += " AND "
+		}
+		result += s[i] + " = $" + strconv.Itoa(i+offset+1)
 	}
 	return result
 }
@@ -261,7 +284,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
 
-	readQueryWithPagination := "SELECT " + strings.Join(columns, ", ") +
+	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
@@ -273,14 +296,11 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
 	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+4, propertiesIndex+5)
-	sqlWhereAll += sqlPagination
-	sqlWhereAllPlusOneExternalIndex += sqlPagination
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns[1:], ", ") + ", created_at)"
 	insertQuery += "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id;"
-
 	createScanValuesAndObject := func(totalCount *int) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
@@ -304,9 +324,133 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		return values, object
 	}
 
-	// store scan values function and read query for later use in relations
-	b.scanValueFunctions[this] = createScanValuesAndObject
-	b.readQuery[this] = readQuery
+	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		var queryParameters []interface{}
+		var sqlQuery string
+		limit := 100
+		page := 1
+		before := time.Time{}
+		after := time.Time{}
+		externalColumn := ""
+		externalIndex := ""
+
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			if len(array) > 1 {
+				http.Error(w, "illegal paramter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+			switch key {
+			case "limit":
+				limit, err = strconv.Atoi(value)
+				if err == nil && (limit < 1 || limit > 100) {
+					err = fmt.Errorf("out of range")
+				}
+			case "page":
+				page, err = strconv.Atoi(value)
+				if err == nil && page < 1 {
+					err = fmt.Errorf("out of range")
+				}
+			case "before":
+				before, err = time.Parse(time.RFC3339, value)
+			case "after":
+				after, err = time.Parse(time.RFC3339, value)
+			default:
+				found := false
+				for i := propertiesEndIndex; i < len(columns); i++ {
+					if key == columns[i] {
+						if found {
+							err = fmt.Errorf("only one external index allowed")
+							break
+						}
+						externalIndex = value
+						externalColumn = columns[i]
+						found = true
+					}
+				}
+				if !found {
+					err = fmt.Errorf("unknown query parameter")
+				}
+			}
+
+			if err != nil {
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		params := mux.Vars(r)
+		if externalIndex == "" { // get entire collection
+			sqlQuery = readQueryWithTotal + sqlWhereAll
+			queryParameters = make([]interface{}, propertiesIndex-1+6)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+		} else {
+			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
+			queryParameters = make([]interface{}, propertiesIndex+6)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+			queryParameters[propertiesIndex-1+6] = externalIndex
+		}
+
+		// add before and after and pagination
+		queryParameters[propertiesIndex-1+0] = before.IsZero()
+		queryParameters[propertiesIndex-1+1] = before.UTC()
+		queryParameters[propertiesIndex-1+2] = after.IsZero()
+		queryParameters[propertiesIndex-1+3] = after.UTC()
+		queryParameters[propertiesIndex-1+4] = limit
+		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+
+		if relation != nil {
+			// ingest subquery for relation
+			sqlQuery += fmt.Sprintf(relation.subquery,
+				compareStringWithOffset(len(queryParameters), relation.columns))
+			queryParameters = append(queryParameters, relation.queryParameters...)
+		}
+
+		sqlQuery += sqlPagination
+
+		log.Println("QUERY", sqlQuery)
+		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		if err != nil {
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		response := []interface{}{}
+		defer rows.Close()
+		var totalCount int
+		for rows.Next() {
+			values, object := createScanValuesAndObject(&totalCount)
+			err := rows.Scan(values...)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			response = append(response, object)
+		}
+
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
+		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+		w.Header().Set("Pagination-Page-Count", strconv.Itoa(totalCount/limit))
+		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+		w.Write(jsonData)
+
+	}
+
+	collection := collectionHelper{
+		readQuery:                 readQuery,
+		createScanValuesAndObject: createScanValuesAndObject,
+		getAll:                    getAll,
+	}
+
+	// store the collection helper for later usage in relations
+	b.collectionHelper[this] = &collection
 
 	// POST
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -532,10 +676,18 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			return
 		}
 
-		status, err := b.maybeAddChildrenToGetResponse(r, response)
-		if err != nil {
-			http.Error(w, err.Error(), status)
-			return
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			switch key {
+			case "children":
+				status, err := b.addChildrenToGetResponse(array, r, response)
+				if err != nil {
+					http.Error(w, err.Error(), status)
+					return
+				}
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+			}
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
@@ -547,112 +699,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	// GET all
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-
-		var queryParameters []interface{}
-		var sqlQuery string
-		limit := 100
-		page := 1
-		before := time.Time{}
-		after := time.Time{}
-		externalColumn := ""
-		externalIndex := ""
-
-		urlQuery := r.URL.Query()
-		for key, array := range urlQuery {
-			if len(array) > 1 {
-				http.Error(w, "illegal paramter array '"+key+"'", http.StatusBadRequest)
-				return
-			}
-			value := array[0]
-			switch key {
-			case "limit":
-				limit, err = strconv.Atoi(value)
-				if err == nil && (limit < 1 || limit > 100) {
-					err = fmt.Errorf("out of range")
-				}
-			case "page":
-				page, err = strconv.Atoi(value)
-				if err == nil && page < 1 {
-					err = fmt.Errorf("out of range")
-				}
-			case "before":
-				before, err = time.Parse(time.RFC3339, value)
-			case "after":
-				after, err = time.Parse(time.RFC3339, value)
-			default:
-				found := false
-				for i := propertiesEndIndex; i < len(columns); i++ {
-					if key == columns[i] {
-						if found {
-							err = fmt.Errorf("only one external index allowed")
-							break
-						}
-						externalIndex = value
-						externalColumn = columns[i]
-					}
-				}
-				if !found {
-					err = fmt.Errorf("uknown query parameter")
-				}
-			}
-
-			if err != nil {
-				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
-				return
-			}
-		}
-		params := mux.Vars(r)
-		if externalIndex == "" { // get entire collection
-			sqlQuery = readQueryWithPagination + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+6)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
-		} else {
-			sqlQuery = fmt.Sprintf(readQueryWithPagination+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex+6)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
-			queryParameters[propertiesIndex-1+6] = externalIndex
-		}
-
-		// add before and after and pagination
-		queryParameters[propertiesIndex-1+0] = before.IsZero()
-		queryParameters[propertiesIndex-1+1] = before.UTC()
-		queryParameters[propertiesIndex-1+2] = after.IsZero()
-		queryParameters[propertiesIndex-1+3] = after.UTC()
-		queryParameters[propertiesIndex-1+4] = limit
-		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
-
-		log.Println("QUERY", sqlQuery)
-		rows, err := b.db.Query(sqlQuery, queryParameters...)
-		if err != nil {
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-		response := []interface{}{}
-		defer rows.Close()
-		var totalCount int
-		for rows.Next() {
-			values, object := createScanValuesAndObject(&totalCount)
-			err := rows.Scan(values...)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			response = append(response, object)
-		}
-
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
-		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
-		w.Header().Set("Pagination-Page-Count", strconv.Itoa(totalCount/limit))
-		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
-		w.Write(jsonData)
+		getAll(w, r, nil)
 	}).Methods(http.MethodGet)
 
 	// DELETE one
@@ -832,8 +879,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	insertQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
 	insertQuery += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
-	createScanValuesAndObject := func(totalCount *int) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+2)
+	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+1)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -848,16 +895,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		}
 		values[len(columns)] = &time.Time{}
 		object["created_at"] = values[len(columns)]
-		if totalCount == nil {
-			return values[:len(columns)+1], object
-		}
-		values[len(columns)+1] = totalCount
 		return values, object
 	}
-
-	// store scan values function and read query for later use in relations
-	b.scanValueFunctions[this] = createScanValuesAndObject
-	b.readQuery[this] = readQuery
 
 	// PUT single
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -931,7 +970,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject(nil)
+		values, response := createScanValuesAndObject()
 		err = b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -970,7 +1009,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject(nil)
+		values, response := createScanValuesAndObject()
 		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			// not an error, single resource are always conceptually there
@@ -982,10 +1021,18 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 			return
 		}
 
-		status, err := b.maybeAddChildrenToGetResponse(r, response)
-		if err != nil {
-			http.Error(w, err.Error(), status)
-			return
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			switch key {
+			case "children":
+				status, err := b.addChildrenToGetResponse(array, r, response)
+				if err != nil {
+					http.Error(w, err.Error(), status)
+					return
+				}
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1050,24 +1097,22 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 	}
 }
 
-func (b *Backend) maybeAddChildrenToGetResponse(r *http.Request, response map[string]interface{}) (int, error) {
-	if children, ok := r.URL.Query()["children"]; ok {
-		var all []string
-		for _, child := range children {
-			all = append(all, strings.Split(child, ",")...)
+func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {
+	var all []string
+	for _, child := range children {
+		all = append(all, strings.Split(child, ",")...)
+	}
+	client := client.New(b.router).WithContext(r.Context())
+	for _, child := range all {
+		if strings.ContainsRune(child, '/') {
+			return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
 		}
-		client := client.New(b.router).WithContext(r.Context())
-		for _, child := range all {
-			if strings.ContainsRune(child, '/') {
-				return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
-			}
-			var childJSON interface{}
-			status, err := client.Get(r.URL.Path+"/"+child, &childJSON)
-			if err != nil {
-				return status, err
-			}
-			response[child] = &childJSON
+		var childJSON interface{}
+		status, err := client.Get(r.URL.Path+"/"+child, &childJSON)
+		if err != nil {
+			return status, err
 		}
+		response[child] = &childJSON
 	}
 	return http.StatusOK, nil
 }
@@ -1130,10 +1175,9 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		panic(err)
 	}
 
-	readQuery := b.readQuery[this]
-	createScanValuesAndObject := b.scanValueFunctions[this]
+	collection := b.collectionHelper[this]
 
-	sqlWhereAll := fmt.Sprintf("WHERE %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %s);", this, this, schema, resource, compareString(resourceColumns[:len(resourceColumns)-1]))
+	sqlInjectRelation := fmt.Sprintf("AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", this, this, schema, resource)
 	sqlWhereOne := fmt.Sprintf("WHERE %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %s);", this, this, schema, resource, compareString(resourceColumns))
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareString(resourceColumns))
@@ -1148,7 +1192,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
-	// GET all nase
+	// GET all
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
@@ -1157,28 +1201,13 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 		for i := 0; i < len(resourceColumns)-1; i++ { // skip ID
 			queryParameters[i] = params[resourceColumns[i]]
 		}
-
-		rows, err := b.db.Query(readQuery+sqlWhereAll, queryParameters...)
-		if err != nil {
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest) // TODO when is this StatusInternalServerError?
-				return
-			}
-		}
-		response := []interface{}{}
-		defer rows.Close()
-		for rows.Next() {
-			values, object := createScanValuesAndObject(nil)
-			err := rows.Scan(values...)
-			if err != nil {
-				log.Println("error when scanning: ", err.Error())
-			}
-			response = append(response, object)
+		injectRelation := &relationInjection{
+			subquery:        sqlInjectRelation,
+			columns:         resourceColumns[:len(resourceColumns)-1],
+			queryParameters: queryParameters,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		w.Write(jsonData)
+		collection.getAll(w, r, injectRelation)
 	}).Methods(http.MethodGet)
 
 	// GET one
@@ -1191,8 +1220,8 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 			queryParameters[i] = params[resourceColumns[i]]
 		}
 
-		values, response := createScanValuesAndObject(nil)
-		err := b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		values, response := collection.createScanValuesAndObject(nil)
+		err := b.db.QueryRow(collection.readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
