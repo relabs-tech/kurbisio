@@ -24,7 +24,10 @@ type JwtMiddlewareBuilder struct {
 }
 
 // MustNewJwtMiddelware returns a middleware handler to validate
-// jwt bearer token.
+// JWT bearer token.
+//
+// Java-Web-Token (JWT) are accepted as "Authorization: Bearer"
+// header or as "Kurbisio-JWT"-cookie.
 //
 // This is a final handler. It will return http.StatusUnauthorized
 // errors if the caller cannot be authorized
@@ -85,12 +88,19 @@ func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				return
 			}
 
+			tokenString := ""
 			bearer := r.Header.Get("Authorization")
-			if len(bearer) < 8 || strings.ToLower(bearer[:7]) != "bearer " {
+			if len(bearer) > 0 {
+				if len(bearer) >= 8 && strings.ToLower(bearer[:7]) == "bearer " {
+					tokenString = bearer[7:]
+				}
+			} else if cookie, _ := r.Cookie("Kurbisio-JWT"); cookie != nil {
+				tokenString = cookie.Value
+			}
+			if len(tokenString) == 0 {
 				http.Error(w, "bearer token missing", http.StatusUnauthorized)
 				return
 			}
-			tokenString := bearer[7:]
 
 			claims := struct {
 				EMail string `json:"email"`

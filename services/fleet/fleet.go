@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 
+	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/backend"
 	"github.com/relabs-tech/backends/iot/credentials"
 	"github.com/relabs-tech/backends/iot/mqtt"
@@ -108,6 +109,8 @@ func main() {
 		CACertFile: "ca.crt",
 		CAKeyFile:  "ca.key",
 	})
+
+	router.Use(access.NewAdminBackdoorMiddelware())
 
 	log.Println("listen on port :3000")
 	go http.ListenAndServe(":3000", router)

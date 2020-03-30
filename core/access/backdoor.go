@@ -10,7 +10,8 @@ import (
 //
 // The admin backdoor authorizes request with the role "admin" based on a
 // authorization bearer token consisting of the single magic word "please".
-// With curl, use -H 'Authorization: Bearer please'
+// With curl, use -H 'Authorization: Bearer please' or pass a cookie with
+// -b 'Kurbisio-JWT=please'
 func NewAdminBackdoorMiddelware() mux.MiddlewareFunc {
 
 	return func(h http.Handler) http.Handler {
@@ -21,7 +22,9 @@ func NewAdminBackdoorMiddelware() mux.MiddlewareFunc {
 				return
 			}
 
-			if token := r.Header.Get("Authorization"); token == "Bearer please" {
+			token := r.Header.Get("Authorization")
+			cookie, _ := r.Cookie("Kurbisio-JWT")
+			if token == "Bearer please" || (cookie != nil && cookie.Value == "please") {
 				auth := Authorization{
 					Roles: []string{"admin"},
 				}

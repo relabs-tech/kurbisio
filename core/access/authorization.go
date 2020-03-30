@@ -37,8 +37,10 @@ and retrieved with
 
 Authorization objects are added to the context by by different middleware
 implementations, depending on authorization tokens in the HTTP request.
-Kurbisio supports jwt bearer token as well as Kurbisio-Device-Token,
+Kurbisio supports JWT bearer token, Kurbisio-Device-Token,
 Kurbisio-Machine-Token and a pair of Kurbisio-Thing-Key/Kurbisio-Thing-Identifier.
+
+For the benefit of simple frontend development, it also supports a Kurbisio-JWT cookie.
 
 */
 type Authorization struct {
@@ -141,11 +143,11 @@ func HandleAuthorizationRoute(router *mux.Router) {
 	log.Println("  handle route: /authorization GET")
 	router.HandleFunc("/authorization", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		response := AuthorizationFromContext(r.Context())
-		if response == nil {
+		auth := AuthorizationFromContext(r.Context())
+		if auth == nil {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
-			jsonData, _ := json.MarshalIndent(response, "", " ")
+			jsonData, _ := json.MarshalIndent(auth, "", " ")
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(jsonData)
 		}
