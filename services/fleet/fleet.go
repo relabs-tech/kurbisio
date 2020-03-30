@@ -11,7 +11,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/relabs-tech/backends/core/backend"
-	"github.com/relabs-tech/backends/iot/authorization"
+	"github.com/relabs-tech/backends/iot/credentials"
 	"github.com/relabs-tech/backends/iot/mqtt"
 	"github.com/relabs-tech/backends/iot/twin"
 )
@@ -20,8 +20,8 @@ var configurationJSON string = `{
 	"resources": [
 	  {
 		"resource": "device",
-		"external_indices": ["equipment_id"],
-		"static_properties": ["authorization_status"]
+		"external_indices": ["thing"],
+		"static_properties": ["provisioning_status"]
 	  },
 	  {
 		"resource": "device/data"
@@ -78,6 +78,7 @@ func main() {
 
 	schema := "fleet"
 	router := mux.NewRouter()
+
 	backend.MustNew(&backend.Builder{
 		Config: configurationJSON,
 		Schema: schema,
@@ -100,7 +101,7 @@ func main() {
 		Router:    router,
 	})
 
-	authorization.MustNewAPI(&authorization.APIBuilder{
+	credentials.MustNewAPI(&credentials.Builder{
 		Schema:     schema,
 		DB:         db,
 		Router:     router,

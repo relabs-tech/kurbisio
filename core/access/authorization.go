@@ -22,10 +22,10 @@ const (
 )
 
 /*Authorization is a context object which stores authorization information
-for the user who is currently logged in.
+for user, things, or machines.
 
-An authorization carries a list or roles and various identifiers corresponding to
-resources in the backend configuration.
+An authorization carries a list or roles and identifiers of resources from the
+backend configuration. It can also carry additional properties.
 
 Authorizations are added to a request context with
 
@@ -35,13 +35,16 @@ and retrieved with
 
   auth := AuthorizationFromContext(ctx)
 
-The backend uses the authorization object for role based access control.
-It is added to the context by a middleware based on the passed authroization
-bearer token.
+Authorization objects are added to the context by by different middleware
+implementations, depending on authorization tokens in the HTTP request.
+Kurbisio supports jwt bearer token as well as Kurbisio-Device-Token,
+Kurbisio-Machine-Token and a pair of Kurbisio-Thing-Key/Kurbisio-Thing-Identifier.
+
 */
 type Authorization struct {
-	Roles     []string             `json:"roles"`
-	Resources map[string]uuid.UUID `json:"resources"`
+	Roles      []string             `json:"roles"`
+	Resources  map[string]uuid.UUID `json:"resources,omitempty"`
+	Properties map[string]string    `json:"properties,omitempty"`
 }
 
 // HasRole returns true if the authorization contains the requested role;
@@ -65,6 +68,16 @@ func (a *Authorization) Identifier(resource string) (uuid.UUID, bool) {
 		return uuid.UUID{}, false
 	}
 	value, ok := a.Resources[resource]
+	return value, ok
+}
+
+// Property returns the value for the requested property; if the
+// identifier does not exist, it returns an empty uuid and false.
+func (a *Authorization) Property(name string) (string, bool) {
+	if a == nil || a.Properties == nil {
+		return "", false
+	}
+	value, ok := a.Properties[name]
 	return value, ok
 }
 

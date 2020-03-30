@@ -1,4 +1,4 @@
-package authorization
+package credentials
 
 import (
 	"bytes"
@@ -22,16 +22,16 @@ import (
 	"github.com/relabs-tech/backends/core/access"
 )
 
-// API is the IoT appliance RESTful interface for device authorization
+// API is the IoT appliance RESTful interface for providing device credentials to things
 type API struct {
-	schema               string
-	db                   *sql.DB
-	kurbisioEquipmentKey string
+	schema           string
+	db               *sql.DB
+	kurbisioThingKey string
 }
 
-// APIBuilder is a builder helper for the API
-type APIBuilder struct {
-	// Schema is optional. When set, the backend uses the data schema name for
+// Builder is a builder helper for the API
+type Builder struct {
+	// Schema is optional. When set, the API uses the data schema name for
 	// generated sql relations. The default schema is "public"
 	Schema string
 	// DB is a postgres database. This is mandatory.
@@ -44,25 +44,24 @@ type APIBuilder struct {
 	// CAKeyFile is the file path to the X509 private key of the certificate authority.
 	// This is mandatory
 	CAKeyFile string
-	// KurbisioEquipmentKey is a key used as shared secret for initial
-	// equipment authorization. The default is "secret"
-	KurbisioEquipmentKey string
+	// KurbisioThingKey is a key used as shared secret for thing authentication.
+	// The default is "secret"
+	KurbisioThingKey string
 }
 
-// MustNewAPI realizes the actual API. It creates the sql relations for the device twin
-// (if they do not exist) and adds actual routes to router.
-//
-// It also installs a middleware on the router to add equipment authorizations.
-func MustNewAPI(b *APIBuilder) *API {
+// MustNewAPI realizes the credentials service. It creates the sql relations for the device twin
+// (if they do not exist) and adds the /credentials route to the router.
+// It also installs thing authorization middleware on the router.
+func MustNewAPI(b *Builder) *API {
 
 	schema := b.Schema
 	if len(schema) == 0 {
 		schema = "public"
 	}
 
-	kurbisioEquipmentKey := b.KurbisioEquipmentKey
-	if len(kurbisioEquipmentKey) == 0 {
-		kurbisioEquipmentKey = "secret"
+	kurbisioThingKey := b.KurbisioThingKey
+	if len(kurbisioThingKey) == 0 {
+		kurbisioThingKey = "secret"
 	}
 
 	if b.DB == nil {
@@ -74,9 +73,9 @@ func MustNewAPI(b *APIBuilder) *API {
 	}
 
 	s := &API{
-		schema:               schema,
-		db:                   b.DB,
-		kurbisioEquipmentKey: kurbisioEquipmentKey,
+		schema:           schema,
+		db:               b.DB,
+		kurbisioThingKey: kurbisioThingKey,
 	}
 
 	if len(b.CACertFile) == 0 {
@@ -94,6 +93,9 @@ func MustNewAPI(b *APIBuilder) *API {
 }
 
 func (a *API) addMiddleware(router *mux.Router) {
+	authCache := access.NewAuthorizationCache()
+	authQuery := fmt.Sprintf("SELECT device_id FROM %s.device WHERE token=$1;", a.schema)
+
 	router.Use(
 		func(h http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,11 +105,39 @@ func (a *API) addMiddleware(router *mux.Router) {
 					return
 				}
 
-				key := r.Header.Get("Kurbisio-Equipment-Key")
-				if key == a.kurbisioEquipmentKey {
+				key := r.Header.Get("Kurbisio-Thing-Key")
+				thing := r.Header.Get("Kurbisio-Thing-Identifier")
+				if key == a.kurbisioThingKey && len(thing) > 0 {
 					auth := access.Authorization{
-						Roles: []string{"equipment"},
+						Properties: map[string]string{"thing": thing},
+						Roles:      []string{"thing"},
 					}
+					ctx := auth.ContextWithAuthorization(r.Context())
+					r = r.WithContext(ctx)
+				}
+
+				token := r.Header.Get("Kurbisio-Device-Token")
+				if len(token) > 0 {
+					auth = authCache.Read(token)
+					if auth == nil {
+						var deviceID uuid.UUID
+						err := a.db.QueryRow(authQuery, token).Scan(&deviceID)
+
+						if err == sql.ErrNoRows {
+							http.Error(w, "invalid device token", http.StatusUnauthorized)
+							return
+						}
+
+						if err != nil {
+							http.Error(w, err.Error(), http.StatusInternalServerError)
+							return
+						}
+						auth = &access.Authorization{
+							Roles:     []string{"device"},
+							Resources: map[string]uuid.UUID{"device_id": deviceID},
+						}
+					}
+
 					ctx := auth.ContextWithAuthorization(r.Context())
 					r = r.WithContext(ctx)
 				}
@@ -118,7 +148,7 @@ func (a *API) addMiddleware(router *mux.Router) {
 }
 
 func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
-	log.Println("device authorization: handle route /device-authorizations/{equipment_id} GET")
+	log.Println("device credentials: handle route /credentials GET")
 
 	caCertData, err := ioutil.ReadFile(caCertFile)
 	if err != nil {
@@ -139,21 +169,25 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 		panic(err)
 	}
 
-	router.HandleFunc("/device-authorizations/{equipment_id}",
+	router.HandleFunc("/credentials",
 		func(w http.ResponseWriter, r *http.Request) {
-			params := mux.Vars(r)
-			equipmentID := params["equipment_id"]
-			log.Println("authorization request of", equipmentID)
+			auth := access.AuthorizationFromContext(r.Context())
+			if auth == nil || !auth.HasRole("thing") {
+				http.Error(w, "thing not authorized", http.StatusUnauthorized)
+				return
+			}
+			thing, _ := auth.Property("thing")
+			log.Println("credential request from", thing)
 
-			var deviceID uuid.UUID
-			var authorizationStatus string
+			var deviceID, token uuid.UUID
+			var provisioningStatus string
 			err := a.db.QueryRow(
-				`SELECT device_id, authorization_status FROM `+a.schema+`.device 
-WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDER BY authorization_status;`,
-				equipmentID).Scan(&deviceID, &authorizationStatus)
+				`SELECT device_id, provisioning_status, token FROM `+
+					a.schema+`.device WHERE thing=$1 AND provisioning_status IN ('waiting', 'provisioned');`,
+				thing).Scan(&deviceID, &provisioningStatus, &token)
 
 			if err == sql.ErrNoRows {
-				http.Error(w, "device not registered or not waiting for authorization", http.StatusBadRequest)
+				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 
@@ -162,26 +196,20 @@ WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDE
 				return
 			}
 
-			if authorizationStatus == "authorized" {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(
-					struct {
-						DeviceID uuid.UUID `json:"device_id"`
-					}{
-						DeviceID: deviceID,
-					})
+			if provisioningStatus == "provisioned" {
+				// all good, but credentials can only be downloaded once
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 
-			// authorization status is waiting, we generate a new certificate and set the status to authorized
-
+			// provisioning status is 'waiting'. Hence we generate a new certificate and set the status to 'provisioned'
 			cert := &x509.Certificate{
 				SerialNumber: big.NewInt(1658),
 				Subject: pkix.Name{
 					CommonName: deviceID.String(),
 				},
 				NotBefore:    time.Now(),
-				NotAfter:     time.Now().AddDate(1, 0, 0), // one year later. TODO, why not quicker? Or longer?
+				NotAfter:     time.Now().AddDate(99, 0, 0), // ninety-nine years later
 				SubjectKeyId: []byte{1, 2, 3, 4, 6},
 				ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 				KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -211,7 +239,7 @@ WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDE
 				Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
 			})
 
-			query := fmt.Sprintf("UPDATE %s.device SET authorization_status='authorized' WHERE device_id=$1", a.schema)
+			query := fmt.Sprintf("UPDATE %s.device SET provisioning_status='provisioned' WHERE device_id=$1", a.schema)
 			res, err := a.db.Exec(query, deviceID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -228,19 +256,18 @@ WHERE equipment_id=$1 AND authorization_status IN ('waiting', 'authorized') ORDE
 				return
 			}
 
-			// TODO: generate machine token for the device_id
-
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(
 				struct {
 					DeviceID    uuid.UUID `json:"device_id"`
 					Certificate string    `json:"cert"`
 					Key         string    `json:"key"`
-					Token       string    `json:"token"`
+					Token       uuid.UUID `json:"token"`
 				}{
 					DeviceID:    deviceID,
 					Certificate: certPEM.String(),
 					Key:         certPrivKeyPEM.String(),
+					Token:       token,
 				})
 
 		}).Methods(http.MethodGet)

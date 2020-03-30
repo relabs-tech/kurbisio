@@ -17,7 +17,7 @@ var configurationJSON string = `
 	"resources": [
 	  {
 		"resource": "user",
-		"external_unique_indices": ["email"]
+		"external_indices": ["identity"]
 	  },
 	  {
 		"resource": "user/profile",
@@ -25,7 +25,7 @@ var configurationJSON string = `
 	  },
 	  {
 		"resource": "device",
-		"external_indices": ["equipment_id"]
+		"external_indices": ["thing"]
 	  }
 	],
 	"relations": [

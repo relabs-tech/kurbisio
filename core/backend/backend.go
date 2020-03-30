@@ -264,6 +264,12 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		columns = append(columns, index)
 	}
 
+	// the "device" ollection gets an additional column for the web token
+	if this == "device" {
+		createColumn := "token uuid NOT NULL DEFAULT uuid_generate_v4()"
+		createColumns = append(createColumns, createColumn)
+	}
+
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createExternalIndicesQuery
 
 	_, err := b.db.Query(createQuery)

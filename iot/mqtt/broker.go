@@ -37,12 +37,12 @@ type Builder struct {
 	// Schema is optional. When set, the backend uses the data schema name for
 	// generated sql relations. The default schema is "public"	Schema   string
 	Schema string
-	// CACertFile is the file path to the X509 certificate of the certificate authority.
+	// CACertFile is the file path to the X.509 certificate of the certificate authority.
 	// This is mandatory
 	CACertFile string
-	// CertFile is the file path to the X509 certificate file. This is mandatory.
+	// CertFile is the file path to the X.509 certificate file. This is mandatory.
 	CertFile string
-	// KeyFile is the file path to the X509 private key file. This is mandatory.
+	// KeyFile is the file path to the X.509 private key file. This is mandatory.
 	KeyFile string
 }
 
@@ -252,7 +252,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				_, err := p.db.Query(
 					`INSERT INTO `+p.schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 					VALUES($1,$2,$3,$4,$5,$6)
-					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE twin.report::jsonb<>$4::jsonb;
+					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE "_twin_".report::jsonb<>$4::jsonb;
 					`, deviceID, key, "{}", string(body), never, now)
 				if err != nil {
 					log.Println(err)
@@ -273,7 +273,6 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 					if err != nil && err != sql.ErrNoRows {
 						log.Println(err)
 					} else {
-						log.Println("send twin request for", deviceID, key)
 						msg := gmqtt.NewMessage("kurbisio/"+deviceID+"/twin/requests/"+key, payload, packets.QOS_0)
 						p.service.PublishService().Publish(msg)
 					}

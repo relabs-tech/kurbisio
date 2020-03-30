@@ -20,7 +20,7 @@ Example:
 	  },
 	  {
 		"resource": "device",
-		"external_indices": ["equipment_id"]
+		"external_indices": ["thing"]
 	  }
 	],
 	"relations": [
@@ -81,7 +81,7 @@ The models look like this:
 	{
 		"device_id": UUID,
 		"properties":  JSON
-		"equipment_id": STRING
+		"thing": STRING
 		"created_at": TIMESTAMP
 	}
 
@@ -98,11 +98,11 @@ We can now create a user with a simple POST:
   }
 
 We can create a device:
-  curl http://localhost:3000/devices -d'{"equipment_id":"12345"}'
+  curl http://localhost:3000/devices -d'{"thing":"12345"}'
   {
  	"created_at": "2020-03-23T16:07:23.57638Z",
 	"device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-	"equipment_id": "12345",
+	"thing": "12345",
  	"properties": {}
   }
 
@@ -116,7 +116,7 @@ Now we can query the devices of this specific user:
  	{
 	  "created_at": "2020-03-23T16:07:23.57638Z",
 	  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-	  "equipment_id": "12345",
+	  "thing": "12345",
 	  "properties": {}
 	 }
   ]
@@ -194,7 +194,7 @@ The GET request on collections can be customized with any of the external indice
 the resource "user" has an external index "identity", hence we can query all users for a specific email with
 	GET /users?identity=test@test.com
 
-The system supports pagination and filtering of responses by creation time
+The system supports pagination and filtering of responses by creation time.
 	  ?limit=n  sets a page limit of n items
 	  ?page=n   selects page number n
 	  ?before=t selects items created before timestamp t
@@ -206,7 +206,9 @@ The response carries the following custom headers for pagination:
 	  "Pagination-Page-Count"   the total number of pages in the collection
 	  "Pagination-Current-Page" the currently selected page
 
-The maximum allowed limit is 100, which is also the default limit.
+The maximum allowed limit is 100, which is also the default limit. Combining pagination with the "before" filter
+avoids page drift.
+
 Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
 if the requested page is out of range.
 

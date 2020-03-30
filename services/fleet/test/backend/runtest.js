@@ -10,14 +10,14 @@ var http = require('http'),
    minimist = require('minimist'),
    fs = require('fs');
 
-function genericPost(path, object, next) {
+function genericRequest(method, path, object, next) {
    const data = JSON.stringify(object)
 
    var opts = {
       host: 'localhost',
       port: 3000,
       path: path,
-      method: 'POST',
+      method: method,
       body: data,
 
       headers: {
@@ -36,8 +36,12 @@ function genericPost(path, object, next) {
       // The whole response has been received. 
       res.on('end', () => {
          console.log("status code:", res.statusCode)
-         let response = JSON.parse(data)
-         next(response)
+         if (res.statusCode == 204) {
+            next({})
+         } else {
+            let response = JSON.parse(data)
+            next(response)
+         }
       });
 
    })
@@ -48,6 +52,14 @@ function genericPost(path, object, next) {
    req.write(data)
    req.end();
 
+}
+
+function genericPost(path, object, next) {
+   genericRequest('POST', path, object, next)
+}
+
+function genericPut(path, object, next) {
+   genericRequest('PUT', path, object, next)
 }
 
 function emptyPut(path, next) {
@@ -107,8 +119,8 @@ function createDevice(next) {
    console.log("create device")
    genericPost("/devices",
       {
-         equipment_id: "Device1",
-         authorization_status: "waiting",
+         thing: "Device1",
+         provisioning_status: "waiting",
          properties: {
             name: "The First Device",
          }
@@ -145,13 +157,26 @@ function assignDeviceToFleet(next) {
       })
 }
 
+function requestDeviceConfiguration(next) {
+   console.log("request device configuration through twin")
+   genericPut("/devices/" + device_id + "/twin/configuration/request",
+      {
+         "version": "4.0"
+      },
+      function (response) {
+         next()
+      })
+}
+
 
 // and now for something completely different: callback hell
 createFleet(
    () => createDevice(
       () => createUser(
          () => assignDeviceToFleet(
-            () => { console.log("done!") }
+            () => requestDeviceConfiguration(
+               () => { console.log("done!") }
+            )
          )
       )
    )
