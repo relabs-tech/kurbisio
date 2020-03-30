@@ -558,13 +558,13 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		sets := make([]string, len(columns))
 		values := make([]interface{}, len(columns)+propertiesIndex+1)
 
-		// minor trick. We add the primary id form the json to the parameters. This is because the route does
-		// not contain the primary ID for convenience
 		value, ok := bodyJSON[columns[0]]
 		if !ok {
 			http.Error(w, "missing "+columns[0], http.StatusBadRequest)
 			return
 		}
+		// To simplify the code logic below, we add the primary id from the body json to the URL parameters.
+		// This is because the PUT-route does not contain the primary ID for convenience
 		params[columns[0]] = value.(string)
 
 		// first add the values for the where-query.
@@ -1012,7 +1012,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		values, response := createScanValuesAndObject()
 		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
-			// not an error, single resource are always conceptually there
+			// not an error, single resource do always exist conceptually
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
