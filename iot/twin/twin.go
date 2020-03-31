@@ -34,9 +34,9 @@ type Builder struct {
 	Publisher iot.MessagePublisher
 }
 
-// MustNewAPI realizes the actual API. It creates the sql relations for the device twin
+// NewAPI realizes the actual API. It creates the sql relations for the device twin
 // (if they do not exist) and adds actual routes to router
-func MustNewAPI(b *Builder) *API {
+func NewAPI(b *Builder) *API {
 
 	schema := b.Schema
 	if len(schema) == 0 {
@@ -51,7 +51,7 @@ func MustNewAPI(b *Builder) *API {
 		panic("Router is missing")
 	}
 
-	MustCreateTwinTableIfNotExists(b.DB)
+	CreateTwinTableIfNotExists(b.DB)
 
 	s := &API{
 		schema:    b.Schema,
@@ -277,12 +277,12 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 
 }
 
-// MustCreateTwinTableIfNotExists creates the SQL table for the
+// CreateTwinTableIfNotExists creates the SQL table for the
 // device twin.
 //
 // The function requires that the database manages a resource "device".
 // The twin table is a system table and named "_twin_".
-func MustCreateTwinTableIfNotExists(db *sql.DB) {
+func CreateTwinTableIfNotExists(db *sql.DB) {
 	// poor man's database migrations
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_twin_"
 (device_id uuid references ` + db.Schema + `.device(device_id) ON DELETE CASCADE,

@@ -12,8 +12,8 @@ import (
 	"github.com/relabs-tech/backends/core/sql"
 )
 
-// MustNew creates a new registry for the specified database
-func MustNew(db *sql.DB) *Registry {
+// New creates a new registry for the specified database
+func New(db *sql.DB) *Registry {
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_registry_" 
 (key varchar NOT NULL, 
 value json NOT NULL, 

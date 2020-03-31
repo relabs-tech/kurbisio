@@ -45,9 +45,9 @@ type Builder struct {
 	Notifier core.Notifier
 }
 
-// MustNew realizes the actual backend. It creates the sql relations (if they
+// New realizes the actual backend. It creates the sql relations (if they
 // do not exist) and adds actual routes to router
-func MustNew(bb *Builder) *Backend {
+func New(bb *Builder) *Backend {
 
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(bb.Config), &config)
@@ -70,7 +70,7 @@ func MustNew(bb *Builder) *Backend {
 		schema:           bb.DB.Schema,
 		router:           bb.Router,
 		collectionHelper: make(map[string]*collectionHelper),
-		Registry:         registry.MustNew(bb.DB),
+		Registry:         registry.New(bb.DB),
 	}
 
 	access.HandleAuthorizationRoute(b.router)

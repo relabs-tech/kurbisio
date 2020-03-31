@@ -53,9 +53,9 @@ type plugin struct {
 	db *sql.DB
 }
 
-// MustNewBroker returns a new broker. The broker will not
+// NewBroker returns a new broker. The broker will not
 // actually run until you call Run()
-func MustNewBroker(bb *Builder) *Broker {
+func NewBroker(bb *Builder) *Broker {
 
 	caCertFile := bb.CACertFile
 	if len(caCertFile) == 0 {
@@ -95,7 +95,7 @@ func MustNewBroker(bb *Builder) *Broker {
 		panic(err)
 	}
 
-	twin.MustCreateTwinTableIfNotExists(bb.DB)
+	twin.CreateTwinTableIfNotExists(bb.DB)
 
 	b := &Broker{
 		p: &plugin{

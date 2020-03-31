@@ -51,11 +51,11 @@ func main() {
 		panic(err)
 	}
 
-	db := sql.MustOpenWithSchema(service.Postgres, "basic")
+	db := sql.OpenWithSchema(service.Postgres, "basic")
 	defer db.Close()
 
 	router := mux.NewRouter()
-	backend.MustNew(&backend.Builder{
+	backend.New(&backend.Builder{
 		Config: configurationJSON,
 		DB:     db,
 		Router: router,

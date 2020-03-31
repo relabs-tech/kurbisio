@@ -27,11 +27,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := sql.MustOpenWithSchema(testService.Postgres, "_core_unit_test_")
+	db := sql.OpenWithSchema(testService.Postgres, "_core_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
-	testService.registry = MustNew(db)
+	testService.registry = New(db)
 
 	code := m.Run()
 	os.Exit(code)

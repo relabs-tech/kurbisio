@@ -28,7 +28,7 @@ type JwtMiddlewareBuilder struct {
 	DB *sql.DB
 }
 
-// MustNewJwtMiddelware returns a middleware handler to validate
+// NewJwtMiddelware returns a middleware handler to validate
 // JWT bearer token.
 //
 // Java-Web-Token (JWT) are accepted as "Authorization: Bearer"
@@ -43,9 +43,9 @@ type JwtMiddlewareBuilder struct {
 //
 // This is a final handler. It will return http.StatusUnauthorized
 // errors if the caller cannot be authorized
-func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
+func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
-	jwtRegistry := registry.MustNew(jmb.DB).Accessor("_jwt_")
+	jwtRegistry := registry.New(jmb.DB).Accessor("_jwt_")
 	var wellKnownCertificates map[string]string
 	createdAt, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
 	if err != nil {

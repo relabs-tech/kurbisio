@@ -48,10 +48,10 @@ type Builder struct {
 	KurbisioThingKey string
 }
 
-// MustNewAPI realizes the credentials service. It creates the sql relations for the device twin
+// NewAPI realizes the credentials service. It creates the sql relations for the device twin
 // (if they do not exist) and adds the /credentials route to the router.
 // It also installs thing authorization middleware on the router.
-func MustNewAPI(b *Builder) *API {
+func NewAPI(b *Builder) *API {
 
 	schema := b.Schema
 	if len(schema) == 0 {

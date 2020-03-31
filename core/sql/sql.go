@@ -18,10 +18,10 @@ type DB struct {
 // defers this error until a Scan.
 var ErrNoRows = sql.ErrNoRows
 
-// MustOpenWithSchema opens a kurbisio postgres database with a schema.
+// OpenWithSchema opens a kurbisio postgres database with a schema.
 // The schema gets created if it does not exist yet.
 // The returned database also has the uuid-ossp extension loaded.
-func MustOpenWithSchema(dataSourceName, schema string) *DB {
+func OpenWithSchema(dataSourceName, schema string) *DB {
 	log.Println("connecting to postgres database: ", dataSourceName)
 	db, err := sql.Open("postgres", dataSourceName)
 	if err != nil {

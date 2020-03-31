@@ -72,31 +72,31 @@ func main() {
 		panic(err)
 	}
 
-	db := sql.MustOpenWithSchema(service.Postgres, "fleet")
+	db := sql.OpenWithSchema(service.Postgres, "fleet")
 	defer db.Close()
 
 	router := mux.NewRouter()
 
-	backend.MustNew(&backend.Builder{
+	backend.New(&backend.Builder{
 		Config: configurationJSON,
 		DB:     db,
 		Router: router,
 	})
 
-	iotBroker := mqtt.MustNewBroker(&mqtt.Builder{
+	iotBroker := mqtt.NewBroker(&mqtt.Builder{
 		DB:         db,
 		CertFile:   "server.crt",
 		KeyFile:    "server.key",
 		CACertFile: "ca.crt",
 	})
 
-	twin.MustNewAPI(&twin.Builder{
+	twin.NewAPI(&twin.Builder{
 		DB:        db,
 		Publisher: iotBroker,
 		Router:    router,
 	})
 
-	credentials.MustNewAPI(&credentials.Builder{
+	credentials.NewAPI(&credentials.Builder{
 		DB:         db,
 		Router:     router,
 		CACertFile: "ca.crt",
