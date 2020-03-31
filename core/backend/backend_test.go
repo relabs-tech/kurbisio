@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -13,17 +12,19 @@ import (
 	"github.com/relabs-tech/backends/core/access"
 
 	"github.com/relabs-tech/backends/core/client"
+	"github.com/relabs-tech/backends/core/sql"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 )
 
 var configurationJSON string = `{
-	"resources": [
+	"collections": [
 	  {
 		"resource": "a",
-		"external_indices": ["external_id"],
-		"static_properties": ["static_prop"]
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
 	  },
 	  {
 		"resource": "b",
@@ -37,10 +38,11 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "o"
-	  },
+	  }
+	],
+	"singletons": [
 	  {
-		"resource": "o/s",
-		"single": true
+		"resource": "o/s"
 	  }
 	],
 	"relations": [
@@ -64,25 +66,13 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db, err := sql.Open("postgres", testService.Postgres)
-	if err != nil {
-		panic(err)
-	}
-
+	db := sql.MustOpenWithSchema(testService.Postgres, "_core_unit_test_")
 	defer db.Close()
-
-	err = db.Ping()
-	if err != nil {
-		panic(err)
-	}
-
-	schema := "_core_unit_test_"
-	db.Exec("drop schema " + schema + " cascade;")
+	db.ClearSchema()
 
 	router := mux.NewRouter()
 	testService.backend = MustNew(&Builder{
 		Config: configurationJSON,
-		Schema: schema,
 		DB:     db,
 		Router: router,
 	})
@@ -93,10 +83,11 @@ func TestMain(m *testing.M) {
 }
 
 type ANew struct {
-	Properties map[string]string `json:"properties"`
-	ExternalID string            `json:"external_id"`
-	StaticProp string            `json:"static_prop"`
-	CreatedAt  time.Time         `json:"created_at"`
+	Properties     map[string]string `json:"properties"`
+	ExternalID     string            `json:"external_id"`
+	StaticProp     string            `json:"static_prop"`
+	SearchableProp string            `json:"searchable_prop"`
+	CreatedAt      time.Time         `json:"created_at"`
 }
 
 type A struct {
@@ -104,17 +95,18 @@ type A struct {
 	AID uuid.UUID `json:"a_id"`
 }
 
-func TestResourceA(t *testing.T) {
+func TestCollectionA(t *testing.T) {
 
 	someJSON := map[string]string{
 		"foo": "bar",
 	}
 
 	aNew := ANew{
-		Properties: someJSON,
-		ExternalID: "external",
-		StaticProp: "static",
-		CreatedAt:  time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+		Properties:     someJSON,
+		ExternalID:     "external",
+		StaticProp:     "static",
+		SearchableProp: "searchable",
+		CreatedAt:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	a := A{}
@@ -132,6 +124,7 @@ func TestResourceA(t *testing.T) {
 	if asJSON(a.Properties) != asJSON(aNew.Properties) ||
 		a.ExternalID != aNew.ExternalID ||
 		a.StaticProp != aNew.StaticProp ||
+		a.SearchableProp != aNew.SearchableProp ||
 		a.CreatedAt != aNew.CreatedAt {
 		t.Fatal("unexpected result:", asJSON(a), "expected:", asJSON(aNew))
 	}
@@ -304,7 +297,7 @@ type S struct {
 	Properties map[string]string `json:"properties"`
 }
 
-func TestResourceOS(t *testing.T) {
+func TestSingletonOS(t *testing.T) {
 
 	empty := Empty{}
 

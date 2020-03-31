@@ -1,13 +1,13 @@
 package registry
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/joeshaw/envdecode"
+	"github.com/relabs-tech/backends/core/sql"
 
 	_ "github.com/lib/pq"
 )
@@ -27,22 +27,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db, err := sql.Open("postgres", testService.Postgres)
-	if err != nil {
-		panic(err)
-	}
-
+	db := sql.MustOpenWithSchema(testService.Postgres, "_core_unit_test_")
 	defer db.Close()
+	db.ClearSchema()
 
-	err = db.Ping()
-	if err != nil {
-		panic(err)
-	}
-
-	schema := "_core_unit_test_"
-	db.Exec("drop schema " + schema + " cascade;")
-
-	testService.registry = MustNew(db, schema)
+	testService.registry = MustNew(db)
 
 	code := m.Run()
 	os.Exit(code)

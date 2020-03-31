@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -18,8 +17,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq" // for the postgres database
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/sql"
 )
 
 // API is the IoT appliance RESTful interface for providing device credentials to things

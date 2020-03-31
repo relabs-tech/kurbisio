@@ -1,7 +1,6 @@
 package twin
 
 import (
-	"database/sql"
 	"encoding/json"
 	"io/ioutil"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq" // for the postgres database
+	"github.com/relabs-tech/backends/core/sql"
 	"github.com/relabs-tech/backends/iot"
 )
 
@@ -51,7 +51,7 @@ func MustNewAPI(b *Builder) *API {
 		panic("Router is missing")
 	}
 
-	MustCreateTwinTableIfNotExists(b.DB, b.Schema)
+	MustCreateTwinTableIfNotExists(b.DB)
 
 	s := &API{
 		schema:    b.Schema,
@@ -278,18 +278,14 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 }
 
 // MustCreateTwinTableIfNotExists creates the SQL table for the
-// device twin under the requested schema. Use "public" if you do
-// not want a custom schema.
+// device twin.
 //
 // The function requires that the database manages a resource "device".
 // The twin table is a system table and named "_twin_".
-func MustCreateTwinTableIfNotExists(db *sql.DB, schema string) {
+func MustCreateTwinTableIfNotExists(db *sql.DB) {
 	// poor man's database migrations
-	_, err := db.Exec(
-		`CREATE extension IF NOT EXISTS "uuid-ossp";
-CREATE schema IF NOT EXISTS ` + schema + `;
-CREATE table IF NOT EXISTS ` + schema + `."_twin_"
-(device_id uuid references ` + schema + `.device(device_id) ON DELETE CASCADE,
+	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_twin_"
+(device_id uuid references ` + db.Schema + `.device(device_id) ON DELETE CASCADE,
 key varchar NOT NULL,
 request json NOT NULL,
 report json NOT NULL,

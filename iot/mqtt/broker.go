@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -19,10 +18,10 @@ import (
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"
+	"github.com/relabs-tech/backends/core/sql"
 	"github.com/relabs-tech/backends/iot/twin"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq" // for the postgres database
 )
 
 // Broker is a MQTT broker for IoT.
@@ -34,9 +33,6 @@ type Broker struct {
 type Builder struct {
 	// DB is a postgres database. This is mandatory.
 	DB *sql.DB
-	// Schema is optional. When set, the backend uses the data schema name for
-	// generated sql relations. The default schema is "public"	Schema   string
-	Schema string
 	// CACertFile is the file path to the X.509 certificate of the certificate authority.
 	// This is mandatory
 	CACertFile string
@@ -53,7 +49,6 @@ type plugin struct {
 	deviceIds      map[net.Conn]uuid.UUID
 
 	service gmqtt.Server
-	schema  string
 
 	db *sql.DB
 }
@@ -61,10 +56,6 @@ type plugin struct {
 // MustNewBroker returns a new broker. The broker will not
 // actually run until you call Run()
 func MustNewBroker(bb *Builder) *Broker {
-	schema := bb.Schema
-	if len(schema) == 0 {
-		schema = "public"
-	}
 
 	caCertFile := bb.CACertFile
 	if len(caCertFile) == 0 {
@@ -104,14 +95,13 @@ func MustNewBroker(bb *Builder) *Broker {
 		panic(err)
 	}
 
-	twin.MustCreateTwinTableIfNotExists(bb.DB, schema)
+	twin.MustCreateTwinTableIfNotExists(bb.DB)
 
 	b := &Broker{
 		p: &plugin{
 			tlsln:     tlsln,
 			deviceIds: make(map[net.Conn]uuid.UUID),
 			db:        bb.DB,
-			schema:    schema,
 		},
 	}
 
@@ -250,7 +240,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				now := time.Now().UTC()
 				never := time.Time{}
 				_, err := p.db.Query(
-					`INSERT INTO `+p.schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
+					`INSERT INTO `+p.db.Schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 					VALUES($1,$2,$3,$4,$5,$6)
 					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE "_twin_".report::jsonb<>$4::jsonb;
 					`, deviceID, key, "{}", string(body), never, now)
@@ -268,7 +258,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				for _, key := range keys {
 					payload := []byte("{}")
 					err = p.db.QueryRow(
-						`SELECT request FROM `+p.schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
+						`SELECT request FROM `+p.db.Schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
 						deviceID, key).Scan(&payload)
 					if err != nil && err != sql.ErrNoRows {
 						log.Println(err)

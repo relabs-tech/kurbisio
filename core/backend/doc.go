@@ -5,22 +5,24 @@ A backend manages a Postgres-SQL database and provides an auto-generated RESTful
 
 Configuration
 
-The configuration is done entirely via JSON.
+The configuration is done entirely via JSON. It consists of collections, singletons, blobs
+and relations
 
 Example:
   {
-	"resources": [
+	"collections": [
 	  {
 		"resource": "user",
-		"index": ["identity"]
-	  },
-	  {
-		"resource": "user/profile",
-		"single": true
+		"external_index": "identity"
 	  },
 	  {
 		"resource": "device",
-		"external_indices": ["thing"]
+		"external_index": "thing"
+	  }
+	],
+	"singletons": [
+	  {
+		"resource": "user/profile",
 	  }
 	],
 	"relations": [
@@ -31,13 +33,13 @@ Example:
 	]
   }
 
-The example creates one resource "user" with an external unique index "email" and a static property "name".
+The example creates one resource "user" with an external unique index "identity" and a static property "name".
 Typically properties are managed dynamically in an untyped JSON object "properties", but it is possible
 to define a list of static properties, mainly to support simpler SQL queries. In case of doubt, do not define
 static properties, but keep everything relevant in the dynamic JSON object.
 
-A user has a child resource "profile", which is marked single, i.e. any user can only have one single profile.
-Then there is a relation from device to user which creates another child resource "user/device".
+A user has a child resource "user/profile", which is declared as a singleton, i.e. every user can only have one single profile.
+Finally there is a relation from device to user which creates another child resource "user/device".
 
 This configuration creates the following REST routes:
 	GET /users
@@ -65,7 +67,7 @@ The models look like this:
 	{
 		"user_id": UUID,
 		"properties":  JSON
-		"email": STRING
+		"identity": STRING
 		"created_at": TIMESTAMP
 	}
 
@@ -90,7 +92,7 @@ We can now create a user with a simple POST:
   curl http://localhost:3000/users -d'{"email":"test@test.com", "properties":{"name":"Jonathan Test"}}'
   {
 	"created_at": "2020-03-23T16:01:08.138302Z",
- 	"email": "test@test.com",
+ 	"identity": "test@test.com",
  	"properties": {
 	  "name": "Jonathan Test"
  	},
@@ -137,7 +139,7 @@ Logged-In Routes
 In the above example it would also be possible to request "logged_in_routes" for the resource "user":
 
   	...
-	"resources": [
+	"collections": [
 	  {
 		"resource": "user",
 		"logged_in_routes" : true
@@ -169,10 +171,13 @@ of the backend will support JSON schema validation for those objects.
 
 Static Properties
 
-In the example above, we have extended the user and the device resource with external indices. Likewise it is possible to extend
-resource with static string properties, using an array "static_properties". The main purpose of this is to enable easier SQL queries
-against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
+In the example above, we have extended the user and the device collections with an external index. Likewise it is possible to extend
+resource with list of static string properties, using an array "static_properties". The main purpose of this is to enable easier SQL
+queries against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
 of resource should go into the dynamic JSON object for maximum flexibility.
+
+Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a query
+parameter in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
 
 Sorting and Creation Time
 
@@ -190,8 +195,8 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
-The GET request on collections can be customized with any of the external indices. In our example,
-the resource "user" has an external index "identity", hence we can query all users for a specific email with
+The GET request on collections can be customized with any of the searchable properties or an external index.
+In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?identity=test@test.com
 
 The system supports pagination and filtering of responses by creation time.

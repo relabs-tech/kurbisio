@@ -1,42 +1,23 @@
 package backend
 
 import (
-	// "context"
-	// "crypto/tls"
-	// "crypto/x509"
-	// "database/sql"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	// "fmt"
-	"io/ioutil"
-	// "log"
-	// "net"
 	"net/http"
 
-	// _ "net/http/pprof"
-
-	// "os"
-	// "os/signal"
-	// "strings"
-	// "sync"
-	// "syscall"
-	// "time"
-
-	// "github.com/DrmagicE/gmqtt"
-	// "github.com/DrmagicE/gmqtt/pkg/packets"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq" // load database driver for postgres
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/registry"
+	"github.com/relabs-tech/backends/core/sql"
 )
 
 // Backend is the generic rest backend
@@ -57,9 +38,6 @@ type Builder struct {
 	Config string
 	// DB is a postgres database. This is mandatory.
 	DB *sql.DB
-	// Schema is optional. When set, the backend uses the data schema name for
-	// generated sql relations. The default schema is "public"
-	Schema string
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// Notifier inserts a database notifier to the backend. If the configuration requests
@@ -74,11 +52,7 @@ func MustNew(bb *Builder) *Backend {
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(bb.Config), &config)
 	if err != nil {
-		panic(err)
-	}
-	schema := bb.Schema
-	if len(schema) == 0 {
-		schema = "public"
+		panic(fmt.Errorf("parse error in backend configuration: %s", err))
 	}
 
 	if bb.DB == nil {
@@ -89,19 +63,14 @@ func MustNew(bb *Builder) *Backend {
 		panic("Router is missing")
 	}
 
-	err = bb.DB.Ping()
-	if err != nil {
-		panic(err)
-	}
-
 	b := &Backend{
-		schema:           schema,
 		config:           config,
 		notifier:         bb.Notifier,
 		db:               bb.DB,
+		schema:           bb.DB.Schema,
 		router:           bb.Router,
 		collectionHelper: make(map[string]*collectionHelper),
-		Registry:         registry.MustNew(bb.DB, schema),
+		Registry:         registry.MustNew(bb.DB),
 	}
 
 	access.HandleAuthorizationRoute(b.router)
@@ -117,30 +86,8 @@ type relationInjection struct {
 
 type collectionHelper struct {
 	createScanValuesAndObject func(*int) ([]interface{}, map[string]interface{})
-	getAll                    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	get                       func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 	readQuery                 string
-}
-
-// backendConfiguration holds a complete backend configuration
-type backendConfiguration struct {
-	Resources []resourceConfiguration `json:"resources"`
-	Relations []relationConfiguration `json:"relations"`
-}
-
-// resourceConfiguration is one single resource table
-type resourceConfiguration struct {
-	Resource         string   `json:"resource"`
-	Single           bool     `json:"single"`
-	LoggedInRoutes   bool     `json:"logged_in_routes"`
-	ExternalIndices  []string `json:"external_indices"`
-	StaticProperties []string `json:"static_properties"`
-	Notifications    []string `json:"notifications"`
-}
-
-// relationConfiguration is a n:m relation from a resource table or another relation
-type relationConfiguration struct {
-	Resource string `json:"resource"`
-	Origin   string `json:"origin"`
 }
 
 func plural(s string) string {
@@ -188,7 +135,7 @@ func compareStringWithOffset(offset int, s []string) string {
 	return result
 }
 
-func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceConfiguration) {
+func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration) {
 	schema := b.schema
 	resource := rc.Resource
 	log.Println("create resource:", resource)
@@ -244,27 +191,43 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
-	propertiesIndex := len(columns)
+	createExternalIndicesQuery := "" // query to create all indices after the table creation
+	propertiesIndex := len(columns)  // where properties start
 	columns = append(columns, "properties")
 
+	// static properties are varchars
 	for _, property := range rc.StaticProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
 	}
-	propertiesEndIndex := len(columns)
 
-	createExternalIndicesQuery := ""
-	for _, index := range rc.ExternalIndices {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
-			"external_index_"+this+"_"+index,
-			schema, resource, index)
+	searchablePropertiesIndex := len(columns) // where searchable properties start
+	// static searchable properties are varchars with a non-unique index
+	for _, property := range rc.SearchableProperties {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
+		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"searchable_property_"+this+"_"+property,
+			schema, resource, property)
 		createColumns = append(createColumns, createColumn)
-		columns = append(columns, index)
+		columns = append(columns, property)
+
 	}
 
-	// the "device" ollection gets an additional column for the web token
+	propertiesEndIndex := len(columns) // where properties end
+
+	// an external index is a manadory and unique varchar property.
+	if len(rc.ExternalIndex) > 0 {
+		name := rc.ExternalIndex
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", name)
+		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"external_index_"+this+"_"+name,
+			schema, resource, name)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, name)
+	}
+
+	// the "device" collection gets an additional UUID column for the web token
 	if this == "device" {
 		createColumn := "token uuid NOT NULL DEFAULT uuid_generate_v4()"
 		createColumns = append(createColumns, createColumn)
@@ -277,14 +240,14 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		panic(err)
 	}
 
-	allRoute := ""
+	collectionRoute := ""
 	oneRoute := ""
 	for _, r := range resources {
-		allRoute = oneRoute + "/" + plural(r)
+		collectionRoute = oneRoute + "/" + plural(r)
 		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
+	log.Println("  handle routes:", collectionRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
@@ -330,7 +293,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		return values, object
 	}
 
-	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var queryParameters []interface{}
 		var sqlQuery string
 		limit := 100
@@ -364,10 +327,10 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 				after, err = time.Parse(time.RFC3339, value)
 			default:
 				found := false
-				for i := propertiesEndIndex; i < len(columns); i++ {
+				for i := searchablePropertiesIndex; i < len(columns); i++ {
 					if key == columns[i] {
 						if found {
-							err = fmt.Errorf("only one external index allowed")
+							err = fmt.Errorf("only one searchable property or external index allowed")
 							break
 						}
 						externalIndex = value
@@ -452,14 +415,14 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	collection := collectionHelper{
 		readQuery:                 readQuery,
 		createScanValuesAndObject: createScanValuesAndObject,
-		getAll:                    getAll,
+		get:                       getCollection,
 	}
 
 	// store the collection helper for later usage in relations
 	b.collectionHelper[this] = &collection
 
 	// POST
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
@@ -474,7 +437,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns))
 		for i, k := range columns {
-			if i < propertiesIndex {
+			if i < propertiesIndex { // the core identifiers
 				if i == 0 { // skip ID, we get it generated from database
 					_, ok := bodyJSON[k]
 					if ok {
@@ -490,15 +453,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 					return
 				}
 				values[i-1] = param
-
-			} else if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property "+k, http.StatusBadRequest)
-					return
-				}
-				values[i-1] = value
-			} else {
+			} else if i == propertiesIndex { // the dynamic properties
 				properties, ok := bodyJSON[k]
 				if ok {
 					propertiesJSON, _ := json.Marshal(properties)
@@ -506,6 +461,19 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 				} else {
 					values[i-1] = []byte("{}")
 				}
+			} else if i < propertiesEndIndex { // static properties, non mandatory
+				value, ok := bodyJSON[k]
+				if !ok {
+					value = ""
+				}
+				values[i-1] = value
+			} else { // external (unique) indices, mandatory
+				value, ok := bodyJSON[k]
+				if !ok {
+					http.Error(w, "missing external index "+k, http.StatusBadRequest)
+					return
+				}
+				values[i-1] = value
 			}
 		}
 
@@ -548,7 +516,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	}).Methods(http.MethodPost)
 
 	// PUT
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
@@ -591,7 +559,7 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 			} else if i > propertiesIndex {
 				value, ok := bodyJSON[k]
 				if !ok {
-					http.Error(w, "missing property "+k, http.StatusBadRequest)
+					http.Error(w, "missing property or index"+k, http.StatusBadRequest)
 					return
 				}
 				values[propertiesIndex+i] = value
@@ -702,10 +670,10 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
-	// GET all
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	// GET collection
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getAll(w, r, nil)
+		getCollection(w, r, nil)
 	}).Methods(http.MethodGet)
 
 	// DELETE one
@@ -770,11 +738,11 @@ func (b *Backend) createBackendHandlerResource(router *mux.Router, rc resourceCo
 	}
 }
 
-func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc resourceConfiguration) {
+func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfiguration) {
 
 	schema := b.schema
 	resource := rc.Resource
-	log.Println("create single resource:", resource)
+	log.Println("create singleton resource:", resource)
 
 	hasNotificationCreate := false
 	hasNotificationUpdate := false
@@ -827,7 +795,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		createColumns = append(createColumns, createColumn)
 	}
 
-	// force the resource itself to be single resource
+	// force the resource itself to be singleton resource
 	createColumn := "UNIQUE (" + owner + "_id )"
 	createColumns = append(createColumns, createColumn)
 
@@ -835,37 +803,21 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 	propertiesIndex := len(columns)
 	columns = append(columns, "properties")
 
-	for _, property := range rc.StaticProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", property)
-		createColumns = append(createColumns, createColumn)
-		columns = append(columns, property)
-	}
-
-	createExternalIndicesQuery := ""
-	for _, index := range rc.ExternalIndices {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", index)
-		createExternalIndicesQuery = createExternalIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
-			"external_index_"+this+"_"+index,
-			schema, resource, index)
-		createColumns = append(createColumns, createColumn)
-		columns = append(columns, index)
-	}
-
-	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createExternalIndicesQuery
+	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
 
 	_, err := b.db.Query(createQuery)
 	if err != nil {
 		panic(err)
 	}
 
-	allRoute := ""
+	singletonRoute := ""
 	oneRoute := ""
 	for _, r := range resources {
-		allRoute = oneRoute + "/" + r
+		singletonRoute = oneRoute + "/" + r
 		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle single routes:", allRoute, "GET,PUT,DELETE")
+	log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereSingle := ""
@@ -904,8 +856,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		return values, object
 	}
 
-	// PUT single
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	// PUT singleton
+	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
@@ -920,7 +872,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns))
 		for i, k := range columns {
-			if i < propertiesIndex {
+			if i < propertiesIndex { // the core identifiers
 				if i == 0 { // skip ID, we get it generated from database
 					continue
 				}
@@ -931,15 +883,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 					return
 				}
 				values[i-1] = param
-
-			} else if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property "+k, http.StatusBadRequest)
-					return
-				}
-				values[i-1] = value
-			} else {
+			} else if i == propertiesIndex { // the dynamic properties
 				properties, ok := bodyJSON[k]
 				if ok {
 					propertiesJSON, _ := json.Marshal(properties)
@@ -1004,8 +948,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		w.Write(jsonData)
 	}).Methods(http.MethodPut)
 
-	// GET single
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	// GET singleton
+	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
@@ -1018,7 +962,7 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		values, response := createScanValuesAndObject()
 		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
-			// not an error, single resource do always exist conceptually
+			// not an error, singleton resources do always exist conceptually
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -1046,8 +990,8 @@ func (b *Backend) createBackendHandlerSingleResource(router *mux.Router, rc reso
 		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
-	// DELETE single
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	// DELETE singleton
+	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
 
@@ -1090,12 +1034,12 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 
 	log.Println("backend: HandleRoutes")
 
-	for _, rc := range b.config.Resources {
-		if rc.Single {
-			b.createBackendHandlerSingleResource(router, rc)
-		} else {
-			b.createBackendHandlerResource(router, rc)
-		}
+	for _, rc := range b.config.Collections {
+		b.createCollectionResource(router, rc)
+	}
+
+	for _, rc := range b.config.Singletons {
+		b.createSingletonResource(router, rc)
 	}
 
 	for _, rc := range b.config.Relations {
@@ -1213,7 +1157,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 			queryParameters: queryParameters,
 		}
 
-		collection.getAll(w, r, injectRelation)
+		collection.get(w, r, injectRelation)
 	}).Methods(http.MethodGet)
 
 	// GET one

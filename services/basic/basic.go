@@ -1,12 +1,12 @@
 package main
 
 import (
-	"database/sql"
 	"log"
 	"net/http"
 
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/backends/core/backend"
+	"github.com/relabs-tech/backends/core/sql"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -14,18 +14,19 @@ import (
 
 var configurationJSON string = `  
 {
-	"resources": [
+	"collections": [
 	  {
 		"resource": "user",
-		"external_indices": ["identity"]
-	  },
-	  {
-		"resource": "user/profile",
-		"single": true
+		"external_index": "identity"
 	  },
 	  {
 		"resource": "device",
-		"external_indices": ["thing"]
+		"external_index": "thing"
+	  }
+	],
+	"singletons": [
+	  {
+		"resource": "user/profile",
 	  }
 	],
 	"relations": [
@@ -50,17 +51,12 @@ func main() {
 		panic(err)
 	}
 
-	db, err := sql.Open("postgres", service.Postgres)
-	if err != nil {
-		panic(err)
-	}
+	db := sql.MustOpenWithSchema(service.Postgres, "basic")
 	defer db.Close()
 
-	schema := "basic"
 	router := mux.NewRouter()
 	backend.MustNew(&backend.Builder{
 		Config: configurationJSON,
-		Schema: schema,
 		DB:     db,
 		Router: router,
 	})

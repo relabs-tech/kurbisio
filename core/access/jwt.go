@@ -1,7 +1,6 @@
 package access
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,13 +13,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/registry"
+	"github.com/relabs-tech/backends/core/sql"
 )
 
 // JwtMiddlewareBuilder is a helper builder for JwtMiddelware
 type JwtMiddlewareBuilder struct {
+	// PublicKeyDownloadURL is the download url for public keys. In case of google, this would be
+	//  "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
 	PublicKeyDownloadURL string
-	DB                   *sql.DB
-	Schema               string
+	// Issuer is the accepted issuer for the token
+	Issuer string
+	// DB is the postgres database. Must have a collection resource "account" with an external index
+	// "identity".
+	DB *sql.DB
 }
 
 // MustNewJwtMiddelware returns a middleware handler to validate
@@ -29,11 +34,18 @@ type JwtMiddlewareBuilder struct {
 // Java-Web-Token (JWT) are accepted as "Authorization: Bearer"
 // header or as "Kurbisio-JWT"-cookie.
 //
+// This middleware requires that there is a resource "account" in the
+// database, with an external index "identity", which stores
+// the authorization for each identity as properties. An account identity
+// is a combination of the token issuer with the user's email,
+// separated by the pipe symbol '|'. Example:
+//   "https://securetoken.google.com/loyalty2u-ea4fd|test@example.com"
+//
 // This is a final handler. It will return http.StatusUnauthorized
 // errors if the caller cannot be authorized
 func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
-	jwtRegistry := registry.MustNew(jmb.DB, jmb.Schema).Accessor("_jwt_")
+	jwtRegistry := registry.MustNew(jmb.DB).Accessor("_jwt_")
 	var wellKnownCertificates map[string]string
 	createdAt, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
 	if err != nil {
@@ -76,8 +88,7 @@ func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		return nil, errors.New("cannot verify token")
 	}
 
-	authQuery := fmt.Sprintf("SELECT authorization_id, properties FROM %s.authorization WHERE email=$1 AND issuer=$2;", jmb.Schema)
-
+	authQuery := fmt.Sprintf("SELECT account_id, properties FROM %s.account WHERE identity=$1;", jmb.DB.Schema)
 	authCache := NewAuthorizationCache()
 
 	return func(h http.Handler) http.Handler {
@@ -108,40 +119,33 @@ func MustNewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			}{}
 			token, err := jwt.ParseWithClaims(tokenString, &claims, jwksLookup)
 
-			// TODO remove this hack, it's only for avoiding that token expire
-			if err == nil || !strings.HasPrefix(err.Error(), "token is expired by") {
-
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusUnauthorized)
-					return
-				}
-				if !token.Valid {
-					log.Println("token not valid")
-					http.Error(w, "invalid bearer token", http.StatusUnauthorized)
-					return
-				}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
+			if !token.Valid {
+				http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+				return
 			}
 
-			// if err != nil {
-			// 	http.Error(w, err.Error(), http.StatusUnauthorized)
-			// 	return
-			// }
-			// if !token.Valid {
-			// 	http.Error(w, "invalid bearer token", http.StatusUnauthorized)
-			// 	return
-			// }
+			if claims.Issuer != jmb.Issuer {
+				http.Error(w, "bearer token issuer not accepted", http.StatusUnauthorized)
+			}
+
+			// identity is a combination of issuer and email
+			identity := claims.Issuer + "|" + claims.EMail
 
 			// look up authorization for the token. We do this by tokenString, and not
-			// by email, so the frontend can enforce a new database lookup with a new token.
+			// by identity, so the frontend can enforce a new database lookup with a new token.
 			auth = authCache.Read(tokenString)
 			if auth == nil {
 
 				var authID uuid.UUID
 				var properties json.RawMessage
-				err = jmb.DB.QueryRow(authQuery, claims.EMail, claims.Issuer).Scan(&authID, &properties)
+				err = jmb.DB.QueryRow(authQuery, identity).Scan(&authID, &properties)
 
 				if err == sql.ErrNoRows {
-					http.Error(w, "no authorization for "+claims.EMail+" from "+claims.Issuer, http.StatusUnauthorized)
+					http.Error(w, "no authorization for "+identity, http.StatusUnauthorized)
 					return
 				}
 

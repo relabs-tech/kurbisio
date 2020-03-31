@@ -74,7 +74,7 @@ func (a *Authorization) Identifier(resource string) (uuid.UUID, bool) {
 }
 
 // Property returns the value for the requested property; if the
-// identifier does not exist, it returns an empty uuid and false.
+// identifier does not exist, it returns an empty string and false.
 func (a *Authorization) Property(name string) (string, bool) {
 	if a == nil || a.Properties == nil {
 		return "", false
