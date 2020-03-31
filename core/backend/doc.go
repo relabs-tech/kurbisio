@@ -183,13 +183,20 @@ Sorting and Creation Time
 
 Collections of resources are sorted by the created_at timestamp, with latest first. For additional flexibility, it is possible
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
-use the starte time of each activity as created_at time.
+use the start time of each activity as created_at time.
 
+The creation time has one more useful side effect: Since the default timestamp for the ?after query parameter is
+"0001-01-01 00:00:00 +0000 UTC" (which happens to be the golang zero time), any resource that is created with
+this timestamp ends up in a quasi hidden state. While it remains accessible with a fully qualified access path, it will not be
+listed in collections. This makes it possible to create a resource with child resources and relations, and only make it
+visible to applications when the entire set it ready.
+
+If you pass an empty string for created_at, the system will convert it to "0001-01-01 00:00:00 +0000 UTC".
 
 Query Parameters and Pagination
 
-The GET request on single resources - i.e. not on collections - can be customized with the "children" query parameter. It makes
-it possible to add child resources to the response, avoiding unnecessary rest calls. For example. if you want to retrieve
+The GET request on single resources - i.e. not on entire collections - can be customized with the "children" query parameter.
+It makes it possible to add child resources to the response, avoiding unnecessary rest calls. For example. if you want to retrieve
 a specific user, the user's profile and the user's devices, you can do all that with a single request to
 	GET /user?children=profile,devices
 or
@@ -203,7 +210,7 @@ The system supports pagination and filtering of responses by creation time.
 	  ?limit=n  sets a page limit of n items
 	  ?page=n   selects page number n
 	  ?before=t selects items created before timestamp t
-	  ?after=t  selects items created after timestamp t
+	  ?after=t  selects items created after timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
 
 The response carries the following custom headers for pagination:
 	  "Pagination-Limit"        the page limit
@@ -211,15 +218,23 @@ The response carries the following custom headers for pagination:
 	  "Pagination-Page-Count"   the total number of pages in the collection
 	  "Pagination-Current-Page" the currently selected page
 
-The maximum allowed limit is 100, which is also the default limit. Combining pagination with the "before" filter
+The maximum allowed limit is 100, which is also the default limit. Combining pagination with the ?before filter
 avoids page drift.
 
 Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
 if the requested page is out of range.
 
+Primary Resource Identifier
+
+The primary resource identifier is not mandatory when creating resources. If the creation request (POST or PUT) contains
+no identifier or a null identifier, then the system creates a new unique UUID for it. Yet it is possible to specify
+a primary identifier in the request, which will be honored by the system. This feature - and the choice of UUID for
+primary identifiers - makes it possible to easily transfer data between different databases.
+
 Notifications
 
-The backend supports notifications via the WithNotifier() modifier and the Notifier interface.
+The backend supports notifications through the Notifier interface specified at construction time.
+TBD describe notifications in configuration JSON
 
 Authorization
 

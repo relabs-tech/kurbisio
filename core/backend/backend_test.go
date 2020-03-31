@@ -38,6 +38,9 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "o"
+	  },
+	  {
+		"resource": "zero_time"
 	  }
 	],
 	"singletons": [
@@ -82,21 +85,20 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-type ANew struct {
-	Properties     map[string]string `json:"properties"`
-	ExternalID     string            `json:"external_id"`
-	StaticProp     string            `json:"static_prop"`
-	SearchableProp string            `json:"searchable_prop"`
-	CreatedAt      time.Time         `json:"created_at"`
-}
-
-type A struct {
-	ANew
-	AID uuid.UUID `json:"a_id"`
-}
-
 func TestCollectionA(t *testing.T) {
 
+	type ANew struct {
+		Properties     map[string]string `json:"properties"`
+		ExternalID     string            `json:"external_id"`
+		StaticProp     string            `json:"static_prop"`
+		SearchableProp string            `json:"searchable_prop"`
+		CreatedAt      time.Time         `json:"created_at"`
+	}
+
+	type A struct {
+		ANew
+		AID uuid.UUID `json:"a_id"`
+	}
 	someJSON := map[string]string{
 		"foo": "bar",
 	}
@@ -288,16 +290,15 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 
 }
 
-type O struct {
-	OID uuid.UUID `json:"o_id"`
-}
-
-type S struct {
-	SID        uuid.UUID         `json:"s_id"`
-	Properties map[string]string `json:"properties"`
-}
-
 func TestSingletonOS(t *testing.T) {
+	type O struct {
+		OID uuid.UUID `json:"o_id"`
+	}
+
+	type S struct {
+		SID        uuid.UUID         `json:"s_id"`
+		Properties map[string]string `json:"properties"`
+	}
 
 	empty := Empty{}
 
@@ -343,6 +344,21 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal("got a new object, should have gotten the same object")
 	}
 
+	oldUID := sResult.SID
+	newUID := uuid.New()
+
+	// put another update to s and try to give it a new id. This will ingore the new
+	// uid and simply update the rest of the object
+	sUpdate.SID = newUID
+	status, err = testService.client.Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sUpdateResult.SID != oldUID {
+		t.Fatal("singleton id changed")
+	}
+
 	// delete single s
 	status, err = testService.client.Delete("/os/" + o.OID.String() + "/s")
 	if status != http.StatusNoContent {
@@ -362,15 +378,19 @@ func TestSingletonOS(t *testing.T) {
 		}
 	}
 
-	// re-create single s, now the sid should be different
+	// re-create single s with new uuid, now the sid should be the new one we set
 	sResult2 := S{}
+
+	s.SID = newUID
 	_, err = testService.client.Put("/os/"+o.OID.String()+"/s", &s, &sResult2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sResult2.SID == sResult.SID {
 		t.Fatal("recreation did not work, still same ID")
-
+	}
+	if sResult2.SID != newUID {
+		t.Fatal("recreation did not work, could not choose ID")
 	}
 
 	// delete the owner o, this should also delete the single s
@@ -389,6 +409,79 @@ func TestSingletonOS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+
+}
+
+func TestZeroTimeAndNullID(t *testing.T) {
+
+	type ZeroTime struct {
+		ZeroTimeID uuid.UUID `json:"zero_time_id"`
+		CreatedAt  time.Time `json:"created_at"`
+	}
+
+	zNew := ZeroTime{}
+	var z ZeroTime
+	_, err := testService.client.Post("/zero_times", &zNew, &z)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.ZeroTimeID == zNew.ZeroTimeID {
+		t.Fatal("null id was not replaced")
+	}
+	if z.CreatedAt != zNew.CreatedAt {
+		t.Fatal("zero created_at was not kept")
+	}
+
+	// the zero created_at should be hidden from the collection list
+	var collection []ZeroTime
+	_, err = testService.client.Get("/zero_times", &collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collection) != 0 {
+		t.Fatal("collection not empty as expected")
+	}
+
+	// update created_at from the hidden object and try again
+	now := time.Now().Round(time.Millisecond) // round to postgres precision
+	z.CreatedAt = now
+	var z2 ZeroTime
+	_, err = testService.client.Put("/zero_times", &z, &z2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the timestamp should come back as UTC
+	if z2.CreatedAt != now.UTC() {
+		t.Fatal("created_at timestamp was not properly updated ")
+	}
+
+	// now the item should be visible in the collection
+	_, err = testService.client.Get("/zero_times", &collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collection) == 0 {
+		t.Fatal("collection is empty, unexpected")
+	}
+
+	// check that we actually got the right object back
+	if collection[0].ZeroTimeID != z.ZeroTimeID {
+		t.Fatal("wrong object id in collection")
+	}
+
+	// an empty created_at string should also result in a zero time
+	emptyString := struct {
+		CreatedAt string `json:"created_at"`
+	}{
+		CreatedAt: "",
+	}
+	_, err = testService.client.Post("/zero_times", &emptyString, &z)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !z.CreatedAt.IsZero() {
+		t.Fatal("empty string did not produce a zero time")
 	}
 
 }

@@ -85,7 +85,7 @@ type relationInjection struct {
 }
 
 type collectionHelper struct {
-	createScanValuesAndObject func(*int) ([]interface{}, map[string]interface{})
+	createScanValuesAndObject func() ([]interface{}, map[string]interface{})
 	get                       func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 	readQuery                 string
 }
@@ -259,18 +259,39 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<$%d) AND ($%d OR created_at>$%d) ",
-		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<$%d) AND created_at>$%d ",
+		propertiesIndex, propertiesIndex+1, propertiesIndex+2)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
+	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+5)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+4, propertiesIndex+5)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+3, propertiesIndex+4)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns[1:], ", ") + ", created_at)"
-	insertQuery += "VALUES(" + parameterString(len(columns)) + ") RETURNING " + this + "_id;"
-	createScanValuesAndObject := func(totalCount *int) ([]interface{}, map[string]interface{}) {
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at)"
+	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ") RETURNING " + this + "_id;"
+
+	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+1)
+		object := map[string]interface{}{}
+		for i, k := range columns {
+			if i < propertiesIndex {
+				values[i] = &uuid.UUID{}
+			} else if i > propertiesIndex {
+				str := ""
+				values[i] = &str
+			} else {
+				values[i] = &json.RawMessage{}
+			}
+			object[k] = values[i]
+		}
+		createdAt := &time.Time{}
+		values[len(columns)] = createdAt
+		object["created_at"] = values[len(columns)]
+		return values, object
+	}
+
+	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
 		for i, k := range columns {
@@ -284,12 +305,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			object[k] = values[i]
 		}
-		values[len(columns)] = &time.Time{}
+		createdAt := &time.Time{}
+		values[len(columns)] = createdAt
 		object["created_at"] = values[len(columns)]
-		if totalCount == nil {
-			return values[:len(columns)+1], object
-		}
-		values[len(columns)+1] = totalCount
+		values[len(columns)+1] = &totalCount
 		return values, object
 	}
 
@@ -323,6 +342,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				}
 			case "before":
 				before, err = time.Parse(time.RFC3339, value)
+
 			case "after":
 				after, err = time.Parse(time.RFC3339, value)
 			default:
@@ -351,26 +371,25 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+6)
+			queryParameters = make([]interface{}, propertiesIndex-1+5)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
 			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex+6)
+			queryParameters = make([]interface{}, propertiesIndex-1+5+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+6] = externalIndex
+			queryParameters[propertiesIndex-1+5] = externalIndex
 		}
 
 		// add before and after and pagination
 		queryParameters[propertiesIndex-1+0] = before.IsZero()
 		queryParameters[propertiesIndex-1+1] = before.UTC()
-		queryParameters[propertiesIndex-1+2] = after.IsZero()
-		queryParameters[propertiesIndex-1+3] = after.UTC()
-		queryParameters[propertiesIndex-1+4] = limit
-		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+		queryParameters[propertiesIndex-1+2] = after.UTC()
+		queryParameters[propertiesIndex-1+3] = limit
+		queryParameters[propertiesIndex-1+4] = (page - 1) * limit
 
 		if relation != nil {
 			// ingest subquery for relation
@@ -381,7 +400,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		sqlQuery += sqlPagination
 
-		log.Println("QUERY", sqlQuery)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			if err != nil {
@@ -393,7 +411,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		defer rows.Close()
 		var totalCount int
 		for rows.Next() {
-			values, object := createScanValuesAndObject(&totalCount)
+			values, object := createScanValuesAndObjectForCollection(&totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -435,59 +453,63 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns))
+		values := make([]interface{}, len(columns)+1)
 		for i, k := range columns {
 			if i < propertiesIndex { // the core identifiers
-				if i == 0 { // skip ID, we get it generated from database
-					_, ok := bodyJSON[k]
-					if ok {
-						http.Error(w, "must not specify "+k, http.StatusBadRequest)
+				value, ok := bodyJSON[k]
+				if i == 0 { // the primary resource identifier, use as specified or create a new one
+					if !ok || value == "00000000-0000-0000-0000-000000000000" {
+						value = uuid.New()
+					}
+					values[i] = value
+				} else {
+					param, _ := params[k]
+					if ok && param != value.(string) {
+						http.Error(w, "illegal "+k, http.StatusBadRequest)
 						return
 					}
-					continue
+					values[i] = param
 				}
-				param, _ := params[k]
-				value, ok := bodyJSON[k]
-				if ok && param != value.(string) {
-					http.Error(w, "illegal "+k, http.StatusBadRequest)
-					return
-				}
-				values[i-1] = param
 			} else if i == propertiesIndex { // the dynamic properties
 				properties, ok := bodyJSON[k]
 				if ok {
 					propertiesJSON, _ := json.Marshal(properties)
-					values[i-1] = propertiesJSON
+					values[i] = propertiesJSON
 				} else {
-					values[i-1] = []byte("{}")
+					values[i] = []byte("{}")
 				}
 			} else if i < propertiesEndIndex { // static properties, non mandatory
 				value, ok := bodyJSON[k]
 				if !ok {
 					value = ""
 				}
-				values[i-1] = value
+				values[i] = value
 			} else { // external (unique) indices, mandatory
 				value, ok := bodyJSON[k]
 				if !ok {
 					http.Error(w, "missing external index "+k, http.StatusBadRequest)
 					return
 				}
-				values[i-1] = value
+				values[i] = value
 			}
 		}
 
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			t, err := time.Parse(time.RFC3339, value.(string))
-			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-				return
+			timestamp, _ := value.(string)
+			if len(timestamp) == 0 {
+				createdAt = time.Time{}
+			} else {
+				t, err := time.Parse(time.RFC3339, timestamp)
+				if err != nil {
+					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				createdAt = t.UTC()
 			}
-			createdAt = t.UTC()
 		}
-		values[len(columns)-1] = &createdAt
+		values[len(columns)] = &createdAt
 
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
@@ -497,7 +519,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject(nil)
+		values, response := createScanValuesAndObject()
 		err = b.db.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -578,12 +600,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			t, err := time.Parse(time.RFC3339, value.(string))
-			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-				return
+			timestamp, _ := value.(string)
+			if len(timestamp) == 0 {
+				createdAt = time.Time{}
+			} else {
+				t, err := time.Parse(time.RFC3339, timestamp)
+				if err != nil {
+					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				createdAt = t.UTC()
 			}
-			createdAt = t.UTC()
 		}
 		values[len(values)-1] = &createdAt
 
@@ -609,7 +636,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
-		values, response := createScanValuesAndObject(nil)
+		values, response := createScanValuesAndObject()
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -639,7 +666,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 
-		values, response := createScanValuesAndObject(nil)
+		values, response := createScanValuesAndObject()
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -828,13 +855,13 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-	insertQuery += "(" + strings.Join(columns[1:], ", ") + ", created_at)"
-	insertQuery += " VALUES(" + parameterString(len(columns)) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
+	insertQuery += "(" + strings.Join(columns, ", ") + ", created_at)"
+	insertQuery += " VALUES(" + parameterString(len(columns)+1) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
 	sets := make([]string, len(columns)-1)
 	for i := 1; i < len(columns); i++ {
-		sets[i-1] = columns[i] + " = $" + strconv.Itoa(i)
+		sets[i-1] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	insertQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns))
+	insertQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1)
 	insertQuery += " RETURNING (xmax = 0) AS inserted;" // return whether we did insert or update, this is a psql trick
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
@@ -870,26 +897,30 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns))
+		values := make([]interface{}, len(columns)+1)
 		for i, k := range columns {
 			if i < propertiesIndex { // the core identifiers
-				if i == 0 { // skip ID, we get it generated from database
-					continue
-				}
-				param, _ := params[k]
 				value, ok := bodyJSON[k]
-				if ok && param != value.(string) {
-					http.Error(w, "illegal "+k, http.StatusBadRequest)
-					return
+				if i == 0 { // the primary resource identifier, use as specified or create a new one
+					if !ok || value == "00000000-0000-0000-0000-000000000000" {
+						value = uuid.New()
+					}
+					values[i] = value
+				} else {
+					param, _ := params[k]
+					if ok && param != value.(string) {
+						http.Error(w, "illegal "+k, http.StatusBadRequest)
+						return
+					}
+					values[i] = param
 				}
-				values[i-1] = param
 			} else if i == propertiesIndex { // the dynamic properties
 				properties, ok := bodyJSON[k]
 				if ok {
 					propertiesJSON, _ := json.Marshal(properties)
-					values[i-1] = propertiesJSON
+					values[i] = propertiesJSON
 				} else {
-					values[i-1] = []byte("{}")
+					values[i] = []byte("{}")
 				}
 			}
 		}
@@ -897,14 +928,19 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			t, err := time.Parse(time.RFC3339, value.(string))
-			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-				return
+			timestamp, _ := value.(string)
+			if len(timestamp) == 0 {
+				createdAt = time.Time{}
+			} else {
+				t, err := time.Parse(time.RFC3339, timestamp)
+				if err != nil {
+					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				createdAt = t.UTC()
 			}
-			createdAt = t.UTC()
 		}
-		values[len(columns)-1] = &createdAt
+		values[len(columns)] = &createdAt
 
 		var inserted bool
 		err = b.db.QueryRow(insertQuery, values...).Scan(&inserted)
@@ -1043,7 +1079,7 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 	}
 
 	for _, rc := range b.config.Relations {
-		b.createBackendHandlerRelation(router, rc)
+		b.createRelationResource(router, rc)
 	}
 }
 
@@ -1067,7 +1103,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 	return http.StatusOK, nil
 }
 
-func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationConfiguration) {
+func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
 	schema := b.schema
 	resource := rc.Resource
 	resources := strings.Split(resource, "/")
@@ -1170,7 +1206,7 @@ func (b *Backend) createBackendHandlerRelation(router *mux.Router, rc relationCo
 			queryParameters[i] = params[resourceColumns[i]]
 		}
 
-		values, response := collection.createScanValuesAndObject(nil)
+		values, response := collection.createScanValuesAndObject()
 		err := b.db.QueryRow(collection.readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
