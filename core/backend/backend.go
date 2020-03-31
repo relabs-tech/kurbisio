@@ -497,10 +497,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, _ := value.(string)
-			if len(timestamp) == 0 {
+			timestamp, ok := value.(string)
+			if ok && len(timestamp) == 0 {
 				createdAt = time.Time{}
-			} else {
+			} else if value != nil {
 				t, err := time.Parse(time.RFC3339, timestamp)
 				if err != nil {
 					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
@@ -600,10 +600,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, _ := value.(string)
-			if len(timestamp) == 0 {
+			timestamp, ok := value.(string)
+			if ok && len(timestamp) == 0 {
 				createdAt = time.Time{}
-			} else {
+			} else if value != nil {
 				t, err := time.Parse(time.RFC3339, timestamp)
 				if err != nil {
 					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
@@ -928,10 +928,10 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		// last value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, _ := value.(string)
-			if len(timestamp) == 0 {
+			timestamp, ok := value.(string)
+			if ok && len(timestamp) == 0 {
 				createdAt = time.Time{}
-			} else {
+			} else if value != nil {
 				t, err := time.Parse(time.RFC3339, timestamp)
 				if err != nil {
 					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
