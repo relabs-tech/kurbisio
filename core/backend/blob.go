@@ -164,8 +164,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1) +
-		", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne
+	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1) + " " + sqlWhereOne
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
@@ -482,7 +481,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		values := make([]interface{}, len(columns)+2)
+		values := make([]interface{}, len(columns)+1)
 
 		// first add the values for the where-query.
 		for i := 0; i < propertiesIndex; i++ {
@@ -500,10 +499,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// next is the blob itself
 		values[len(columns)] = &blob
-
-		// last value is created_at
-		createdAt := time.Now().UTC()
-		values[len(columns)+1] = &createdAt
 
 		res, err := b.db.Exec(updateQuery, values...)
 		if err != nil {

@@ -27,7 +27,7 @@ type singletonConfiguration struct {
 	Permissions   map[string][]string `json:"permissions"`
 }
 
-// blobConfiguration describes a blob resource
+// blobConfiguration describes a blob collection resource
 type blobConfiguration struct {
 	Resource             string              `json:"resource"`
 	ExternalIndex        string              `json:"external_index"`
@@ -38,8 +38,7 @@ type blobConfiguration struct {
 }
 
 // relationConfiguration is a n:m relation from
-// another collection or relation
-// TODO support relations from blobs
+// another collection, blob collection or relation
 type relationConfiguration struct {
 	Resource string `json:"resource"`
 	Origin   string `json:"origin"`
