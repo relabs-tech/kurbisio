@@ -9,23 +9,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq" // for the postgres database
 	"github.com/relabs-tech/backends/core/sql"
 	"github.com/relabs-tech/backends/iot"
 )
 
 // API is the IoT appliance RESTful interface for the device twin.
 type API struct {
-	schema    string
 	db        *sql.DB
 	publisher iot.MessagePublisher
 }
 
 // Builder is a builder helper for the IoT API
 type Builder struct {
-	// Schema is optional. When set, the backend uses the data schema name for
-	// generated sql relations. The default schema is "public"
-	Schema string
 	// DB is a postgres database. This is mandatory.
 	DB *sql.DB
 	// Router is a mux router. This is mandatory.
@@ -38,11 +33,6 @@ type Builder struct {
 // (if they do not exist) and adds actual routes to router
 func NewAPI(b *Builder) *API {
 
-	schema := b.Schema
-	if len(schema) == 0 {
-		schema = "public"
-	}
-
 	if b.DB == nil {
 		panic("DB is missing")
 	}
@@ -54,7 +44,6 @@ func NewAPI(b *Builder) *API {
 	CreateTwinTableIfNotExists(b.DB)
 
 	s := &API{
-		schema:    b.Schema,
 		db:        b.DB,
 		publisher: b.Publisher,
 	}
@@ -87,7 +76,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		}
 
 		rows, err := s.db.Query(
-			`SELECT key,request,report,requested_at,reported_at FROM `+s.schema+`."_twin_" WHERE device_id=$1;`,
+			`SELECT key,request,report,requested_at,reported_at FROM `+s.db.Schema+`."_twin_" WHERE device_id=$1;`,
 			deviceID)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such twin", http.StatusNotFound)
@@ -122,7 +111,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
-			`SELECT key,request,report,requested_at,reported_at FROM `+s.schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
+			`SELECT key,request,report,requested_at,reported_at FROM `+s.db.Schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
 			deviceID, key).Scan(&t.Key, &t.Request, &t.Report, &t.RequestedAt, &t.ReportedAt)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such twin", http.StatusNotFound)
@@ -148,7 +137,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
-			`SELECT request FROM `+s.schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
+			`SELECT request FROM `+s.db.Schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
 			deviceID, key).Scan(&t.Request)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such twin", http.StatusNotFound)
@@ -174,7 +163,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		key := params["key"]
 		t := twin{}
 		err = s.db.QueryRow(
-			`SELECT report FROM `+s.schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
+			`SELECT report FROM `+s.db.Schema+`."_twin_" WHERE device_id=$1 AND key=$2;`,
 			deviceID, key).Scan(&t.Report)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such twin", http.StatusNotFound)
@@ -208,7 +197,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		now := time.Now().UTC()
 		never := time.Time{}
 		res, err := s.db.Exec(
-			`INSERT INTO `+s.schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
+			`INSERT INTO `+s.db.Schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 VALUES($1,$2,$3,$4,$5,$6)
 ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 			deviceID, key, string(body), "{}", now, never)
@@ -252,7 +241,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 		now := time.Now().UTC()
 		never := time.Time{}
 		res, err := s.db.Exec(
-			`INSERT INTO `+s.schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
+			`INSERT INTO `+s.db.Schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 VALUES($1,$2,$3,$4,$5,$6)
 ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 			deviceID, key, "{}", string(body), never, now)

@@ -97,10 +97,11 @@ func main() {
 	})
 
 	credentials.NewAPI(&credentials.Builder{
-		DB:         db,
-		Router:     router,
-		CACertFile: "ca.crt",
-		CAKeyFile:  "ca.key",
+		DB:               db,
+		Router:           router,
+		CACertFile:       "ca.crt",
+		CAKeyFile:        "ca.key",
+		KurbisioThingKey: "fleet-thing-secret",
 	})
 
 	log.Println("listen on port :3000")

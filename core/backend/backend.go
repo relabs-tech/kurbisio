@@ -23,7 +23,6 @@ import (
 // Backend is the generic rest backend
 type Backend struct {
 	config           backendConfiguration
-	schema           string
 	notifier         core.Notifier
 	db               *sql.DB
 	router           *mux.Router
@@ -67,7 +66,6 @@ func New(bb *Builder) *Backend {
 		config:           config,
 		notifier:         bb.Notifier,
 		db:               bb.DB,
-		schema:           bb.DB.Schema,
 		router:           bb.Router,
 		collectionHelper: make(map[string]*collectionHelper),
 		Registry:         registry.New(bb.DB),
@@ -136,7 +134,7 @@ func compareStringWithOffset(offset int, s []string) string {
 }
 
 func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration) {
-	schema := b.schema
+	schema := b.db.Schema
 	resource := rc.Resource
 	log.Println("create resource:", resource)
 
@@ -767,7 +765,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfiguration) {
 
-	schema := b.schema
+	schema := b.db.Schema
 	resource := rc.Resource
 	log.Println("create singleton resource:", resource)
 
@@ -1104,7 +1102,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 }
 
 func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
-	schema := b.schema
+	schema := b.db.Schema
 	resource := rc.Resource
 	resources := strings.Split(resource, "/")
 	this := resources[len(resources)-1]

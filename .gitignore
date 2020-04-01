@@ -19,3 +19,6 @@
 
 #IDE
 .vscode/
+
+#configuration data
+.config/

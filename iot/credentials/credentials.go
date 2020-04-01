@@ -23,16 +23,12 @@ import (
 
 // API is the IoT appliance RESTful interface for providing device credentials to things
 type API struct {
-	schema           string
 	db               *sql.DB
 	kurbisioThingKey string
 }
 
 // Builder is a builder helper for the API
 type Builder struct {
-	// Schema is optional. When set, the API uses the data schema name for
-	// generated sql relations. The default schema is "public"
-	Schema string
 	// DB is a postgres database. This is mandatory.
 	DB *sql.DB
 	// Router is a mux router. This is mandatory.
@@ -44,7 +40,6 @@ type Builder struct {
 	// This is mandatory
 	CAKeyFile string
 	// KurbisioThingKey is a key used as shared secret for thing authentication.
-	// The default is "secret"
 	KurbisioThingKey string
 }
 
@@ -53,14 +48,8 @@ type Builder struct {
 // It also installs thing authorization middleware on the router.
 func NewAPI(b *Builder) *API {
 
-	schema := b.Schema
-	if len(schema) == 0 {
-		schema = "public"
-	}
-
-	kurbisioThingKey := b.KurbisioThingKey
-	if len(kurbisioThingKey) == 0 {
-		kurbisioThingKey = "secret"
+	if len(b.KurbisioThingKey) == 0 {
+		panic("Kurbisio-Thing-Key is missing")
 	}
 
 	if b.DB == nil {
@@ -71,12 +60,6 @@ func NewAPI(b *Builder) *API {
 		panic("Router is missing")
 	}
 
-	s := &API{
-		schema:           schema,
-		db:               b.DB,
-		kurbisioThingKey: kurbisioThingKey,
-	}
-
 	if len(b.CACertFile) == 0 {
 		panic("ca-cert file misssing")
 	}
@@ -85,6 +68,10 @@ func NewAPI(b *Builder) *API {
 		panic("ca-key file misssing")
 	}
 
+	s := &API{
+		db:               b.DB,
+		kurbisioThingKey: b.KurbisioThingKey,
+	}
 	s.handleRoutes(b.CACertFile, b.CAKeyFile, b.Router)
 	s.addMiddleware(b.Router)
 
@@ -93,7 +80,7 @@ func NewAPI(b *Builder) *API {
 
 func (a *API) addMiddleware(router *mux.Router) {
 	authCache := access.NewAuthorizationCache()
-	authQuery := fmt.Sprintf("SELECT device_id FROM %s.device WHERE token=$1;", a.schema)
+	authQuery := fmt.Sprintf("SELECT device_id FROM %s.device WHERE token=$1;", a.db.Schema)
 
 	router.Use(
 		func(h http.Handler) http.Handler {
@@ -182,7 +169,7 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 			var provisioningStatus string
 			err := a.db.QueryRow(
 				`SELECT device_id, provisioning_status, token FROM `+
-					a.schema+`.device WHERE thing=$1 AND provisioning_status IN ('waiting', 'provisioned');`,
+					a.db.Schema+`.device WHERE thing=$1 AND provisioning_status IN ('waiting', 'provisioned');`,
 				thing).Scan(&deviceID, &provisioningStatus, &token)
 
 			if err == sql.ErrNoRows {
@@ -238,7 +225,7 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 				Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
 			})
 
-			query := fmt.Sprintf("UPDATE %s.device SET provisioning_status='provisioned' WHERE device_id=$1", a.schema)
+			query := fmt.Sprintf("UPDATE %s.device SET provisioning_status='provisioned' WHERE device_id=$1", a.db.Schema)
 			res, err := a.db.Exec(query, deviceID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
