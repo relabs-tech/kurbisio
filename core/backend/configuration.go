@@ -4,7 +4,7 @@ package backend
 type backendConfiguration struct {
 	Collections []collectionConfiguration `json:"collections"`
 	Singletons  []singletonConfiguration  `json:"singletons"`
-	Blobs       []collectionConfiguration `json:"blobs"`
+	Blobs       []blobConfiguration       `json:"blobs"`
 	Relations   []relationConfiguration   `json:"relations"`
 	Roles       []string                  `json:"roles"`
 }
@@ -34,8 +34,9 @@ type blobConfiguration struct {
 	Permissions   map[string][]string `json:"permissions"`
 }
 
-// relationConfiguration is a n:m relation from any other resource,
-// including from any other relation
+// relationConfiguration is a n:m relation from
+// another collection or relation
+// TODO support relations from blobs
 type relationConfiguration struct {
 	Resource string `json:"resource"`
 	Origin   string `json:"origin"`

@@ -1,7 +1,9 @@
 package backend
 
 import (
+	"bytes"
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"testing"
@@ -48,6 +50,11 @@ var configurationJSON string = `{
 		"resource": "o/s"
 	  }
 	],
+	"blobs": [
+	  {
+		"resource": "blob"
+	  }
+	],
 	"relations": [
 	]
   }
@@ -87,7 +94,8 @@ func TestMain(m *testing.M) {
 
 func TestCollectionA(t *testing.T) {
 
-	type ANew struct {
+	type A struct {
+		AID            uuid.UUID         `json:"a_id"`
 		Properties     map[string]string `json:"properties"`
 		ExternalID     string            `json:"external_id"`
 		StaticProp     string            `json:"static_prop"`
@@ -95,15 +103,11 @@ func TestCollectionA(t *testing.T) {
 		CreatedAt      time.Time         `json:"created_at"`
 	}
 
-	type A struct {
-		ANew
-		AID uuid.UUID `json:"a_id"`
-	}
 	someJSON := map[string]string{
 		"foo": "bar",
 	}
 
-	aNew := ANew{
+	aNew := A{
 		Properties:     someJSON,
 		ExternalID:     "external",
 		StaticProp:     "static",
@@ -482,6 +486,93 @@ func TestZeroTimeAndNullID(t *testing.T) {
 	}
 	if !z.CreatedAt.IsZero() {
 		t.Fatal("empty string did not produce a zero time")
+	}
+
+}
+
+func TestBlob(t *testing.T) {
+
+	type Blob struct {
+		BlobID      uuid.UUID `json:"blob_id"`
+		CreatedAt   time.Time `json:"created_at"`
+		ContentType string    `json:"content_type"`
+	}
+
+	data, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var br Blob
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	_, err = testService.client.PostWithHeader("/blobs", header, &data, &br)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := []Blob{}
+	_, err = testService.client.Get("/blobs", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("unexpected blob list size %d", len(list))
+	}
+	if list[0].BlobID != br.BlobID {
+		t.Fatal("missing my blob")
+	}
+	if list[0].ContentType != "image/png" {
+		t.Fatal("wrong content type")
+	}
+
+	var dataReturn []byte
+	_, headerReturn, err := testService.client.GetWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headerReturn.Get("Content-Type") != header["Content-Type"] {
+		t.Fatal("wrong Content-Type in return header")
+	}
+
+	if headerReturn.Get("Kurbisio-Meta-Data") != header["Kurbisio-Meta-Data"] {
+		t.Fatal("wrong meta data in return header")
+	}
+
+	if bytes.Compare(data, dataReturn) != 0 {
+		t.Fatal("returned binary data is not equal")
+	}
+
+	// now update the  blob with something completely different
+	var ubr Blob
+	uHeader := map[string]string{
+		"Content-Type": "something weird",
+	}
+	uData := []byte("binary stuff")
+	_, err = testService.client.PutWithHeader("/blobs/"+br.BlobID.String(), uHeader, &uData, &ubr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var uDataReturn []byte
+	_, uHeaderReturn, err := testService.client.GetWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uHeaderReturn.Get("Content-Type") != uHeader["Content-Type"] {
+		t.Fatal("wrong Content-Type in return header")
+	}
+
+	if uHeaderReturn.Get("Kurbisio-Meta-Data") != "{}" {
+		t.Fatal("got meta data, but should have been cleared")
+	}
+
+	if bytes.Compare(uData, uDataReturn) != 0 {
+		t.Fatal("returned binary data is not equal")
 	}
 
 }
