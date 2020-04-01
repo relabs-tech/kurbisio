@@ -80,22 +80,41 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
 
-	searchablePropertiesIndex := len(columns) // where searchable properties start
+	jsonToHeader := map[string]string{}
 
-	// we have one searchable property: content_type
-	propertyToHeader := map[string]string{}
-	property := "content_type"
-	{
+	// static properties are varchars
+	for _, property := range rc.StaticProperties {
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, property)
+		jsonToHeader[property] = jsonNameToCanonicalHeader(property)
+	}
+
+	searchablePropertiesIndex := len(columns) // where searchable properties start
+	// static searchable properties are varchars with a non-unique index
+	for _, property := range rc.SearchableProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
 		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
-		propertyToHeader[property] = propertyNameToCanonicalHeader(property)
+		jsonToHeader[property] = jsonNameToCanonicalHeader(property)
 	}
 
 	propertiesEndIndex := len(columns) // where properties end
+
+	// an external index is a manadory and unique varchar property.
+	if len(rc.ExternalIndex) > 0 {
+		name := rc.ExternalIndex
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", name)
+		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"external_index_"+this+"_"+name,
+			schema, resource, name)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, name)
+		jsonToHeader[name] = jsonNameToCanonicalHeader(name)
+	}
 
 	// the actual blob data as bytea
 	createColumn := "blob bytea NOT NULL"
@@ -328,6 +347,42 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
+	getOne := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		var blob []byte
+		values, response := createScanValuesAndObjectWithBlob(&blob)
+
+		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		if err == sql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for i := propertiesIndex + 1; i < len(columns); i++ {
+			k := columns[i]
+			w.Header().Set(jsonToHeader[k], *response[k].(*string))
+		}
+		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(blob)
+	}
+
+	collection := collectionHelper{
+		getCollection: getCollection,
+		getOne:        getOne,
+	}
+
+	// store the collection helper for later usage in relations
+	b.collectionHelper[this] = &collection
+
 	// CREATE
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
@@ -361,7 +416,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			} else if i == propertiesIndex { // the dynamic properties
 				values[i] = metaData
 			} else if i < propertiesEndIndex { // static properties, non mandatory
-				values[i] = r.Header.Get(propertyToHeader[k])
+				values[i] = r.Header.Get(jsonToHeader[k])
+			} else { // external (unique) indices, mandatory
+				value := r.Header.Get(jsonToHeader[k])
+				if len(value) == 0 {
+					http.Error(w, "missing external index "+k, http.StatusBadRequest)
+					return
+				}
+				values[i] = value
 			}
 		}
 
@@ -433,7 +495,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		// build the update set
 		for i := propertiesIndex + 1; i < len(columns); i++ {
 			k := columns[i]
-			values[i] = r.Header.Get(propertyToHeader[k])
+			values[i] = r.Header.Get(jsonToHeader[k])
 		}
 
 		// next is the blob itself
@@ -484,28 +546,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
 
-		var blob []byte
-		values, response := createScanValuesAndObjectWithBlob(&blob)
-
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", *response["content_type"].(*string))
-		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
-		w.WriteHeader(http.StatusOK)
-		w.Write(blob)
+		getOne(w, r)
 	}).Methods(http.MethodGet)
 
 	// LIST

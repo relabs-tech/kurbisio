@@ -323,10 +323,47 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
+	getOne := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		values, response := createScanValuesAndObject()
+		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		if err == sql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			switch key {
+			case "children":
+				status, err := b.addChildrenToGetResponse(array, r, response)
+				if err != nil {
+					http.Error(w, err.Error(), status)
+					return
+				}
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+			}
+		}
+
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+	}
+
 	collection := collectionHelper{
-		readQuery:                 readQuery,
-		createScanValuesAndObject: createScanValuesAndObject,
-		get:                       getCollection,
+		getCollection: getCollection,
+		getOne:        getOne,
 	}
 
 	// store the collection helper for later usage in relations
@@ -431,7 +468,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}).Methods(http.MethodPost)
 
-	// PUT
+	// UPDATE
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
@@ -545,44 +582,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}).Methods(http.MethodPut)
 
-	// GET
+	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-
-		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		urlQuery := r.URL.Query()
-		for key, array := range urlQuery {
-			switch key {
-			case "children":
-				status, err := b.addChildrenToGetResponse(array, r, response)
-				if err != nil {
-					http.Error(w, err.Error(), status)
-					return
-				}
-			default:
-				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
-			}
-		}
-
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+		getOne(w, r)
 	}).Methods(http.MethodGet)
 
 	// LIST

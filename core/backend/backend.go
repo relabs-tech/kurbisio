@@ -148,9 +148,8 @@ type relationInjection struct {
 }
 
 type collectionHelper struct {
-	createScanValuesAndObject func() ([]interface{}, map[string]interface{})
-	get                       func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	readQuery                 string
+	getCollection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	getOne        func(w http.ResponseWriter, r *http.Request)
 }
 
 func plural(s string) string {
@@ -221,7 +220,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 // propertyNameToCanonicalHeader converts kurbisio JSON property names
 // to their canonical header representation. Example: "content_type"
 // becomes "Content-Type".
-func propertyNameToCanonicalHeader(property string) string {
+func jsonNameToCanonicalHeader(property string) string {
 	parts := strings.Split(property, "_")
 	for i := 0; i < len(parts); i++ {
 		s := parts[i]

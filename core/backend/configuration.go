@@ -29,9 +29,12 @@ type singletonConfiguration struct {
 
 // blobConfiguration describes a blob resource
 type blobConfiguration struct {
-	Resource      string              `json:"resource"`
-	Notifications []string            `json:"notifications"`
-	Permissions   map[string][]string `json:"permissions"`
+	Resource             string              `json:"resource"`
+	ExternalIndex        string              `json:"external_index"`
+	StaticProperties     []string            `json:"static_properties"`
+	SearchableProperties []string            `json:"searchable_properties"`
+	Notifications        []string            `json:"notifications"`
+	Permissions          map[string][]string `json:"permissions"`
 }
 
 // relationConfiguration is a n:m relation from

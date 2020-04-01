@@ -203,7 +203,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 			deviceID, key, string(body), "{}", now, never)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "no such device", http.StatusBadRequest)
 			return
 		}
 		count, err := res.RowsAffected()
@@ -247,7 +247,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 			deviceID, key, "{}", string(body), never, now)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "no such device", http.StatusBadRequest)
 			return
 		}
 		count, err := res.RowsAffected()

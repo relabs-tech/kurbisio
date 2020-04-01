@@ -22,7 +22,7 @@ var configurationJSON string = `{
 	  {
 		"resource": "device",
 		"external_index": "thing",
-		"static_properties": ["provisioning_status"]
+		"searchable_properties": ["provisioning_status"]
 	  },
 	  {
 		"resource": "device/data"

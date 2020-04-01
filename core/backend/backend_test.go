@@ -52,11 +52,11 @@ var configurationJSON string = `{
 	],
 	"blobs": [
 	  {
-		"resource": "blob"
+		"resource": "blob",
+		"searchable_properties":["content_type"]
 	  }
 	],
-	"relations": [
-	]
+	"relations": []
   }
 `
 

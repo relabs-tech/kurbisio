@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/sql"
 )
 
 func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
@@ -73,7 +71,6 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	collection := b.collectionHelper[this]
 
 	sqlInjectRelation := fmt.Sprintf("AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", this, this, schema, resource)
-	sqlWhereOne := fmt.Sprintf("WHERE %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %s);", this, this, schema, resource, compareString(resourceColumns))
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareString(resourceColumns))
 
@@ -102,33 +99,14 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		collection.get(w, r, injectRelation)
+		collection.getCollection(w, r, injectRelation)
 	}).Methods(http.MethodGet)
 
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, len(resourceColumns))
-		for i := 0; i < len(resourceColumns); i++ {
-			queryParameters[i] = params[resourceColumns[i]]
-		}
-
-		values, response := collection.createScanValuesAndObject()
-		err := b.db.QueryRow(collection.readQuery+sqlWhereOne, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		w.Write(jsonData)
+		// nase collect.get(w, r)
 	}).Methods(http.MethodGet)
 
 	// UPDATE
