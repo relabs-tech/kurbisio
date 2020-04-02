@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -508,7 +509,7 @@ func TestBlob(t *testing.T) {
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
 	}
-	_, err = testService.client.PostWithHeader("/blobs", header, &data, &br)
+	_, err = testService.client.PostBlob("/blobs", header, data, &br)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +530,7 @@ func TestBlob(t *testing.T) {
 	}
 
 	var dataReturn []byte
-	_, headerReturn, err := testService.client.GetWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
+	_, headerReturn, err := testService.client.BlobWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
 
 	if err != nil {
 		t.Fatal(err)
@@ -542,6 +543,9 @@ func TestBlob(t *testing.T) {
 		t.Fatal("wrong meta data in return header")
 	}
 
+	log.Println(data)
+	log.Println(dataReturn)
+
 	if bytes.Compare(data, dataReturn) != 0 {
 		t.Fatal("returned binary data is not equal")
 	}
@@ -552,13 +556,13 @@ func TestBlob(t *testing.T) {
 		"Content-Type": "something weird",
 	}
 	uData := []byte("binary stuff")
-	_, err = testService.client.PutWithHeader("/blobs/"+br.BlobID.String(), uHeader, &uData, &ubr)
+	_, err = testService.client.PutBlob("/blobs/"+br.BlobID.String(), uHeader, uData, &ubr)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var uDataReturn []byte
-	_, uHeaderReturn, err := testService.client.GetWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
+	_, uHeaderReturn, err := testService.client.BlobWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
 
 	if err != nil {
 		t.Fatal(err)

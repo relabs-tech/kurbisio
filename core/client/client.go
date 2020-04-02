@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
 
@@ -79,9 +78,9 @@ func (c *Client) Get(path string, result interface{}) (int, error) {
 	return status, err
 }
 
-// GetHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
+// BlobWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
 // flag an error. Returns the actual http status code and the return header
-func (c *Client) GetWithHeader(path string, result interface{}) (int, http.Header, error) {
+func (c *Client) BlobWithHeader(path string, blob *[]byte) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
@@ -94,13 +93,11 @@ func (c *Client) GetWithHeader(path string, result interface{}) (int, http.Heade
 	}
 
 	if status != http.StatusOK {
-		log.Println(string(rec.Body.Bytes()))
 		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
 	}
 
-	err := json.Unmarshal(rec.Body.Bytes(), result)
-
-	return status, res.Header, err
+	*blob = rec.Body.Bytes()
+	return status, res.Header, nil
 }
 
 // Post posts a resource to path. Expects http.StatusCreated as response, otherwise it will
@@ -125,16 +122,11 @@ func (c *Client) Post(path string, body interface{}, result interface{}) (int, e
 	return status, err
 }
 
-// PostWithHeader posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// PostBlob posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
-func (c *Client) PostWithHeader(path string, header map[string]string, body interface{}, result interface{}) (int, error) {
+func (c *Client) PostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	j, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return http.StatusBadRequest, err
-	}
-
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(blob))
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -146,7 +138,7 @@ func (c *Client) PostWithHeader(path string, header map[string]string, body inte
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
 	}
 
-	err = json.Unmarshal(rec.Body.Bytes(), result)
+	err := json.Unmarshal(rec.Body.Bytes(), result)
 	return status, err
 }
 
@@ -172,16 +164,11 @@ func (c *Client) Put(path string, body interface{}, result interface{}) (int, er
 	return status, err
 }
 
-// PutWithHeader puts a resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
+// PutBlob puts a resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
 // otherwise it will flag an error. Returns the actual http status code.
-func (c *Client) PutWithHeader(path string, header map[string]string, body interface{}, result interface{}) (int, error) {
+func (c *Client) PutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	j, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return http.StatusBadRequest, err
-	}
-
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(blob))
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -193,7 +180,7 @@ func (c *Client) PutWithHeader(path string, header map[string]string, body inter
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
 	}
 
-	err = json.Unmarshal(rec.Body.Bytes(), result)
+	err := json.Unmarshal(rec.Body.Bytes(), result)
 	return status, err
 }
 

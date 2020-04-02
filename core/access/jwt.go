@@ -41,8 +41,9 @@ type JwtMiddlewareBuilder struct {
 // separated by the pipe symbol '|'. Example:
 //   "https://securetoken.google.com/loyalty2u-ea4fd|test@example.com"
 //
-// This is a final handler. It will return http.StatusUnauthorized
-// errors if the caller cannot be authorized
+// This is a final handler with regards to the bearer token. It will return
+// http.StatusUnauthorized when a token is available but insufficent to
+// authorize the request.
 func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 	jwtRegistry := registry.New(jmb.DB).Accessor("_jwt_")
@@ -109,7 +110,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				tokenString = cookie.Value
 			}
 			if len(tokenString) == 0 {
-				http.Error(w, "bearer token missing", http.StatusUnauthorized)
+				h.ServeHTTP(w, r) // no token no auth, moving on
 				return
 			}
 
