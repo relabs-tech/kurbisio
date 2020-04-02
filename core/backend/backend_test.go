@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"testing"
@@ -542,9 +541,6 @@ func TestBlob(t *testing.T) {
 	if headerReturn.Get("Kurbisio-Meta-Data") != header["Kurbisio-Meta-Data"] {
 		t.Fatal("wrong meta data in return header")
 	}
-
-	log.Println(data)
-	log.Println(dataReturn)
 
 	if bytes.Compare(data, dataReturn) != 0 {
 		t.Fatal("returned binary data is not equal")

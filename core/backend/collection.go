@@ -201,7 +201,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createdAt := &time.Time{}
 		values[len(columns)] = createdAt
 		object["created_at"] = values[len(columns)]
-		values[len(columns)+1] = &totalCount
+		values[len(columns)+1] = totalCount
 		return values, object
 	}
 
@@ -317,7 +317,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
-		w.Header().Set("Pagination-Page-Count", strconv.Itoa(totalCount/limit))
+		w.Header().Set("Pagination-Page-Count", strconv.Itoa((totalCount/limit)+1))
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		w.Write(jsonData)
 
@@ -356,6 +356,121 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+	}
+
+	update := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := ioutil.ReadAll(r.Body)
+		params := mux.Vars(r)
+
+		var bodyJSON map[string]interface{}
+		err := json.Unmarshal(body, &bodyJSON)
+		if err != nil {
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		values := make([]interface{}, len(columns)+1)
+
+		// primary id can come from parameter (fully qualified put) or from body json (collection put)
+		if len(params[columns[0]]) == 0 {
+			primaryID, ok := bodyJSON[columns[0]].(string)
+			if !ok {
+				http.Error(w, "missing "+columns[0], http.StatusBadRequest)
+				return
+			}
+			params[columns[0]] = primaryID
+		}
+
+		// add and validate core identifiers
+		for i := 0; i < propertiesIndex; i++ {
+			key := columns[i]
+			param := params[key]
+			values[i] = param
+			value, ok := bodyJSON[key]
+			if ok && param != value.(string) {
+				http.Error(w, "illegal "+key, http.StatusBadRequest)
+				return
+			}
+		}
+
+		// build the update set
+		for i := propertiesIndex; i < len(columns); i++ {
+			k := columns[i]
+			if i > propertiesIndex {
+				value, ok := bodyJSON[k]
+				if !ok {
+					http.Error(w, "missing property or index"+k, http.StatusBadRequest)
+					return
+				}
+				values[i] = value
+			} else {
+				properties, ok := bodyJSON[k]
+				if ok {
+					propertiesJSON, _ := json.Marshal(properties)
+					values[i] = propertiesJSON
+				} else {
+					values[i] = []byte("{}")
+				}
+			}
+		}
+
+		// last value is created_at
+		createdAt := time.Now().UTC()
+		if value, ok := bodyJSON["created_at"]; ok {
+			timestamp, ok := value.(string)
+			if ok && len(timestamp) == 0 {
+				createdAt = time.Time{}
+			} else if value != nil {
+				t, err := time.Parse(time.RFC3339, timestamp)
+				if err != nil {
+					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				createdAt = t.UTC()
+			}
+		}
+		values[len(values)-1] = &createdAt
+
+		res, err := b.db.Exec(updateQuery, values...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if count != 1 {
+			http.Error(w, "no such "+this, http.StatusBadRequest)
+			return
+		}
+
+		// re-read new values
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+		values, response := createScanValuesAndObject()
+		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		if err == sql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		jsonData, _ := json.MarshalIndent(response, "", " ")
+		if hasNotificationUpdate && b.notifier != nil {
+			b.notifier.Notify(resource, core.OperationUpdate, jsonData)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
@@ -471,115 +586,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// UPDATE
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		body, _ := ioutil.ReadAll(r.Body)
-		params := mux.Vars(r)
+		update(w, r)
+	}).Methods(http.MethodPut)
 
-		var bodyJSON map[string]interface{}
-		err := json.Unmarshal(body, &bodyJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		values := make([]interface{}, len(columns)+1)
-
-		primaryID, ok := bodyJSON[columns[0]]
-		if !ok {
-			http.Error(w, "missing "+columns[0], http.StatusBadRequest)
-			return
-		}
-		values[0] = primaryID
-		// add and validate core identifiers
-		for i := 1; i < propertiesIndex; i++ {
-			key := columns[i]
-			param := params[key]
-			values[i] = param
-			value, ok := bodyJSON[key]
-			if ok && param != value.(string) {
-				http.Error(w, "illegal "+key, http.StatusBadRequest)
-				return
-			}
-		}
-
-		// build the update set
-		for i := propertiesIndex; i < len(columns); i++ {
-			k := columns[i]
-			if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property or index"+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = value
-			} else {
-				properties, ok := bodyJSON[k]
-				if ok {
-					propertiesJSON, _ := json.Marshal(properties)
-					values[i] = propertiesJSON
-				} else {
-					values[i] = []byte("{}")
-				}
-			}
-		}
-
-		// last value is created_at
-		createdAt := time.Now().UTC()
-		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, ok := value.(string)
-			if ok && len(timestamp) == 0 {
-				createdAt = time.Time{}
-			} else if value != nil {
-				t, err := time.Parse(time.RFC3339, timestamp)
-				if err != nil {
-					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-					return
-				}
-				createdAt = t.UTC()
-			}
-		}
-		values[len(values)-1] = &createdAt
-
-		res, err := b.db.Exec(updateQuery, values...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count != 1 {
-			http.Error(w, "no such "+this, http.StatusBadRequest)
-			return
-		}
-
-		// re-read new values
-		queryParameters := make([]interface{}, propertiesIndex)
-		queryParameters[0] = primaryID
-		for i := 1; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if hasNotificationUpdate && b.notifier != nil {
-			b.notifier.Notify(resource, core.OperationUpdate, jsonData)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+	// UPDATE with fully qualified path
+	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		update(w, r)
 	}).Methods(http.MethodPut)
 
 	// READ

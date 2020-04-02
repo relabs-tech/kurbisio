@@ -82,16 +82,16 @@ type anyResourceConfiguration struct {
 	relation   *relationConfiguration
 }
 
-type byResourceName []anyResourceConfiguration
+type byDepth []anyResourceConfiguration
 
-func (r byResourceName) Len() int {
+func (r byDepth) Len() int {
 	return len(r)
 }
-func (r byResourceName) Swap(i, j int) {
+func (r byDepth) Swap(i, j int) {
 	r[i], r[j] = r[j], r[i]
 }
-func (r byResourceName) Less(i, j int) bool {
-	return r[i].resource < r[j].resource
+func (r byDepth) Less(i, j int) bool {
+	return strings.Count(r[i].resource, "/") < strings.Count(r[j].resource, "/")
 }
 
 // HandleRoutes adds all necessary handlers for the specified configuration
@@ -99,7 +99,7 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 
 	log.Println("backend: HandleRoutes")
 
-	// we combine all types of resources into one and sort them lexically. Rationale: dependencies of
+	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of
 	// resources must be generated first, otherwise we cannot enforce those dependencies via sql
 	// foreign keys
 	allResources := []anyResourceConfiguration{}
@@ -122,10 +122,9 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 		rc := &b.config.Relations[i]
 		allResources = append(allResources, anyResourceConfiguration{resource: rc.Resource, relation: rc})
 	}
-	sort.Sort(byResourceName(allResources))
+	sort.Sort(byDepth(allResources))
 
 	for _, rc := range allResources {
-
 		if rc.collection != nil {
 			b.createCollectionResource(router, *rc.collection)
 		}
