@@ -372,6 +372,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
+		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Write(blob)
 	}
 
