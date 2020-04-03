@@ -46,14 +46,17 @@ This configuration creates the following REST routes:
 	POST /users
 	GET /users/{user_id}
 	PUT /users/{user_id}
+	PATCH /users/{user_id}
 	DELETE /users/{user_id}
 	GET /users/{user_id}/profile
 	PUT /users/{user_id}/profile
+	PATCH /users/{user_id}/profile
 	DELETE /users/{user_id}/profile
 	GET /devices
 	POST /devices
 	GET /devices/{device_id}
 	PUT /devices/{device_id}
+	PATCH /devices/{device_id}
 	DELETE /devices/{device_id}
 	GET /users/{user_id}/devices
 	PUT /users/{user_id}/devices/{device_id} - with empty request body
@@ -238,6 +241,14 @@ TBD describe notifications in configuration JSON
 Authorization
 
 The backend mangages role based access control to its resource. See access package for details. TBD.
+
+Blobs
+
+TODO describe blobs. Additional property: MaxAgeCache, which goes into the cache-control header as max-time.
+It's the time to live in the cache in seconds. The default is 31536000 (which is one year worth of seconds).
+Set it to -1 if you want no cache.
+
+
 
 */
 package backend

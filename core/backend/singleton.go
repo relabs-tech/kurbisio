@@ -96,7 +96,7 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,DELETE")
+	log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereSingle := ""
@@ -284,6 +284,9 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Write(jsonData)
 	}).Methods(http.MethodGet)
+
+	// PATCH (READ + UPDATE)
+	b.createPatchRoute(router, singletonRoute)
 
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {

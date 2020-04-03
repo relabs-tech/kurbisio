@@ -134,8 +134,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", collectionRoute, "GET,POST")
-	log.Println("  handle routes:", oneRoute, "GET,PUT, DELETE")
+	log.Println("  handle blob routes:", collectionRoute, "GET,POST")
+	log.Println("  handle blob routes:", oneRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", blob, created_at FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
@@ -165,6 +165,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1) + " " + sqlWhereOne
+
+	maxAge := "max-age=31536000" // one year worth of seconds
+	if rc.MaxAgeCache > 0 {
+		maxAge = fmt.Sprintf("max-age=%d", rc.MaxAgeCache)
+	} else if rc.MaxAgeCache < 0 {
+		maxAge = ""
+	}
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
@@ -372,7 +379,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
-		w.Header().Set("Cache-Control", "max-age=3600")
+		if len(maxAge) > 0 {
+			w.Header().Set("Cache-Control", maxAge)
+		}
 		w.Write(blob)
 	}
 

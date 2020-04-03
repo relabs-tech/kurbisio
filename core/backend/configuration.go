@@ -35,6 +35,7 @@ type blobConfiguration struct {
 	SearchableProperties []string            `json:"searchable_properties"`
 	Notifications        []string            `json:"notifications"`
 	Permissions          map[string][]string `json:"permissions"`
+	MaxAgeCache          int                 `json:"max_age_cache"`
 }
 
 // relationConfiguration is a n:m relation from

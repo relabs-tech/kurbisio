@@ -133,8 +133,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", collectionRoute, "GET,POST,PUT")
-	log.Println("  handle routes:", oneRoute, "GET,DELETE")
+	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
+	log.Println("  handle collection routes:", oneRoute, "GET,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
@@ -594,6 +594,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log.Println("called route for", r.URL, r.Method)
 		update(w, r)
 	}).Methods(http.MethodPut)
+
+	// PATCH (READ + UPDATE)
+	b.createPatchRoute(router, oneRoute)
 
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
