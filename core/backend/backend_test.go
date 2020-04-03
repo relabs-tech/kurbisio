@@ -424,7 +424,8 @@ func TestZeroTimeAndNullID(t *testing.T) {
 		CreatedAt  time.Time `json:"created_at"`
 	}
 
-	zNew := ZeroTime{}
+	// zNew was created before the dawn of time
+	zNew := ZeroTime{CreatedAt: time.Time{}.Add(-time.Millisecond)}
 	var z ZeroTime
 	_, err := testService.client.Post("/zero_times", &zNew, &z)
 	if err != nil {
@@ -437,7 +438,7 @@ func TestZeroTimeAndNullID(t *testing.T) {
 		t.Fatal("zero created_at was not kept")
 	}
 
-	// the zero created_at should be hidden from the collection list
+	// the pre-zero created_at should be hidden from the collection list
 	var collection []ZeroTime
 	_, err = testService.client.Get("/zero_times", &collection)
 	if err != nil {

@@ -193,16 +193,16 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
 			timestamp, ok := value.(string)
-			if ok && len(timestamp) == 0 {
-				createdAt = time.Time{}
-			} else if value != nil {
-				t, err := time.Parse(time.RFC3339, timestamp)
-				if err != nil {
-					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-					return
-				}
-				createdAt = t.UTC()
+			if !ok {
+				http.Error(w, "illegal created_at", http.StatusBadRequest)
+				return
 			}
+			t, err := time.Parse(time.RFC3339, timestamp)
+			if err != nil {
+				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			createdAt = t.UTC()
 		}
 		values[len(values)-1] = &createdAt
 

@@ -185,13 +185,11 @@ Collections of resources are sorted by the created_at timestamp, with latest fir
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
 use the start time of each activity as created_at time.
 
-The creation time has one more useful side effect: Since the default timestamp for the ?after query parameter is
+The creation time has one more useful side effect: Since the default timestamp for the ?from query parameter is
 "0001-01-01 00:00:00 +0000 UTC" (which happens to be the golang zero time), any resource that is created with
-this timestamp ends up in a quasi hidden state. While it remains accessible with a fully qualified access path, it will not be
+an earlier timestamp ends up in a quasi hidden state. While it remains accessible with a fully qualified access path, it will not be
 listed in collections. This makes it possible to create a resource with child resources and relations, and only make it
 visible to applications when the entire set it ready.
-
-If you pass an empty string for created_at, the system will convert it to "0001-01-01 00:00:00 +0000 UTC".
 
 Query Parameters and Pagination
 
@@ -209,8 +207,8 @@ In our example, the resource "user" has an external index "identity", hence we c
 The system supports pagination and filtering of responses by creation time.
 	  ?limit=n  sets a page limit of n items
 	  ?page=n   selects page number n
-	  ?before=t selects items created before timestamp t
-	  ?after=t  selects items created after timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
+	  ?from=t   selects items created at or after the timestamp t
+	  ?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
 
 The response carries the following custom headers for pagination:
 	  "Pagination-Limit"        the page limit
@@ -218,8 +216,9 @@ The response carries the following custom headers for pagination:
 	  "Pagination-Page-Count"   the total number of pages in the collection
 	  "Pagination-Current-Page" the currently selected page
 
-The maximum allowed limit is 100, which is also the default limit. Combining pagination with the ?before filter
-avoids page drift.
+The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
+avoids page drift. A well-behaving application would get the first page without any filter, and then use the created_at
+value of the first received item as until-parameter for querying pages further down.
 
 Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
 if the requested page is out of range.

@@ -147,7 +147,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<$%d) AND created_at>$%d ",
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND created_at>=$%d ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+5)
@@ -224,7 +224,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createdAt := &time.Time{}
 		values[len(columns)] = createdAt
 		object["created_at"] = values[len(columns)]
-		values[len(columns)+1] = &totalCount
+		values[len(columns)+1] = totalCount
 		return values, object
 	}
 
@@ -233,8 +233,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var sqlQuery string
 		limit := 100
 		page := 1
-		before := time.Time{}
-		after := time.Time{}
+		until := time.Time{}
+		from := time.Time{}
 		externalColumn := ""
 		externalIndex := ""
 
@@ -256,11 +256,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				if err == nil && page < 1 {
 					err = fmt.Errorf("out of range")
 				}
-			case "before":
-				before, err = time.Parse(time.RFC3339, value)
+			case "until":
+				until, err = time.Parse(time.RFC3339, value)
 
-			case "after":
-				after, err = time.Parse(time.RFC3339, value)
+			case "from":
+				from, err = time.Parse(time.RFC3339, value)
 			default:
 				found := false
 				for i := searchablePropertiesIndex; i < len(columns); i++ {
@@ -301,9 +301,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		// add before and after and pagination
-		queryParameters[propertiesIndex-1+0] = before.IsZero()
-		queryParameters[propertiesIndex-1+1] = before.UTC()
-		queryParameters[propertiesIndex-1+2] = after.UTC()
+		queryParameters[propertiesIndex-1+0] = until.IsZero()
+		queryParameters[propertiesIndex-1+1] = until.UTC()
+		queryParameters[propertiesIndex-1+2] = from.UTC()
 		queryParameters[propertiesIndex-1+3] = limit
 		queryParameters[propertiesIndex-1+4] = (page - 1) * limit
 
@@ -340,7 +340,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
-		w.Header().Set("Pagination-Page-Count", strconv.Itoa(totalCount/limit))
+		w.Header().Set("Pagination-Page-Count", strconv.Itoa((totalCount/limit)+1))
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		w.Write(jsonData)
 
