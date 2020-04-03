@@ -217,8 +217,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 	return http.StatusOK, nil
 }
 
-// clever function to patch a generic json object. Something like this
-// will go into the platform to support patch
+// clever recursive function to patch a generic json object.
 func patchObject(object map[string]interface{}, patch map[string]interface{}) {
 	for k, v := range patch {
 		oc, ocok := object[k].(map[string]interface{})
