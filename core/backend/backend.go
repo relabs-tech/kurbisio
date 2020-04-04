@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"net/http"
 
@@ -27,7 +29,8 @@ type Backend struct {
 	router           *mux.Router
 	collectionHelper map[string]*collectionHelper
 	// Registry is the JSON object registry for this backend's schema
-	Registry *registry.Registry
+	Registry             *registry.Registry
+	authorizationEnabled bool
 }
 
 // Builder is a builder helper for the Backend
@@ -41,6 +44,9 @@ type Builder struct {
 	// Notifier inserts a database notifier to the backend. If the configuration requests
 	// notifications, they will be sent to the notifier. This is optional.
 	Notifier core.Notifier
+	// If AuthorizationEnabled is true, the backend requires auhorization for each route
+	// in the request context, as specified in the configuration.
+	AuthorizationEnabled bool
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -62,12 +68,13 @@ func New(bb *Builder) *Backend {
 	}
 
 	b := &Backend{
-		config:           config,
-		notifier:         bb.Notifier,
-		db:               bb.DB,
-		router:           bb.Router,
-		collectionHelper: make(map[string]*collectionHelper),
-		Registry:         registry.New(bb.DB),
+		config:               config,
+		notifier:             bb.Notifier,
+		db:                   bb.DB,
+		router:               bb.Router,
+		collectionHelper:     make(map[string]*collectionHelper),
+		Registry:             registry.New(bb.DB),
+		authorizationEnabled: bb.AuthorizationEnabled,
 	}
 
 	access.HandleAuthorizationRoute(b.router)
@@ -148,8 +155,8 @@ type relationInjection struct {
 }
 
 type collectionHelper struct {
-	getCollection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	getOne        func(w http.ResponseWriter, r *http.Request)
+	getAll func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	getOne func(w http.ResponseWriter, r *http.Request)
 }
 
 func plural(s string) string {
@@ -195,6 +202,13 @@ func compareStringWithOffset(offset int, s []string) string {
 		result += s[i] + " = $" + strconv.Itoa(i+offset+1)
 	}
 	return result
+}
+
+func timeToEtag(t time.Time) string {
+	return fmt.Sprintf("\"%x\"", sha1.Sum([]byte(t.String())))
+}
+func bytesToEtag(b []byte) string {
+	return fmt.Sprintf("\"%x\"", sha1.Sum(b))
 }
 
 func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {
@@ -264,6 +278,31 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 		w.Write(response)
 
 	}).Methods(http.MethodPatch)
+}
+
+func (b *Backend) createShortcutRoute(router *mux.Router, resources []string) {
+	resource := resources[len(resources)-1]
+	prefix := "/" + resource
+	log.Println("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
+
+	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called shortcut route for", r.URL, r.Method)
+		auth := access.AuthorizationFromContext(r.Context())
+		newPrefix := ""
+		for _, s := range resources {
+			id, ok := auth.Identifier(s)
+			if !ok {
+				http.Error(w, resource+" not authorized", http.StatusUnauthorized)
+				return
+			}
+			newPrefix += "/" + plural(s) + "/" + id.String()
+		}
+		r.URL.Path = newPrefix + strings.TrimPrefix(r.URL.Path, prefix)
+		log.Println("redirect shortcut route to:", r.URL)
+		router.ServeHTTP(w, r)
+	}
+	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
+	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 }
 
 // propertyNameToCanonicalHeader converts kurbisio JSON property names

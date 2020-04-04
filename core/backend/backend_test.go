@@ -30,7 +30,7 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "b",
-		"logged_in_routes": true
+		"shortcuts": true
 	  },
 	  {
 		"resource": "b/c"

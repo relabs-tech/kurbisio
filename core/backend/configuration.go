@@ -12,7 +12,7 @@ type backendConfiguration struct {
 // collectionConfiguration describes a collection resource
 type collectionConfiguration struct {
 	Resource             string              `json:"resource"`
-	LoggedInRoutes       bool                `json:"logged_in_routes"`
+	Shortcuts            bool                `json:"shortcuts"`
 	ExternalIndex        string              `json:"external_index"`
 	StaticProperties     []string            `json:"static_properties"`
 	SearchableProperties []string            `json:"searchable_properties"`
@@ -36,11 +36,13 @@ type blobConfiguration struct {
 	Notifications        []string            `json:"notifications"`
 	Permissions          map[string][]string `json:"permissions"`
 	MaxAgeCache          int                 `json:"max_age_cache"`
+	Mutable              bool                `json:"mutable"`
 }
 
 // relationConfiguration is a n:m relation from
 // another collection, blob collection or relation
 type relationConfiguration struct {
-	Resource string `json:"resource"`
-	Origin   string `json:"origin"`
+	Resource    string              `json:"resource"`
+	Origin      string              `json:"origin"`
+	Permissions map[string][]string `json:"permissions"`
 }

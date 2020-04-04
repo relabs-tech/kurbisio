@@ -205,7 +205,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
-	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var queryParameters []interface{}
 		var sqlQuery string
 		limit := 100
@@ -314,6 +314,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
+		etag := bytesToEtag(jsonData)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
@@ -356,6 +362,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
+		etag := bytesToEtag(jsonData)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
@@ -382,6 +394,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			params[columns[0]] = primaryID
+		}
+
+		// now we have all parameters and can authorize
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationUpdate, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		// add and validate core identifiers
@@ -477,8 +498,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	collection := collectionHelper{
-		getCollection: getCollection,
-		getOne:        getOne,
+		getAll: getAll,
+		getOne: getOne,
 	}
 
 	// store the collection helper for later usage in relations
@@ -489,6 +510,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
+
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationCreate, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 
 		var bodyJSON map[string]interface{}
 		err := json.Unmarshal(body, &bodyJSON)
@@ -601,19 +630,43 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		getOne(w, r)
 	}).Methods(http.MethodGet)
 
-	// LIST
+	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getCollection(w, r, nil)
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		getAll(w, r, nil)
 	}).Methods(http.MethodGet)
 
 	// DELETE
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationDelete, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
@@ -647,27 +700,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}).Methods(http.MethodDelete)
 
-	if rc.LoggedInRoutes {
-		prefix := "/" + resource
-		log.Println("  handle logged-in routes: "+prefix+"[/...]", "GET,POST,PUT,DELETE")
-
-		replaceHandler := func(w http.ResponseWriter, r *http.Request) {
-			log.Println("called logged-in route for", r.URL, r.Method)
-			auth := access.AuthorizationFromContext(r.Context())
-			newPrefix := ""
-			for _, s := range resources {
-				id, ok := auth.Identifier(s + "_id")
-				if !ok {
-					http.Error(w, resource+" not authorized", http.StatusUnauthorized)
-					return
-				}
-				newPrefix += "/" + plural(s) + "/" + id.String()
-			}
-			r.URL.Path = newPrefix + strings.TrimPrefix(r.URL.Path, prefix)
-			log.Println("redirect logged-in route to:", r.URL)
-			router.ServeHTTP(w, r)
-		}
-		router.HandleFunc(prefix, replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete)
-		router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete)
+	if rc.Shortcuts {
+		b.createShortcutRoute(router, resources)
 	}
 }

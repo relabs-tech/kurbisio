@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
+	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/sql"
 )
 
@@ -140,6 +141,13 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationUpdate, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 
 		var bodyJSON map[string]interface{}
 		err := json.Unmarshal(body, &bodyJSON)
@@ -248,6 +256,13 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		sqlQuery := readQuery + sqlWhereSingle
 		queryParameters := make([]interface{}, propertiesIndex-1)
 		for i := 1; i < propertiesIndex; i++ { // skip ID
@@ -280,8 +295,15 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		jsonData, _ := json.MarshalIndent(response, "", " ")
+		etag := bytesToEtag(jsonData)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Etag", etag)
+		w.Header().Set("Content-Type", "application/json")
+
 		w.Write(jsonData)
 	}).Methods(http.MethodGet)
 
@@ -292,7 +314,13 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
-
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationDelete, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		queryParameters := make([]interface{}, propertiesIndex-1)
 		for i := 1; i < propertiesIndex; i++ { // skip ID
 			queryParameters[i-1] = params[columns[i]]

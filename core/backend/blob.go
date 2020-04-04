@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
+	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/sql"
 )
 
@@ -166,14 +167,15 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1) + " " + sqlWhereOne
 
-	maxAge := "max-age=31536000" // one year worth of seconds
+	maxAge := ""
+	if !rc.Mutable {
+		rc.MaxAgeCache = 31536000
+	}
 	if rc.MaxAgeCache > 0 {
 		maxAge = fmt.Sprintf("max-age=%d", rc.MaxAgeCache)
-	} else if rc.MaxAgeCache < 0 {
-		maxAge = ""
 	}
 
-	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
+	createScanValuesAndObject := func(createdAt *time.Time) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
 		object := map[string]interface{}{}
 		for i, k := range columns {
@@ -187,13 +189,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 			object[k] = values[i]
 		}
-		createdAt := &time.Time{}
 		values[len(columns)] = createdAt
-		object["created_at"] = values[len(columns)]
+		object["created_at"] = createdAt
 		return values, object
 	}
 
-	createScanValuesAndObjectWithBlob := func(blob *[]byte) ([]interface{}, map[string]interface{}) {
+	createScanValuesAndObjectWithBlob := func(blob *[]byte, createdAt *time.Time) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
 		for i, k := range columns {
@@ -208,9 +209,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			object[k] = values[i]
 		}
 		values[len(columns)] = blob
-		createdAt := &time.Time{}
 		values[len(columns)+1] = createdAt
-		object["created_at"] = values[len(columns)+1]
+		object["created_at"] = createdAt
 		return values, object
 	}
 
@@ -236,6 +236,15 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		var queryParameters []interface{}
 		var sqlQuery string
 		limit := 100
@@ -291,7 +300,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-		params := mux.Vars(r)
+
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+5)
@@ -355,13 +364,45 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	getOne := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
 
+		if rc.Mutable {
+			if ifNoneMatch := r.Header.Get("If-None-Match"); len(ifNoneMatch) > 0 {
+				// special blob handling for if-non-match: Since we only need the creation time
+				// for calculating the etag, we prefer doing an extra query instead of
+				// loading the entire binary blob into memory for no good reason
+				var createdAt time.Time
+				values, _ := createScanValuesAndObject(&createdAt)
+				err = b.db.QueryRow(readQueryMetaDataOnly+sqlWhereOne, queryParameters...).Scan(values...)
+				if err == sql.ErrNoRows {
+					http.Error(w, "no such "+this, http.StatusNotFound)
+					return
+				}
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if timeToEtag(createdAt) == ifNoneMatch {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+		}
+
 		var blob []byte
-		values, response := createScanValuesAndObjectWithBlob(&blob)
+		var createdAt time.Time
+		values, response := createScanValuesAndObjectWithBlob(&blob, &createdAt)
 
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
@@ -376,18 +417,21 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			k := columns[i]
 			w.Header().Set(jsonToHeader[k], *response[k].(*string))
 		}
-		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
-		w.WriteHeader(http.StatusOK)
-		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
+		if rc.Mutable {
+			w.Header().Set("Etag", timeToEtag(createdAt))
+		}
 		if len(maxAge) > 0 {
 			w.Header().Set("Cache-Control", maxAge)
 		}
+		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
+		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
+		w.WriteHeader(http.StatusOK)
 		w.Write(blob)
 	}
 
 	collection := collectionHelper{
-		getCollection: getCollection,
-		getOne:        getOne,
+		getAll: getCollection,
+		getOne: getOne,
 	}
 
 	// store the collection helper for later usage in relations
@@ -452,7 +496,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		// re-read meta data and return as json
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(&time.Time{})
 		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -528,7 +572,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		// re-read meta data and return as json
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(&time.Time{})
 		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", params[columns[0]]).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -556,7 +600,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		getOne(w, r)
 	}).Methods(http.MethodGet)
 
-	// LIST
+	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		getCollection(w, r, nil)

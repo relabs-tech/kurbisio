@@ -139,13 +139,13 @@ This adds a profile to the user, or updates the user's profile:
 
 Logged-In Routes
 
-In the above example it would also be possible to request "logged_in_routes" for the resource "user":
+In the above example it would also be possible to request "shortcuts" for the resource "user":
 
   	...
 	"collections": [
 	  {
 		"resource": "user",
-		"logged_in_routes" : true
+		"shortcuts" : true
 		...
 	  },
 	...
@@ -240,14 +240,87 @@ TBD describe notifications in configuration JSON
 
 Authorization
 
-The backend mangages role based access control to its resource. See access package for details. TBD.
+if AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
+By default, only the "admin" role has access to resources. A permissions object for each resource
+permits specific roles to execute specific operations. The different operations are: "create", "read", "update"
+and "delete". Each operation is further qualified whether it is permitted for only one single instance ("one")
+of the resource, or for the entire collection ("all").
+
+For example, you want to specify a resource "pictures", which is a child-resource of "user". Now you want to
+give each user permission to create, read and delete their own pictures, but only their own pictures.
+Therefore you qualify "one" for the parent resource, and "all" for the picture resource:
+
+  {
+	"resource": "user/pictures",
+	"permissions" : {
+		"user": ["create:one/all","read:one/all","delete:one/all"]
+	}
+  }
+
+Now users want to be able to give out links to their pictures. The public should be able to read them,
+but they should not be able to list all picture, nor to create new ones or delete them.
+You can achieve this, by giving the public read access to pictures with qualifier "one":
+
+  {
+	"permissions" : {
+		...
+		"public": ["read:one/one"]
+		...
+	}
+  }
+
+There are three special roles in the system: The "admin" role who by default has permission for everything.
+The "public" role, which is assumed by every non-authorized request. And finally the "everybody" role,
+which is a placeholder for any other role in the system but "public".
+
+If-None-Match and Etag
+
+All GET requests are served with Etag and obey the If-None-Match request. This allows clients to check
+whether new data is available without downloading and comparing the entire response. If a client puts
+the received Etag of a request into the If-None-Match header of a subsequent request, then the system will
+simply response to that subsequent with a 304 Not Modified in case the resource was not changed. In case
+the resource was changed, the request will be answered as usual.
 
 Blobs
 
-TODO describe blobs. Additional property: MaxAgeCache, which goes into the cache-control header as max-time.
-It's the time to live in the cache in seconds. The default is 31536000 (which is one year worth of seconds).
-Set it to -1 if you want no cache.
+Blobs are collections of binary resources. They will be served to the client as-is. You can use blobs
+for example to manage a collection of images like this:
 
+  	"blobs": [
+	  {
+		"resource": "image",
+		"static_properties" : ["content_type"]
+	  }
+	]
+
+This configuration creates the following routes:
+	GET /images  - returns meta data of all images as JSON
+	POST /images
+	GET /images/{image_id}
+	DELETE /images/{image_id}
+
+All static properties, searchable properties and external indices of a blob are passed as canonical headers.
+The property "content_type" hence becomes a header "Content-Type". The dynamic JSON object "properties"
+is transferred as the header "Kurbisio-Meta-Data".
+
+Blobs are immutable by default, which means they can be optimally cached. If you need blobs that can be
+updated, for example a profile image, you get declare them mutable like this:
+
+  	"blobs": [
+	  {
+		"resource": "image",
+		"static_properties" : ["content_type"],
+		"mutable": true,
+		"max_age_cache": 3600
+	  }
+	]
+
+This creates the extra route
+	PUT /images/{image_id}
+
+In the example we have also set the "max_age_cache" property to 3600 seconds, which is one hour. The default
+for mutable blobs is no caching at all. Mutable blobs also support Etag and If-Non-Match out-of-the-box,
+which allows clients to check for updates quickly without re-downloading the entire blob.
 
 
 */

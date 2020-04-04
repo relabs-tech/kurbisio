@@ -8,6 +8,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core"
+	"github.com/relabs-tech/backends/core/access"
 )
 
 func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
@@ -84,11 +86,18 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
 	log.Println("  handle routes:", oneRoute, "GET,DELETE")
 
-	// LIST
+	// READ ALL
 	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		queryParameters := make([]interface{}, len(resourceColumns)-1)
 		for i := 0; i < len(resourceColumns)-1; i++ { // skip ID
 			queryParameters[i] = params[resourceColumns[i]]
@@ -99,21 +108,35 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		collection.getCollection(w, r, injectRelation)
+		collection.getAll(w, r, injectRelation)
 	}).Methods(http.MethodGet)
 
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-
-		// nase collect.get(w, r)
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		collection.getOne(w, r)
 	}).Methods(http.MethodGet)
 
-	// UPDATE
+	// CREATE
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationCreate, access.QualifierAll, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		queryParameters := make([]interface{}, len(resourceColumns))
 		for i := 0; i < len(resourceColumns); i++ {
 			queryParameters[i] = params[resourceColumns[i]]
@@ -141,6 +164,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationDelete, access.QualifierOne, params, rc.Permissions) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		queryParameters := make([]interface{}, len(resourceColumns))
 		for i := 0; i < len(resourceColumns); i++ {
 			queryParameters[i] = params[resourceColumns[i]]
