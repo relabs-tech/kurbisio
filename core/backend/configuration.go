@@ -8,13 +8,12 @@ type backendConfiguration struct {
 	Singletons  []singletonConfiguration  `json:"singletons"`
 	Blobs       []blobConfiguration       `json:"blobs"`
 	Relations   []relationConfiguration   `json:"relations"`
-	Roles       []string                  `json:"roles"`
+	Shortcuts   []shortcutConfiguration   `json:"shortcuts"`
 }
 
 // collectionConfiguration describes a collection resource
 type collectionConfiguration struct {
 	Resource             string          `json:"resource"`
-	Shortcuts            bool            `json:"shortcuts"`
 	ExternalIndex        string          `json:"external_index"`
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
@@ -47,4 +46,12 @@ type relationConfiguration struct {
 	Resource string          `json:"resource"`
 	Origin   string          `json:"origin"`
 	Permits  []access.Permit `json:"permits"`
+}
+
+// shortcutConfiguration is shorcut to a resource
+// for an authenticated request
+type shortcutConfiguration struct {
+	Shortcut string   `json:"shortcut"`
+	Target   string   `json:"target"`
+	Roles    []string `json:"roles"`
 }

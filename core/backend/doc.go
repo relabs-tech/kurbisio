@@ -139,18 +139,19 @@ This adds a profile to the user, or updates the user's profile:
 
 Logged-In Routes
 
-In the above example it would also be possible to request "shortcuts" for the resource "user":
+The above example can be made even more user friendly, by adding shortcut routes for the authenticated user. Say we
+have a role "userrole" which contains a selector for a user resource. Then we can declare a shortcut with
 
   	...
-	"collections": [
+	"shortcuts": [
 	  {
-		"resource": "user",
-		"shortcuts" : true
-		...
-	  },
+		"shortcut": "user",
+		"target" : "user",
+		"roles": ["userrole"]
+	  }
 	...
 
-This would create these additional REST routes for the logged-in user:
+This would create these additional REST routes for the authenticated user:
 	GET /user
 	PUT /user
 	DELETE /user
@@ -162,9 +163,7 @@ This would create these additional REST routes for the logged-in user:
 	GET /user/devices/{device_id}
 	DELETE /user/devices/{device_id}
 
-Effectively, the path segement /user is replaced with /users/{user_id}, where user_id comes from the Authorization
-object of the request context. For this to work, you need an authorization middleware which looks at the
-authorization bearer token and adds the necessary Authorization object with user_id to the request context.
+Effectively, the path segement /user/{user_id} is replaced with the shortcut /user for all generated routes.
 
 Dynamic Properties
 
@@ -188,7 +187,7 @@ Collections of resources are sorted by the created_at timestamp, with latest fir
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
 use the start time of each activity as created_at time.
 
-The creation time has one more useful side effect: Since the default timestamp for the ?from query parameter is
+The creation time has one more useful side effect: Since the default timestamp for the from query parameter is
 "0001-01-01 00:00:00 +0000 UTC" (which happens to be the golang zero time), any resource that is created with
 an earlier timestamp ends up in a quasi hidden state. While it remains accessible with a fully qualified access path, it will not be
 listed in collections. This makes it possible to create a resource with child resources and relations, and only make it
@@ -238,71 +237,6 @@ Notifications
 The backend supports notifications through the Notifier interface specified at construction time.
 TBD describe notifications in configuration JSON
 
-Authorization
-
-If AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
-By default, only the "admin" role has a permit to access resources. A permit object for each resource
-authorizes specific roles to execute specific operations. The different operations are: "create", "read", "update",
-"delete" and "list". The "list"-operation is the retrieval of the entire collection.
-
-For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
-give each user permission to create, read and delete their own pictures, but only their own pictures. You
-delare a role for a user  - in this case "userrole" - and specify the resource like this:
-
-		{
-			"resource": "user/picture",
-			"permits": [
-				{
-					"role": "userrole",
-					"operations": [
-						"create",
-						"read",
-						"update",
-						"delete",
-						"list"
-					],
-					"selectors": [
-						"user"
-					]
-				}
-			]
-		}
-
-The selector basically states that the authorization object must contain a concrete user_id, and
-that any of the operations is only permitted for this user_id.
-
-Now users want to be able to give out links to their pictures. The public should be able to read them,
-but they should not be able to list all picture, nor to create new ones or delete them.
-You can achieve this, by giving the public read access to pictures:
-
-			"permits": [
-				...
-				{
-					"role": "public",
-					"operations": [
-						"read"
-					]
-				}
-			]
-
-There are three special roles in the system: The "admin" role who has permission to do everything.
-The "public" role, which is assumed by every non-authorized request. And finally the "everybody" role,
-which is a placeholder for any other role in the system but "public".
-
-You can easily check the authorization state of any token, by doing a GET request to
-
-   /authorization
-
-which will return the authorization state for the authenticated requester.
-
-
-If-None-Match and Etag
-
-All GET requests are served with Etag and obey the If-None-Match request. This allows clients to check
-whether new data is available without downloading and comparing the entire response. If a client puts
-the received Etag of a request into the If-None-Match header of a subsequent request, then the system will
-simply response to that subsequent with a 304 Not Modified in case the resource was not changed. In case
-the resource was changed, the request will be answered as usual.
 
 Blobs
 
@@ -343,7 +277,74 @@ This creates the extra route
 
 In the example we have also set the "max_age_cache" property to 3600 seconds, which is one hour. The default
 for mutable blobs is no caching at all. Mutable blobs also support Etag and If-Non-Match out-of-the-box,
-which allows clients to check for updates quickly without re-downloading the entire blob.
+which allows clients to check for updates quickly without re-downloading the entire blob. See section
+on If-None-Match and Etag below.
+
+Authorization
+
+If AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
+By default, only the "admin" role has a permit to access resources. A permit object for each resource
+authorizes specific roles to execute specific operations. The different operations are: "create", "read", "update",
+"delete" and "list". The "list"-operation is the retrieval of the entire collection.
+
+For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
+give each user permission to create, read and delete their own pictures, but only their own pictures. You
+delare a role for a user  - in this case "userrole" - and specify the resource like this:
+
+		{
+			"resource": "user/picture",
+			"permits": [
+				{
+					"role": "userrole",
+					"operations": [
+						"create",
+						"read",
+						"update",
+						"delete",
+						"list"
+					],
+					"selectors": [
+						"user"
+					]
+				}
+			]
+		}
+
+The selector basically states that the authorization object must contain a concrete user_id, and
+that any of the operations is only permitted for this user_id.
+
+Now users want to be able to share links to their pictures. The public should be able to read them,
+but they should not be able to list all picture, nor to create new ones nor delete them.
+You can achieve this by issueing another permit for the "public" role:
+
+			"permits": [
+				...
+				{
+					"role": "public",
+					"operations": [
+						"read"
+					]
+				}
+			]
+
+There are three special roles in the system: The "admin" role who has permission to do everything.
+The "public" role, which is assumed by every non-authorized request. And finally the "everybody" role,
+which is a placeholder for any other role in the system but "public".
+
+You can easily check the authorization state of any token, by doing a GET request to
+
+   /authorization
+
+which will return the authorization state for the authenticated requester as JSON object.
+
+
+If-None-Match and Etag
+
+All GET requests are served with Etag and obey the If-None-Match request. This allows clients to check
+whether new data is available without downloading and comparing the entire response. If a client puts
+the received Etag of a request into the If-None-Match header of a subsequent request, then the system will
+simply response to that subsequent with a 304 Not Modified in case the resource was not changed. In case
+the resource was changed, the request will be answered as usual.
 
 
 */

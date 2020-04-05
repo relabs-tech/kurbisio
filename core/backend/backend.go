@@ -146,6 +146,10 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 			b.createRelationResource(router, *rc.relation)
 		}
 	}
+
+	for _, sc := range b.config.Shortcuts {
+		b.createShortcut(router, sc)
+	}
 }
 
 type relationInjection struct {
@@ -280,14 +284,20 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 	}).Methods(http.MethodPatch)
 }
 
-func (b *Backend) createShortcutRoute(router *mux.Router, resources []string) {
-	resource := resources[len(resources)-1]
-	prefix := "/" + resource
+func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
+	shortcut := sc.Shortcut
+	target := sc.Target
+
+	targetResources := strings.Split(target, "/")
+	prefix := "/" + shortcut
 	var matchPrefix string
-	for _, s := range resources {
-		matchPrefix += "/" + plural(s) + "/id"
+	var targetDoc string
+	for _, s := range targetResources {
+		targetDoc += "/" + plural(s) + "/{" + s + "_id}"
+		matchPrefix += "/" + plural(s) + "/" + s + "_id"
 	}
 
+	log.Println("create shortcut from", shortcut, "to", targetDoc)
 	log.Println("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
 
 	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -304,8 +314,17 @@ func (b *Backend) createShortcutRoute(router *mux.Router, resources []string) {
 		}
 
 		auth := access.AuthorizationFromContext(r.Context())
+		authorized := auth.HasRole("admin")
+		for i := 0; i < len(sc.Roles) && !authorized; i++ {
+			role := sc.Roles[i]
+			authorized = (auth.HasRole(role) || (auth.HasRoles() && role == "everybody") || role == "public")
+		}
+		if !authorized {
+			http.Error(w, "not authorized", http.StatusUnauthorized)
+			return
+		}
 		newPrefix := ""
-		for _, s := range resources {
+		for _, s := range targetResources {
 			id, ok := auth.Selector(s + "_id")
 			if !ok {
 				http.Error(w, fmt.Sprintf("missing selector for %s", s), http.StatusBadRequest)

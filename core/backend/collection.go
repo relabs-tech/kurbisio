@@ -699,8 +699,4 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.WriteHeader(http.StatusNoContent)
 
 	}).Methods(http.MethodDelete)
-
-	if rc.Shortcuts {
-		b.createShortcutRoute(router, resources)
-	}
 }
