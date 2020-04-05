@@ -283,21 +283,37 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 func (b *Backend) createShortcutRoute(router *mux.Router, resources []string) {
 	resource := resources[len(resources)-1]
 	prefix := "/" + resource
+	var matchPrefix string
+	for _, s := range resources {
+		matchPrefix += "/" + plural(s) + "/id"
+	}
+
 	log.Println("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
 
 	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called shortcut route for", r.URL, r.Method)
+		tail := strings.TrimPrefix(r.URL.Path, prefix)
+
+		var match mux.RouteMatch
+		r.URL.Path = matchPrefix + tail
+		log.Println("try to match route", r.URL.Path)
+		if !router.Match(r, &match) {
+			log.Println("got a match")
+			http.NotFound(w, r)
+			return
+		}
+
 		auth := access.AuthorizationFromContext(r.Context())
 		newPrefix := ""
 		for _, s := range resources {
 			id, ok := auth.Selector(s + "_id")
 			if !ok {
-				http.Error(w, resource+" not authorized", http.StatusUnauthorized)
+				http.Error(w, fmt.Sprintf("missing selector for %s", s), http.StatusBadRequest)
 				return
 			}
 			newPrefix += "/" + plural(s) + "/" + id
 		}
-		r.URL.Path = newPrefix + strings.TrimPrefix(r.URL.Path, prefix)
+		r.URL.Path = newPrefix + tail
 		log.Println("redirect shortcut route to:", r.URL)
 		router.ServeHTTP(w, r)
 	}
