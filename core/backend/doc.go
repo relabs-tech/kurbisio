@@ -240,38 +240,61 @@ TBD describe notifications in configuration JSON
 
 Authorization
 
-if AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
-By default, only the "admin" role has access to resources. A permissions object for each resource
-permits specific roles to execute specific operations. The different operations are: "create", "read", "update"
-and "delete". Each operation is further qualified whether it is permitted for only one single instance ("one")
-of the resource, or for the entire collection ("all").
+If AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
+By default, only the "admin" role has a permit to access resources. A permit object for each resource
+authorizes specific roles to execute specific operations. The different operations are: "create", "read", "update",
+"delete" and "list". The "list"-operation is the retrieval of the entire collection.
 
-For example, you want to specify a resource "pictures", which is a child-resource of "user". Now you want to
-give each user permission to create, read and delete their own pictures, but only their own pictures.
-Therefore you qualify "one" for the parent resource, and "all" for the picture resource:
+For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
+give each user permission to create, read and delete their own pictures, but only their own pictures. You
+delare a role for a user  - in this case "userrole" - and specify the resource like this:
 
-  {
-	"resource": "user/pictures",
-	"permissions" : {
-		"user": ["create:one/all","read:one/all","delete:one/all"]
-	}
-  }
+		{
+			"resource": "user/picture",
+			"permits": [
+				{
+					"role": "userrole",
+					"operations": [
+						"create",
+						"read",
+						"update",
+						"delete",
+						"list"
+					],
+					"selectors": [
+						"user"
+					]
+				}
+			]
+		}
+
+The selector basically states that the authorization object must contain a concrete user_id, and
+that any of the operations is only permitted for this user_id.
 
 Now users want to be able to give out links to their pictures. The public should be able to read them,
 but they should not be able to list all picture, nor to create new ones or delete them.
-You can achieve this, by giving the public read access to pictures with qualifier "one":
+You can achieve this, by giving the public read access to pictures:
 
-  {
-	"permissions" : {
-		...
-		"public": ["read:one/one"]
-		...
-	}
-  }
+			"permits": [
+				...
+				{
+					"role": "public",
+					"operations": [
+						"read"
+					]
+				}
+			]
 
-There are three special roles in the system: The "admin" role who by default has permission for everything.
+There are three special roles in the system: The "admin" role who has permission to do everything.
 The "public" role, which is assumed by every non-authorized request. And finally the "everybody" role,
 which is a placeholder for any other role in the system but "public".
+
+You can easily check the authorization state of any token, by doing a GET request to
+
+   /authorization
+
+which will return the authorization state for the authenticated requester.
+
 
 If-None-Match and Etag
 

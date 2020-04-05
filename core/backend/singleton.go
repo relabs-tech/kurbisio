@@ -143,7 +143,7 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, access.QualifierAll, params, rc.Permissions) {
+			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -258,7 +258,7 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, access.QualifierOne, params, rc.Permissions) {
+			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -316,7 +316,7 @@ func (b *Backend) createSingletonResource(router *mux.Router, rc singletonConfig
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, access.QualifierAll, params, rc.Permissions) {
+			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}

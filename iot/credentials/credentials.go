@@ -95,8 +95,8 @@ func (a *API) addMiddleware(router *mux.Router) {
 				thing := r.Header.Get("Kurbisio-Thing-Identifier")
 				if key == a.kurbisioThingKey && len(thing) > 0 {
 					auth := access.Authorization{
-						Properties: map[string]string{"thing": thing},
-						Roles:      []string{"thing"},
+						Selectors: map[string]string{"thing": thing},
+						Roles:     []string{"thing"},
 					}
 					ctx := auth.ContextWithAuthorization(r.Context())
 					r = r.WithContext(ctx)
@@ -120,7 +120,7 @@ func (a *API) addMiddleware(router *mux.Router) {
 						}
 						auth = &access.Authorization{
 							Roles:     []string{"device"},
-							Resources: map[string]uuid.UUID{"device_id": deviceID},
+							Selectors: map[string]string{"device_id": deviceID.String()},
 						}
 					}
 
@@ -162,7 +162,7 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 				http.Error(w, "thing not authorized", http.StatusUnauthorized)
 				return
 			}
-			thing, _ := auth.Property("thing")
+			thing, _ := auth.Selector("thing")
 			log.Println("credential request from", thing)
 
 			var deviceID, token uuid.UUID

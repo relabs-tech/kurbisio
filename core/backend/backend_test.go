@@ -244,7 +244,7 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	}
 
 	auth := access.Authorization{
-		Resources: map[string]uuid.UUID{"b_id": b.BID},
+		Selectors: map[string]string{"b_id": b.BID.String()},
 	}
 
 	loggedInClient := testService.client.WithAuthorization(&auth)

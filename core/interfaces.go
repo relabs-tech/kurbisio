@@ -1,6 +1,6 @@
 package core
 
-// Operation represents a modifying backend storage operation, one of Create, Read, Update,Delete
+// Operation represents a modifying backend storage operation, one of Create, Read, Update, Delete, List
 //
 type Operation string
 
@@ -10,6 +10,7 @@ const (
 	OperationRead   Operation = "read"
 	OperationUpdate Operation = "update"
 	OperationDelete Operation = "delete"
+	OperationList   Operation = "list"
 )
 
 // Notifier is an interface to receive database notifications

@@ -5,13 +5,10 @@ package access
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 )
@@ -47,9 +44,8 @@ For the benefit of simple frontend development, it also supports a Kurbisio-JWT 
 
 */
 type Authorization struct {
-	Roles      []string             `json:"roles"`
-	Resources  map[string]uuid.UUID `json:"resources,omitempty"`
-	Properties map[string]string    `json:"properties,omitempty"`
+	Roles     []string          `json:"roles"`
+	Selectors map[string]string `json:"selectors,omitempty"`
 }
 
 // Qualifier represents a permission qualifier
@@ -76,76 +72,71 @@ func (a *Authorization) HasRole(role string) bool {
 	return false
 }
 
-// Identifier returns the identifier for the requested resource; if the
-// identifier does not exist, it returns an empty uuid and false.
-func (a *Authorization) Identifier(resource string) (uuid.UUID, bool) {
-	fmt.Println("check auth identifier for ", resource)
-	if a == nil || a.Resources == nil {
-		return uuid.UUID{}, false
+// HasRoles returns true if the authorization contains any roles;
+// otherwise it returns false
+func (a *Authorization) HasRoles() bool {
+	if a == nil {
+		return false
 	}
-	value, ok := a.Resources[resource+"_id"]
+	return len(a.Roles) > 0
+}
+
+// Selector returns the value for the requested key; if the
+// selector does not exist, it returns an empty string and false.
+func (a *Authorization) Selector(key string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	value, ok := a.Selectors[key]
 	return value, ok
 }
 
-// Property returns the value for the requested property; if the
-// identifier does not exist, it returns an empty string and false.
-func (a *Authorization) Property(name string) (string, bool) {
-	if a == nil || a.Properties == nil {
-		return "", false
-	}
-	value, ok := a.Properties[name]
-	return value, ok
+// Permit models an authorization permit for a resource. It gives the role
+// permission to execute any of the listed operations, provided that
+// it can satisfy the requested selectors.
+type Permit struct {
+	Role       string   `json:"role"`
+	Operations []string `json:"operations"`
+	Selectors  []string `json:"selectors"`
 }
 
 // IsAuthorized returns true if the authorization is authorized for the requested
-// resource and operation according to the passed permissions.
+// resource and operation according to the passed permits.
 //
-// The permissions are a map from role to qualified operations, as specified in the backend configuration.
+// The permits are a list of Permit objects, each containing a role, a list of operations and a
+// list of required selectors.
 //
-// The "admin" role is always authorized by default, unless specified otherwise for a resource.
-// If a permission if given to "everybody", then this permission applies to all roles.
-func (a *Authorization) IsAuthorized(resources []string, operation core.Operation, qualifier Qualifier,
-	params map[string]string, permissions map[string][]string) bool {
+// The "admin" role has a universal permit for all operations. If a permit if given to "everybody",
+// then this permit applies to all roles but "public"
+func (a *Authorization) IsAuthorized(resources []string, operation core.Operation, params map[string]string, permits []Permit) bool {
 
-	var roles []string
-
-	if a != nil {
-		roles = a.Roles
+	if a.HasRole("admin") {
+		return true // admin is always authorized
 	}
-	roles = append(roles, "public")
 
-	for _, role := range roles {
-		rolePermissions, ok := permissions[role]
-		if !ok && role != "public" {
-			rolePermissions, ok = permissions["everybody"]
+	for _, permit := range permits {
+
+		// check if permit is applicable
+		if !(a.HasRole(permit.Role) || (a.HasRoles() && permit.Role == "everybody") || permit.Role == "public") {
+			continue
 		}
-		if !ok && role == "admin" {
-			return true // admin by default is always authorized
+		// check if the permit contains the necessary permission for the requested operation
+		found := false
+		for i := 0; i < len(permit.Operations) && !found; i++ {
+			found = permit.Operations[i] == string(operation)
 		}
-
-		for _, rolePermission := range rolePermissions {
-			if i := strings.IndexRune(rolePermission, ':'); i >= 0 && rolePermission[:i] == string(operation) {
-				qualifiers := strings.Split(rolePermission[i+1:], "/")
-				if len(qualifiers) == len(resources) {
-					qualified := true
-
-					// the the operation is on a collection, then we require "all" permission
-					if qualifier == QualifierAll && qualifiers[len(qualifiers)-1] != string(qualifier) {
-						qualified = false
-						continue
-					}
-					for i, qualifier := range qualifiers {
-						id, ok := a.Identifier(resources[i])
-						if ok && qualifier == string(QualifierOne) {
-							param, ok := params[resources[i]+"_id"]
-							qualified = qualified && ok && param == id.String()
-						}
-					}
-					if qualified {
-						return true
-					}
-				}
-			}
+		if !found {
+			continue
+		}
+		// check that we have all requested selectors
+		fail := false
+		for i := 0; i < len(permit.Selectors) && !fail; i++ {
+			id := permit.Selectors[i] + "_id"
+			selector, ok := a.Selector(id)
+			fail = !ok || selector != params[id]
+		}
+		if !fail {
+			return true
 		}
 	}
 	return false
@@ -205,7 +196,8 @@ func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 
 // HandleAuthorizationRoute adds a route /authorization GET to the router
 //
-// The route returns the current authorization for provided bearer token.
+// The route returns the current authorization for the authenticated
+// requester.
 func HandleAuthorizationRoute(router *mux.Router) {
 	log.Println("authorization")
 	log.Println("  handle route: /authorization GET")

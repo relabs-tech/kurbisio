@@ -290,12 +290,12 @@ func (b *Backend) createShortcutRoute(router *mux.Router, resources []string) {
 		auth := access.AuthorizationFromContext(r.Context())
 		newPrefix := ""
 		for _, s := range resources {
-			id, ok := auth.Identifier(s)
+			id, ok := auth.Selector(s + "_id")
 			if !ok {
 				http.Error(w, resource+" not authorized", http.StatusUnauthorized)
 				return
 			}
-			newPrefix += "/" + plural(s) + "/" + id.String()
+			newPrefix += "/" + plural(s) + "/" + id
 		}
 		r.URL.Path = newPrefix + strings.TrimPrefix(r.URL.Path, prefix)
 		log.Println("redirect shortcut route to:", r.URL)
