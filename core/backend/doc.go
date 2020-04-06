@@ -92,7 +92,7 @@ The models look like this:
 
 
 We can now create a user with a simple POST:
-  curl http://localhost:3000/users -d'{"email":"test@test.com", "properties":{"name":"Jonathan Test"}}'
+  curl http://localhost:3000/users -d'{"identity":"test@test.com", "properties":{"name":"Jonathan Test"}}'
   {
 	"created_at": "2020-03-23T16:01:08.138302Z",
  	"identity": "test@test.com",
