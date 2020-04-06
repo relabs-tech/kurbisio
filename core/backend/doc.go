@@ -137,7 +137,7 @@ This adds a profile to the user, or updates the user's profile:
 	 "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
   }
 
-Logged-In Routes
+Shortcut Routes
 
 The above example can be made even more user friendly, by adding shortcut routes for the authenticated user. Say we
 have a role "userrole" which contains a selector for a user resource. Then we can declare a shortcut with
