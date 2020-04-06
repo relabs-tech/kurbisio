@@ -22,3 +22,7 @@
 
 #configuration data
 .config/
+
+
+#generate go files
+generated_*.go
