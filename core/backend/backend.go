@@ -77,6 +77,7 @@ func New(bb *Builder) *Backend {
 		authorizationEnabled: bb.AuthorizationEnabled,
 	}
 
+	b.handleCORS(b.router)
 	access.HandleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
 	return b
