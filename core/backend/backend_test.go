@@ -29,8 +29,7 @@ var configurationJSON string = `{
 		"searchable_properties": ["searchable_prop"]
 	  },
 	  {
-		"resource": "b",
-		"shortcuts": true
+		"resource": "b"
 	  },
 	  {
 		"resource": "b/c"
@@ -56,7 +55,14 @@ var configurationJSON string = `{
 		"searchable_properties":["content_type"]
 	  }
 	],
-	"relations": []
+	"relations": [],
+	"shortcuts": [
+		{
+			"shortcut" : "b",
+			"target" : "b",
+			"roles" : ["beerole"]
+		}
+	]
   }
 `
 
@@ -233,7 +239,7 @@ func TestResourceBCD(t *testing.T) {
 
 }
 
-func TestResourceBCD_LoggedInRoutes(t *testing.T) {
+func TestResourceBCD_Shortcuts(t *testing.T) {
 
 	empty := Empty{}
 	b := B{}
@@ -244,13 +250,14 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	}
 
 	auth := access.Authorization{
+		Roles:     []string{"beerole"},
 		Selectors: map[string]string{"b_id": b.BID.String()},
 	}
 
-	loggedInClient := testService.client.WithAuthorization(&auth)
+	authenticatedClient := testService.client.WithAuthorization(&auth)
 
 	bl := B{}
-	_, err = loggedInClient.Get("/b", &bl)
+	_, err = authenticatedClient.Get("/b", &bl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,13 +266,13 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	}
 
 	c := C{}
-	_, err = loggedInClient.Post("/b/cs", &empty, &c)
+	_, err = authenticatedClient.Post("/b/cs", &empty, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	d := D{}
-	_, err = loggedInClient.Post("/b/cs/"+c.CID.String()+"/ds", &empty, &d)
+	_, err = authenticatedClient.Post("/b/cs/"+c.CID.String()+"/ds", &empty, &d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +282,7 @@ func TestResourceBCD_LoggedInRoutes(t *testing.T) {
 	}
 
 	// delete the root object b, this should cascade to all child objects
-	status, err := loggedInClient.Delete("/b")
+	status, err := authenticatedClient.Delete("/b")
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
