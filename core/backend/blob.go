@@ -514,6 +514,60 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}).Methods(http.MethodPost)
 
+	// READ
+	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		getOne(w, r)
+	}).Methods(http.MethodGet)
+
+	// READ ALL
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		getCollection(w, r, nil)
+	}).Methods(http.MethodGet)
+
+	// DELETE
+	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		params := mux.Vars(r)
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if count == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if hasNotificationDelete && b.notifier != nil {
+			notification := make(map[string]interface{})
+			for i := 0; i < propertiesIndex; i++ {
+				notification[columns[i]] = params[columns[i]]
+			}
+			jsonData, _ := json.MarshalIndent(notification, "", " ")
+			b.notifier.Notify(resource, core.OperationDelete, jsonData)
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	}).Methods(http.MethodDelete)
+
+	// skip update route if the blob is not mutable
+	if !rc.Mutable {
+		return
+	}
 	// UPDATE
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
@@ -592,55 +646,5 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
 	}).Methods(http.MethodPut)
-
-	// READ
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-
-		getOne(w, r)
-	}).Methods(http.MethodGet)
-
-	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		getCollection(w, r, nil)
-	}).Methods(http.MethodGet)
-
-	// DELETE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-
-		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		if hasNotificationDelete && b.notifier != nil {
-			notification := make(map[string]interface{})
-			for i := 0; i < propertiesIndex; i++ {
-				notification[columns[i]] = params[columns[i]]
-			}
-			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, core.OperationDelete, jsonData)
-		}
-		w.WriteHeader(http.StatusNoContent)
-
-	}).Methods(http.MethodDelete)
 
 }

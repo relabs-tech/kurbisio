@@ -52,7 +52,8 @@ var configurationJSON string = `{
 	"blobs": [
 	  {
 		"resource": "blob",
-		"searchable_properties":["content_type"]
+		"searchable_properties":["content_type"],
+		"mutable": true
 	  }
 	],
 	"relations": [],
