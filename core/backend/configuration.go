@@ -1,6 +1,8 @@
 package backend
 
-import "github.com/relabs-tech/backends/core/access"
+import (
+	"github.com/relabs-tech/backends/core/access"
+)
 
 // backendConfiguration holds a complete backend configuration
 type backendConfiguration struct {

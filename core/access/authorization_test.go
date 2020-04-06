@@ -34,7 +34,7 @@ func TestAuthorization_Public(t *testing.T) {
 	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "public",
-		Operations: []string{"read"},
+		Operations: []core.Operation{"read"},
 	}
 	permits := []Permit{permit}
 
@@ -64,7 +64,7 @@ func TestAuthorization_Everybody(t *testing.T) {
 	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "everybody",
-		Operations: []string{"read"},
+		Operations: []core.Operation{"read"},
 	}
 	permits := []Permit{permit}
 
@@ -100,7 +100,7 @@ func TestAuthorization_Selector(t *testing.T) {
 	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "userrole",
-		Operations: []string{"read"},
+		Operations: []core.Operation{"read"},
 		Selectors:  []string{"user"},
 	}
 	permits := []Permit{permit}
@@ -144,7 +144,7 @@ func TestAuthorization_ParentSelector(t *testing.T) {
 	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "fleetadmin",
-		Operations: []string{"read"},
+		Operations: []core.Operation{"read"},
 		Selectors:  []string{"fleet"},
 	}
 	permits := []Permit{permit}

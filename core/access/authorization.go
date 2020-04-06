@@ -95,9 +95,9 @@ func (a *Authorization) Selector(key string) (string, bool) {
 // permission to execute any of the listed operations, provided that
 // it can satisfy the requested selectors.
 type Permit struct {
-	Role       string   `json:"role"`
-	Operations []string `json:"operations"`
-	Selectors  []string `json:"selectors"`
+	Role       string      `json:"role"`
+	Operations []core.Operation `json:"operations"`
+	Selectors  []string    `json:"selectors"`
 }
 
 // IsAuthorized returns true if the authorization is authorized for the requested
@@ -123,7 +123,7 @@ func (a *Authorization) IsAuthorized(resources []string, operation core.Operatio
 		// check if the permit contains the necessary permission for the requested operation
 		found := false
 		for i := 0; i < len(permit.Operations) && !found; i++ {
-			found = permit.Operations[i] == string(operation)
+			found = permit.Operations[i] == operation
 		}
 		if !found {
 			continue
