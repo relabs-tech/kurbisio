@@ -454,7 +454,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// hide "state" from response unless true
+		// hide "state" from response unless defined
 		if state, ok := response["state"].(string); !ok || len(state) == 0 {
 			delete(response, "state")
 		}
@@ -609,6 +609,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// hide "state" from response unless defined
+		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+			delete(response, "state")
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
@@ -778,6 +783,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		// hide "state" from response unless defined
+		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+			delete(response, "state")
+		}
+
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		if hasNotificationCreate && b.notifier != nil {
 			b.notifier.Notify(resource, core.OperationCreate, jsonData)
@@ -940,6 +950,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// hide "state" from response unless defined
+		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+			delete(response, "state")
+		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		if b.notifier != nil {
@@ -1003,6 +1017,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 			}
+		}
+		// hide "state" from response unless defined
+		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+			delete(response, "state")
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
