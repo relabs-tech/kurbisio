@@ -48,16 +48,6 @@ type Authorization struct {
 	Selectors map[string]string `json:"selectors,omitempty"`
 }
 
-// Qualifier represents a permission qualifier
-type Qualifier string
-
-const (
-	// QualifierOne means access to exactly one object in a collection
-	QualifierOne Qualifier = "one"
-	// QualifierAll means access to all objects in a collection
-	QualifierAll Qualifier = "all"
-)
-
 // HasRole returns true if the authorization contains the requested role;
 // otherwise it returns false.
 func (a *Authorization) HasRole(role string) bool {

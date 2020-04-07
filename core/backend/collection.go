@@ -512,7 +512,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			param := params[key]
 			values[i] = param
 			value, ok := bodyJSON[key]
-			if ok && param != value.(string) {
+			if ok && param != "all" && param != value.(string) {
 				http.Error(w, "illegal "+key, http.StatusBadRequest)
 				return
 			}
@@ -683,7 +683,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if i < propertiesIndex { // the core identifiers
 				value, ok := bodyJSON[k]
 				param, _ := params[k]
-				if ok && param != value.(string) {
+				if ok && param != "all" && param != value.(string) {
 					http.Error(w, "illegal "+k, http.StatusBadRequest)
 					return
 				}
@@ -852,7 +852,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			param := params[key]
 			values[i] = param
 			value, ok := bodyJSON[key]
-			if ok && param != value.(string) {
+			if ok && param != "all" && param != value.(string) {
 				http.Error(w, "illegal "+key, http.StatusBadRequest)
 				return
 			}

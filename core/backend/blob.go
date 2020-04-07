@@ -551,7 +551,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		values := make([]interface{}, len(columns)+1)
 
-		// first add the values for the where-query.
+		// first add the values for the where-query
 		for i := 0; i < propertiesIndex; i++ {
 			values[i] = params[columns[i]]
 		}
