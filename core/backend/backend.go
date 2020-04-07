@@ -135,10 +135,16 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 
 	for _, rc := range allResources {
 		if rc.collection != nil {
-			b.createCollectionResource(router, *rc.collection)
+			b.createCollectionResource(router, *rc.collection, false)
 		}
 		if rc.singleton != nil {
-			b.createSingletonResource(router, *rc.singleton)
+			// a singleton is a a specialized collection
+			tmp := collectionConfiguration{
+				Resource:      rc.singleton.Resource,
+				Notifications: rc.singleton.Notifications,
+				Permits:       rc.singleton.Permits,
+			}
+			b.createCollectionResource(router, tmp, true)
 		}
 		if rc.blob != nil {
 			b.createBlobResource(router, *rc.blob)
@@ -184,27 +190,27 @@ func parameterString(n int) string {
 }
 
 // returns s[0]=$1 AND ... AND s[n-1]=$n
-func compareString(s []string) string {
+func compareIDsString(s []string) string {
 	result := ""
 	i := 0
 	for ; i < len(s); i++ {
 		if i > 0 {
 			result += " AND "
 		}
-		result += s[i] + " = $" + strconv.Itoa(i+1)
+		result += fmt.Sprintf("($%d = 'all' OR %s = $%d::UUID)", i+1, s[i], i+1)
 	}
 	return result
 }
 
 // returns s[0]=$(offset+1) AND ... AND s[n-1]=$(offset+n)
-func compareStringWithOffset(offset int, s []string) string {
+func compareIDsStringWithOffset(offset int, s []string) string {
 	result := ""
 	i := 0
 	for ; i < len(s); i++ {
 		if i > 0 {
 			result += " AND "
 		}
-		result += s[i] + " = $" + strconv.Itoa(i+offset+1)
+		result += fmt.Sprintf("($%d::VARCHAR = 'all' OR %s = $%d)", i+offset+1, s[i], i+offset+1)
 	}
 	return result
 }
@@ -229,7 +235,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 		var childJSON interface{}
 		status, err := client.Get(r.URL.Path+"/"+child, &childJSON)
 		if err != nil {
-			return status, err
+			return status, fmt.Errorf("cannot get child %s", child)
 		}
 		response[child] = &childJSON
 	}
@@ -282,7 +288,7 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 		w.WriteHeader(http.StatusOK)
 		w.Write(response)
 
-	}).Methods(http.MethodPatch)
+	}).Methods(http.MethodOptions, http.MethodPatch)
 }
 
 func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
@@ -337,8 +343,8 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 		log.Println("redirect shortcut route to:", r.URL)
 		router.ServeHTTP(w, r)
 	}
-	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
-	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
+	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
+	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 }
 
 // propertyNameToCanonicalHeader converts kurbisio JSON property names

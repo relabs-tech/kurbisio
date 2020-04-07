@@ -99,7 +99,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		w.Header().Set("Content-Type", "application/json")
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Write(jsonData)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -125,7 +125,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		w.Header().Set("Content-Type", "application/json")
 		jsonData, _ := json.MarshalIndent(t, "", " ")
 		w.Write(jsonData)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -151,7 +151,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		w.Header().Set("Content-Type", "application/json")
 		jsonData, _ := json.MarshalIndent(t.Request, "", " ")
 		w.Write(jsonData)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -177,7 +177,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 		w.Header().Set("Content-Type", "application/json")
 		jsonData, _ := json.MarshalIndent(t.Report, "", " ")
 		w.Write(jsonData)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -222,7 +222,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 			w.WriteHeader(http.StatusBadRequest)
 		}
 
-	}).Methods(http.MethodPut)
+	}).Methods(http.MethodOptions, http.MethodPut)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -262,7 +262,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 			w.WriteHeader(http.StatusBadRequest)
 		}
 
-	}).Methods(http.MethodPut)
+	}).Methods(http.MethodOptions, http.MethodPut)
 
 }
 

@@ -95,9 +95,9 @@ func (a *Authorization) Selector(key string) (string, bool) {
 // permission to execute any of the listed operations, provided that
 // it can satisfy the requested selectors.
 type Permit struct {
-	Role       string      `json:"role"`
+	Role       string           `json:"role"`
 	Operations []core.Operation `json:"operations"`
-	Selectors  []string    `json:"selectors"`
+	Selectors  []string         `json:"selectors"`
 }
 
 // IsAuthorized returns true if the authorization is authorized for the requested
@@ -211,6 +211,6 @@ func HandleAuthorizationRoute(router *mux.Router) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(jsonData)
 		}
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 }

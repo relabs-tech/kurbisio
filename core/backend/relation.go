@@ -74,7 +74,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	sqlInjectRelation := fmt.Sprintf("AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", this, this, schema, resource)
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
-	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareString(resourceColumns))
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(resourceColumns))
 
 	allRoute := ""
 	oneRoute := ""
@@ -109,7 +109,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		}
 
 		collection.getAll(w, r, injectRelation)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +123,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			}
 		}
 		collection.getOne(w, r)
-	}).Methods(http.MethodGet)
+	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// CREATE
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
-	}).Methods(http.MethodPut)
+	}).Methods(http.MethodOptions, http.MethodPut)
 
 	// DELETE
 	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +191,6 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}).Methods(http.MethodDelete)
+	}).Methods(http.MethodOptions, http.MethodDelete)
 
 }

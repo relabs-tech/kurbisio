@@ -165,6 +165,12 @@ This would create these additional REST routes for the authenticated user:
 
 Effectively, the path segement /user/{user_id} is replaced with the shortcut /user for all generated routes.
 
+Wildcard Queries
+
+You can replace any id in a path segment with the keyword "all". For example, if some administrators wants
+to retrieve all profiles from all users, they would query
+   GET /users/all/profiles
+
 Dynamic Properties
 
 Every resource has a property "properties", which contains a free-form JSON object. This object is optional during creation and

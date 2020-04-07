@@ -256,5 +256,5 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 					Token:       token,
 				})
 
-		}).Methods(http.MethodGet)
+		}).Methods(http.MethodOptions, http.MethodGet)
 }

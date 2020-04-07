@@ -7,9 +7,6 @@ import (
 )
 
 func (b *Backend) handleCORS(router *mux.Router) {
-	router.HandleFunc("/{rest:.+}", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}).Methods(http.MethodOptions)
 
 	corseMiddleware := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

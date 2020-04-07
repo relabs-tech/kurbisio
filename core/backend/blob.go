@@ -140,13 +140,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", blob, created_at FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
-	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
+	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex]) + ";"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
-		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
+		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
@@ -327,7 +327,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		if relation != nil {
 			// ingest subquery for relation
 			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareStringWithOffset(len(queryParameters), relation.columns))
+				compareIDsStringWithOffset(len(queryParameters), relation.columns))
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
@@ -365,17 +365,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	getOne := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
+		}
+
+		if queryParameters[0].(string) == "all" {
+			http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+			return
 		}
 
 		if rc.Mutable {
@@ -405,6 +402,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var createdAt time.Time
 		values, response := createScanValuesAndObjectWithBlob(&blob, &createdAt)
 
+		fmt.Println("QUERY", readQuery+sqlWhereOne)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -430,23 +428,33 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(blob)
 	}
 
-	collection := collectionHelper{
-		getAll: getCollection,
-		getOne: getOne,
+	getOneWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		getOne(w, r)
 	}
 
-	// store the collection helper for later usage in relations
-	b.collectionHelper[this] = &collection
+	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 
-	// CREATE
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
 		blob, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		params := mux.Vars(r)
 
 		metaData := []byte(r.Header.Get("Kurbisio-Meta-Data"))
 		if len(metaData) == 0 {
@@ -512,72 +520,23 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(jsonData)
-
-	}).Methods(http.MethodPost)
-
-	// READ
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-
-		getOne(w, r)
-	}).Methods(http.MethodGet)
-
-	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		getCollection(w, r, nil)
-	}).Methods(http.MethodGet)
-
-	// DELETE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-
-		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		if hasNotificationDelete && b.notifier != nil {
-			notification := make(map[string]interface{})
-			for i := 0; i < propertiesIndex; i++ {
-				notification[columns[i]] = params[columns[i]]
-			}
-			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, core.OperationDelete, jsonData)
-		}
-		w.WriteHeader(http.StatusNoContent)
-
-	}).Methods(http.MethodDelete)
-
-	// skip update route if the blob is not mutable
-	if !rc.Mutable {
-		return
 	}
-	// UPDATE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+
+	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		blob, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		params := mux.Vars(r)
 
 		metaData := []byte(r.Header.Get("Kurbisio-Meta-Data"))
 		if len(metaData) == 0 {
@@ -646,6 +605,90 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
-	}).Methods(http.MethodPut)
+
+	}
+
+	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		count, err := res.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if count == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if hasNotificationDelete && b.notifier != nil {
+			notification := make(map[string]interface{})
+			for i := 0; i < propertiesIndex; i++ {
+				notification[columns[i]] = params[columns[i]]
+			}
+			jsonData, _ := json.MarshalIndent(notification, "", " ")
+			b.notifier.Notify(resource, core.OperationDelete, jsonData)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+
+	collection := collectionHelper{
+		getAll: getCollection,
+		getOne: getOne,
+	}
+
+	// store the collection helper for later usage in relations
+	b.collectionHelper[this] = &collection
+
+	// CREATE
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		createWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPost)
+
+	// READ
+	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		getOneWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// READ ALL
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		getCollection(w, r, nil)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// DELETE
+	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		deleteWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	// UPDATE
+	if rc.Mutable {
+		router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+			log.Println("called route for", r.URL, r.Method)
+			updateWithAuth(w, r)
+		}).Methods(http.MethodOptions, http.MethodPut)
+	}
 
 }
