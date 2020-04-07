@@ -44,7 +44,7 @@ var configurationJSON string = `{
 		"resource": "created_time"
 	  },
 	  {
-		"resource": "hidden"
+		"resource": "state"
 	  }
 	],
 	"singletons": [
@@ -462,23 +462,23 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 
 }
 
-func TestHidden(t *testing.T) {
-	type Hidden struct {
-		HiddenID uuid.UUID `json:"hidden_id"`
-		Hidden   bool      `json:"hidden"`
+func TestState(t *testing.T) {
+	type State struct {
+		StateID uuid.UUID `json:"state_id"`
+		State   string    `json:"state"`
 	}
 
-	hidden := Hidden{
-		Hidden: true,
+	state := State{
+		State: "partial",
 	}
-	var h Hidden
-	_, err := testService.client.Post("/hiddens", &hidden, &h)
+	var h State
+	_, err := testService.client.Post("/states", &state, &h)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var collection []Hidden
-	_, err = testService.client.Get("/hiddens", &collection)
+	var collection []State
+	_, err = testService.client.Get("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,8 +486,8 @@ func TestHidden(t *testing.T) {
 		t.Fatal("collection not empty as expected")
 	}
 
-	//  the item should be visible in the collection with the hidden query parameter
-	_, err = testService.client.Get("/hiddens?hidden=true", &collection)
+	//  the item should be visible in the collection with the state query parameter
+	_, err = testService.client.Get("/states?state=partial", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,44 +496,44 @@ func TestHidden(t *testing.T) {
 	}
 
 	// create a visible item
-	visible := Hidden{
-		Hidden: false,
+	visible := State{
+		State: "",
 	}
-	var v Hidden
-	_, err = testService.client.Post("/hiddens", &visible, &v)
+	var v State
+	_, err = testService.client.Post("/states", &visible, &v)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// we should now have one visible and one hidden item
-	_, err = testService.client.Get("/hiddens", &collection)
+	// we should now have one visible and one state item
+	_, err = testService.client.Get("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(collection) != 1 {
 		t.Fatal("visible collection does not have one item as expected")
 	}
-	_, err = testService.client.Get("/hiddens?hidden=true", &collection)
+	_, err = testService.client.Get("/states?state=partial", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(collection) != 1 {
-		t.Fatal("hidden collection does not have one item as expected")
+		t.Fatal("state collection does not have one item as expected")
 	}
 
-	// lets make the hidden item visible
-	h.Hidden = false
-	var h3 Hidden
-	_, err = testService.client.Put("/hiddens", &h, &h3)
+	// lets make the state item visible
+	h.State = ""
+	var h3 State
+	_, err = testService.client.Put("/states", &h, &h3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h3.Hidden == true {
-		t.Fatal("still hidden but should not")
+	if h3.State != "" {
+		t.Fatal("still state not empty, but should be empty")
 	}
 
 	// now the item should be visible in the collection, hence we have two items there
-	_, err = testService.client.Get("/hiddens", &collection)
+	_, err = testService.client.Get("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}

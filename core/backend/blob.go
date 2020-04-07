@@ -402,7 +402,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var createdAt time.Time
 		values, response := createScanValuesAndObjectWithBlob(&blob, &createdAt)
 
-		fmt.Println("QUERY", readQuery+sqlWhereOne)
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)

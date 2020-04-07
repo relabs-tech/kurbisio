@@ -232,16 +232,17 @@ no identifier or a null identifier, then the system creates a new unique UUID fo
 a primary identifier in the request, which will be honored by the system. This feature - and the choice of UUID for
 primary identifiers - makes it possible to easily transfer data between different databases.
 
-Hidden Resources
+Hidden Resources and Processing States
 
-Resources in a collection have one additional boolean property "hidden", which is not reported unless
-set to "true". The property makes it possible to create resources in a quasi hidden state. While an item
-remains accessible with a fully qualified access path, it will not be listed in the collection itself. This way
-you can create composite resources, i.e. resources with child resources and relations, and only make them  visible
-to applications once the entire set it ready. The mechanism can also be used to implement post-processing on newly
-created resources before they are made visible to the user.
+Resources in a collection have one additional property "state", which is not reported unless set.
+The property makes it possible to hide resources from user. While an item with a state remains accessible via its
+fully qualified access path, it will not be listed in the collection itself.  This way you can create composite
+resources, i.e. resources with child resources and relations, and only make them visible to applications once the entire
+set it ready. The mechanism can also be used to implement multi-stage post-processing pipelines on newly created resources
+before they are made visible to the user.
 
-You can list hidden resources with the hidden=true query parameter on the collection GET request.
+You can explicitely reqest resources with a specic state by passing state={state} as query parameter on the
+collection GET request.
 
 Notifications
 
