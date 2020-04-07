@@ -178,18 +178,23 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	createScanValuesAndObject := func(createdAt *time.Time) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1)
 		object := map[string]interface{}{}
-		for i, k := range columns {
-			if i < propertiesIndex {
-				values[i] = &uuid.UUID{}
-			} else if i > propertiesIndex {
-				str := ""
-				values[i] = &str
-			} else {
-				values[i] = &json.RawMessage{}
-			}
-			object[k] = values[i]
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
 		}
-		values[len(columns)] = createdAt
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
+		}
+
+		values[i] = createdAt
 		object["created_at"] = createdAt
 		return values, object
 	}
@@ -197,19 +202,24 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	createScanValuesAndObjectWithBlob := func(blob *[]byte, createdAt *time.Time) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
-		for i, k := range columns {
-			if i < propertiesIndex {
-				values[i] = &uuid.UUID{}
-			} else if i > propertiesIndex {
-				str := ""
-				values[i] = &str
-			} else {
-				values[i] = &json.RawMessage{}
-			}
-			object[k] = values[i]
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
 		}
-		values[len(columns)] = blob
-		values[len(columns)+1] = createdAt
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
+		}
+		values[i] = blob
+		i++
+		values[i] = createdAt
 		object["created_at"] = createdAt
 		return values, object
 	}
@@ -217,42 +227,40 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
-		for i, k := range columns {
-			if i < propertiesIndex {
-				values[i] = &uuid.UUID{}
-			} else if i > propertiesIndex {
-				str := ""
-				values[i] = &str
-			} else {
-				values[i] = &json.RawMessage{}
-			}
-			object[k] = values[i]
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
+		}
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
 		}
 		createdAt := &time.Time{}
-		values[len(columns)] = createdAt
-		object["created_at"] = values[len(columns)]
-		values[len(columns)+1] = totalCount
+		values[i] = createdAt
+		object["created_at"] = createdAt
+		i++
+		values[i] = totalCount
 		return values, object
 	}
 
-	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationList, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var queryParameters []interface{}
-		var sqlQuery string
-		limit := 100
-		page := 1
-		until := time.Time{}
-		from := time.Time{}
-		externalColumn := ""
-		externalIndex := ""
+	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		var (
+			queryParameters []interface{}
+			sqlQuery        string
+			limit           int = 100
+			page            int = 1
+			until           time.Time
+			from            time.Time
+			externalColumn  string
+			externalIndex   string
+		)
 
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
@@ -300,7 +308,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-
+		params := mux.Vars(r)
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
@@ -325,7 +333,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
 
 		if relation != nil {
-			// ingest subquery for relation
+			// inject subquery for relation
 			sqlQuery += fmt.Sprintf(relation.subquery,
 				compareIDsStringWithOffset(len(queryParameters), relation.columns))
 			queryParameters = append(queryParameters, relation.queryParameters...)
@@ -361,6 +369,19 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		w.Write(jsonData)
 
+	}
+
+	getAllWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationList, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		getAll(w, r, nil)
 	}
 
 	getOne := func(w http.ResponseWriter, r *http.Request) {
@@ -470,31 +491,38 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns)+2)
 		values[0] = uuid.New()
-		for i := 1; i < len(columns); i++ {
-			k := columns[i]
-			if i < propertiesIndex { // the core identifiers
-				param, _ := params[k]
-				values[i] = param
-			} else if i == propertiesIndex { // the dynamic properties
-				values[i] = metaData
-			} else if i < propertiesEndIndex { // static properties, non mandatory
-				values[i] = r.Header.Get(jsonToHeader[k])
-			} else { // external (unique) indices, mandatory
-				value := r.Header.Get(jsonToHeader[k])
-				if len(value) == 0 {
-					http.Error(w, "missing external index "+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = value
+		var i int
+
+		for i = 1; i < propertiesIndex; i++ { // the core identifiers
+			param, _ := params[columns[i]]
+			values[i] = param
+		}
+		// the dynamic properties
+		values[i] = metaData
+		i++
+
+		// static properties, non mandatory
+		for ; i < propertiesEndIndex; i++ {
+			values[i] = r.Header.Get(jsonToHeader[columns[i]])
+		}
+
+		// external (unique) indices, mandatory
+		for ; i < len(columns); i++ {
+			value := r.Header.Get(jsonToHeader[columns[i]])
+			if len(value) == 0 {
+				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
+				return
 			}
+			values[i] = value
 		}
 
 		// next is the blob itself
-		values[len(columns)] = &blob
+		values[i] = &blob
+		i++
 
 		// last value is created_at
 		createdAt := time.Now().UTC()
-		values[len(columns)+1] = &createdAt
+		values[i] = &createdAt
 
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
@@ -550,23 +578,26 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		values := make([]interface{}, len(columns)+1)
+		var i int
 
 		// first add the values for the where-query
-		for i := 0; i < propertiesIndex; i++ {
+		for i = 0; i < propertiesIndex; i++ {
 			values[i] = params[columns[i]]
 		}
 
 		// the meta data as dynamic properties
-		values[propertiesIndex] = metaData
+		values[i] = metaData
+		i++
 
 		// build the update set
-		for i := propertiesIndex + 1; i < len(columns); i++ {
+		for ; i < len(columns); i++ {
 			k := columns[i]
 			values[i] = r.Header.Get(jsonToHeader[k])
 		}
 
 		// next is the blob itself
-		values[len(columns)] = &blob
+		values[i] = &blob
+		i++
 
 		res, err := b.db.Exec(updateQuery, values...)
 		if err != nil {
@@ -650,7 +681,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	collection := collectionHelper{
-		getAll: getCollection,
+		getAll: getAll,
 		getOne: getOne,
 	}
 
@@ -673,7 +704,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getCollection(w, r, nil)
+		getAllWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE

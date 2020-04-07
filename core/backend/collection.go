@@ -210,51 +210,61 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		n := len(columns)
-		values := make([]interface{}, n+2)
+		values := make([]interface{}, len(columns)+2)
 		object := map[string]interface{}{}
-		for i, k := range columns {
-			if i < propertiesIndex {
-				values[i] = &uuid.UUID{}
-			} else if i > propertiesIndex {
-				str := ""
-				values[i] = &str
-			} else {
-				values[i] = &json.RawMessage{}
-			}
-			object[k] = values[i]
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
 		}
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
+		}
+
 		createdAt := &time.Time{}
-		values[n] = createdAt
+		values[i] = createdAt
 		object["created_at"] = createdAt
+		i++
 		var state string
-		values[n+1] = &state
+		values[i] = &state
 		object["state"] = &state
 		return values, object
 	}
 
 	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
-		n := len(columns)
-		values := make([]interface{}, n+3)
+		values := make([]interface{}, len(columns)+3)
 		object := map[string]interface{}{}
-		for i, k := range columns {
-			if i < propertiesIndex {
-				values[i] = &uuid.UUID{}
-			} else if i > propertiesIndex {
-				str := ""
-				values[i] = &str
-			} else {
-				values[i] = &json.RawMessage{}
-			}
-			object[k] = values[i]
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
+		}
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
 		}
 		createdAt := &time.Time{}
-		values[n] = createdAt
+		values[i] = createdAt
 		object["created_at"] = createdAt
+		i++
 		var state string
-		values[n+1] = &state
+		values[i] = &state
 		object["state"] = &state
-		values[n+2] = totalCount
+		i++
+		values[i] = totalCount
 		return values, object
 	}
 
@@ -346,7 +356,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		queryParameters[propertiesIndex-1+6] = (page - 1) * limit
 
 		if relation != nil {
-			// ingest subquery for relation
+			// inject subquery for relation
 			sqlQuery += fmt.Sprintf(relation.subquery,
 				compareIDsStringWithOffset(len(queryParameters), relation.columns))
 			queryParameters = append(queryParameters, relation.queryParameters...)
@@ -506,8 +516,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		var i int
+
 		// add and validate core identifiers
-		for i := 0; i < propertiesIndex; i++ {
+		for i = 0; i < propertiesIndex; i++ {
 			key := columns[i]
 			param := params[key]
 			values[i] = param
@@ -519,24 +531,22 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build the update set
-		for i := propertiesIndex; i < len(columns); i++ {
-			k := columns[i]
-			if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property or index"+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = value
-			} else {
-				properties, ok := bodyJSON[k]
-				if ok {
-					propertiesJSON, _ := json.Marshal(properties)
-					values[i] = propertiesJSON
-				} else {
-					values[i] = []byte("{}")
-				}
+		properties, ok := bodyJSON["properties"]
+		if ok {
+			propertiesJSON, _ := json.Marshal(properties)
+			values[i] = propertiesJSON
+		} else {
+			values[i] = []byte("{}")
+		}
+		i++
+
+		for ; i < len(columns); i++ {
+			value, ok := bodyJSON[columns[i]]
+			if !ok {
+				http.Error(w, "missing property or index"+columns[i], http.StatusBadRequest)
+				return
 			}
+			values[i] = value
 		}
 
 		// next value is created_at
@@ -554,7 +564,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			createdAt = t.UTC()
 		}
-		values[len(values)-2] = &createdAt
+		values[i] = &createdAt
+		i++
 
 		// last value is state
 		var state string
@@ -565,7 +576,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
-		values[len(values)-1] = &state
+		values[i] = &state
+		i++
 
 		res, err := b.db.Exec(updateQuery, values...)
 		if err != nil {
@@ -678,38 +690,45 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			primaryID = uuid.New()
 		}
 		values[0] = primaryID
-		for i := 1; i < len(columns); i++ {
+		var i int
+		for i = 1; i < propertiesIndex; i++ { // the core identifiers
 			k := columns[i]
-			if i < propertiesIndex { // the core identifiers
-				value, ok := bodyJSON[k]
-				param, _ := params[k]
-				if ok && param != "all" && param != value.(string) {
-					http.Error(w, "illegal "+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = param
-			} else if i == propertiesIndex { // the dynamic properties
-				properties, ok := bodyJSON[k]
-				if ok {
-					propertiesJSON, _ := json.Marshal(properties)
-					values[i] = propertiesJSON
-				} else {
-					values[i] = []byte("{}")
-				}
-			} else if i < propertiesEndIndex { // static properties, non mandatory
-				value, ok := bodyJSON[k]
-				if !ok {
-					value = ""
-				}
-				values[i] = value
-			} else { // external (unique) indices, mandatory
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing external index "+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = value
+			value, ok := bodyJSON[k]
+			param, _ := params[k]
+			if ok && param != "all" && param != value.(string) {
+				http.Error(w, "illegal "+k, http.StatusBadRequest)
+				return
 			}
+			values[i] = param
+		}
+
+		// the dynamic properties
+		properties, ok := bodyJSON[columns[i]]
+		if ok {
+			propertiesJSON, _ := json.Marshal(properties)
+			values[i] = propertiesJSON
+		} else {
+			values[i] = []byte("{}")
+		}
+		i++
+
+		// static properties, non mandatory
+		for ; i < propertiesEndIndex; i++ {
+			value, ok := bodyJSON[columns[i]]
+			if !ok {
+				value = ""
+			}
+			values[i] = value
+		}
+
+		// external (unique) indices, mandatory
+		for ; i < len(columns); i++ {
+			value, ok := bodyJSON[columns[i]]
+			if !ok {
+				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
+				return
+			}
+			values[i] = value
 		}
 
 		// next value is created_at
@@ -729,7 +748,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				createdAt = t.UTC()
 			}
 		}
-		values[len(columns)] = &createdAt
+		values[i] = &createdAt
+		i++
 
 		// last value is state
 		var state string
@@ -740,7 +760,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
-		values[len(columns)+1] = &state
+		values[i] = &state
+		i++
 
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
@@ -846,8 +867,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			primaryID = uuid.New()
 		}
 		values[0] = primaryID
+		var i int
+
 		// add and validate core identifiers
-		for i := 1; i < propertiesIndex; i++ {
+		for i = 1; i < propertiesIndex; i++ {
 			key := columns[i]
 			param := params[key]
 			values[i] = param
@@ -857,25 +880,26 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
+
 		// build the update set
-		for i := propertiesIndex; i < len(columns); i++ {
+		properties, ok := bodyJSON["properties"]
+		if ok {
+			propertiesJSON, _ := json.Marshal(properties)
+			values[i] = propertiesJSON
+		} else {
+			values[i] = []byte("{}")
+		}
+		sets[i-propertiesIndex] = "properties = $" + strconv.Itoa(i+1)
+		i++
+
+		for ; i < len(columns); i++ {
 			k := columns[i]
-			if i > propertiesIndex {
-				value, ok := bodyJSON[k]
-				if !ok {
-					http.Error(w, "missing property or index"+k, http.StatusBadRequest)
-					return
-				}
-				values[i] = value
-			} else {
-				properties, ok := bodyJSON[k]
-				if ok {
-					propertiesJSON, _ := json.Marshal(properties)
-					values[i] = propertiesJSON
-				} else {
-					values[i] = []byte("{}")
-				}
+			value, ok := bodyJSON[k]
+			if !ok {
+				http.Error(w, "missing property or index"+k, http.StatusBadRequest)
+				return
 			}
+			values[i] = value
 			sets[i-propertiesIndex] = k + " = $" + strconv.Itoa(i+1)
 		}
 
@@ -894,7 +918,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			createdAt = t.UTC()
 		}
-		values[len(values)-1] = &createdAt
+		values[i] = &createdAt
+		i++
 
 		var inserted bool
 		var id uuid.UUID
