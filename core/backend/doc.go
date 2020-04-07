@@ -27,8 +27,8 @@ Example:
 	],
 	"relations": [
 	  {
-		"origin": "device",
-		"resource": "user/device"
+		"resource": "user/device",
+		"origin": "device"
 	  }
 	]
   }
