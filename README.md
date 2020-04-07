@@ -1,3 +1,5 @@
+![Build & Test](https://github.com/relabs-tech/backends/workflows/Build%20&%20Test/badge.svg)
+
 # Backends
 Generic repo for different backend work
 
