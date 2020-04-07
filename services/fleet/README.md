@@ -29,7 +29,7 @@ From the `services/fleet/test/backend` and in a different shell than the previou
    1. `npm install`
    1. `npm start`
 
-This will create the `Matthias Ettrich` user as well as one device.
+This will create the `Great Pumkin` user as well as one device.
 
 # Using the Python based device
 

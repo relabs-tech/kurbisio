@@ -138,8 +138,8 @@ function createUser(next) {
    genericPost("/fleets/" + fleet_id + "/users",
       {
          properties: {
-            first_name: "Matthias",
-            last_name: "Ettrich"
+            first_name: "Great",
+            last_name: "Pumkin"
          }
       }, function (response) {
          console.log(response)
