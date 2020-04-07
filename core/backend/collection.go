@@ -21,7 +21,6 @@ import (
 func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
-	log.Println("create collection:", resource)
 
 	hasNotificationCreate := false
 	hasNotificationUpdate := false
@@ -47,6 +46,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	createColumns := []string{
 		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
 		"created_at timestamp NOT NULL DEFAULT now()",
+		"hidden boolean NOT NULL DEFAULT false",
 	}
 
 	columns := []string{this + "_id"}
@@ -136,36 +136,37 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
 	log.Println("  handle collection routes:", oneRoute, "GET,DELETE")
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, hidden FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareString(columns[:propertiesIndex]) + ";"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", created_at, hidden, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND created_at>=$%d ",
-		propertiesIndex, propertiesIndex+1, propertiesIndex+2)
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND hidden=$%d ",
+		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+5)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+5, propertiesIndex+6)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+3, propertiesIndex+4)
+	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at)"
-	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ") RETURNING " + this + "_id;"
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, hidden)"
+	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") RETURNING " + this + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + " " + sqlWhereOne
+	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", hidden = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne
 
 	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+1)
+		n := len(columns)
+		values := make([]interface{}, n+2)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -179,13 +180,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			object[k] = values[i]
 		}
 		createdAt := &time.Time{}
-		values[len(columns)] = createdAt
-		object["created_at"] = values[len(columns)]
+		values[n] = createdAt
+		object["created_at"] = createdAt
+		hidden := false
+		values[n+1] = &hidden
+		object["hidden"] = &hidden
 		return values, object
 	}
 
 	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+2)
+		n := len(columns)
+		values := make([]interface{}, n+3)
 		object := map[string]interface{}{}
 		for i, k := range columns {
 			if i < propertiesIndex {
@@ -199,9 +204,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			object[k] = values[i]
 		}
 		createdAt := &time.Time{}
-		values[len(columns)] = createdAt
-		object["created_at"] = values[len(columns)]
-		values[len(columns)+1] = totalCount
+		values[n] = createdAt
+		object["created_at"] = createdAt
+		hidden := false
+		values[n+1] = &hidden
+		object["hidden"] = &hidden
+		values[n+2] = totalCount
 		return values, object
 	}
 
@@ -212,6 +220,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		page := 1
 		until := time.Time{}
 		from := time.Time{}
+		hidden := false
 		externalColumn := ""
 		externalIndex := ""
 
@@ -238,6 +247,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
+
+			case "hidden":
+				hidden, err = strconv.ParseBool(value)
+
 			default:
 				found := false
 				for i := searchablePropertiesIndex; i < len(columns); i++ {
@@ -264,25 +277,27 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+5)
+			queryParameters = make([]interface{}, propertiesIndex-1+7)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
 			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex-1+5+1)
+			queryParameters = make([]interface{}, propertiesIndex-1+7+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+5] = externalIndex
+			queryParameters[propertiesIndex-1+7] = externalIndex
 		}
 
 		// add before and after and pagination
 		queryParameters[propertiesIndex-1+0] = until.IsZero()
 		queryParameters[propertiesIndex-1+1] = until.UTC()
-		queryParameters[propertiesIndex-1+2] = from.UTC()
-		queryParameters[propertiesIndex-1+3] = limit
-		queryParameters[propertiesIndex-1+4] = (page - 1) * limit
+		queryParameters[propertiesIndex-1+2] = from.IsZero()
+		queryParameters[propertiesIndex-1+3] = from.UTC()
+		queryParameters[propertiesIndex-1+4] = hidden
+		queryParameters[propertiesIndex-1+5] = limit
+		queryParameters[propertiesIndex-1+6] = (page - 1) * limit
 
 		if relation != nil {
 			// ingest subquery for relation
@@ -309,6 +324,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			// hide "hidden" from response unless requested
+			if !hidden {
+				delete(object, "hidden")
 			}
 			response = append(response, object)
 		}
@@ -361,6 +380,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		// hide "hidden" from response unless true
+		if hidden, ok := response["hidden"].(bool); !ok || !hidden {
+			delete(response, "hidden")
+		}
+
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
 		if r.Header.Get("If-None-Match") == etag {
@@ -384,7 +408,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		values := make([]interface{}, len(columns)+1)
+		values := make([]interface{}, len(columns)+2)
 
 		// primary id can come from parameter (fully qualified put) or from body json (collection put)
 		if len(params[columns[0]]) == 0 {
@@ -438,7 +462,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// last value is created_at
+		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
 			timestamp, ok := value.(string)
@@ -453,7 +477,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			createdAt = t.UTC()
 		}
-		values[len(values)-1] = &createdAt
+		values[len(values)-2] = &createdAt
+
+		// last value is hidden
+		hidden := false
+		if value, ok := bodyJSON["hidden"]; ok {
+			hidden, ok = value.(bool)
+			if !ok {
+				http.Error(w, "illegal value for hidden: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		values[len(values)-1] = &hidden
 
 		res, err := b.db.Exec(updateQuery, values...)
 		if err != nil {
@@ -527,7 +562,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns)+1)
+		values := make([]interface{}, len(columns)+2)
 
 		// the primary resource identifier, use as specified or create a new one
 		primaryID, ok := bodyJSON[columns[0]]
@@ -569,13 +604,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// last value is created_at
+		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, ok := value.(string)
-			if ok && len(timestamp) == 0 {
-				createdAt = time.Time{}
-			} else if value != nil {
+			if !ok {
+				http.Error(w, "illegal created_at", http.StatusBadRequest)
+				return
+			}
+			if value != nil {
+				timestamp, _ := value.(string)
 				t, err := time.Parse(time.RFC3339, timestamp)
 				if err != nil {
 					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
@@ -585,6 +622,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		values[len(columns)] = &createdAt
+
+		// last value is hidden
+		hidden := false
+		if value, ok := bodyJSON["hidden"]; ok {
+			hidden, ok = value.(bool)
+			if !ok {
+				http.Error(w, "illegal value for hidden: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		values[len(columns)+1] = &hidden
 
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)

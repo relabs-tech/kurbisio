@@ -41,7 +41,10 @@ var configurationJSON string = `{
 		"resource": "o"
 	  },
 	  {
-		"resource": "zero_time"
+		"resource": "created_time"
+	  },
+	  {
+		"resource": "hidden"
 	  }
 	],
 	"singletons": [
@@ -425,30 +428,57 @@ func TestSingletonOS(t *testing.T) {
 
 }
 
-func TestZeroTimeAndNullID(t *testing.T) {
+func TestCreatedTimeAndNullID(t *testing.T) {
 
-	type ZeroTime struct {
-		ZeroTimeID uuid.UUID `json:"zero_time_id"`
-		CreatedAt  time.Time `json:"created_at"`
+	type CreatedTime struct {
+		CreatedTimeID uuid.UUID `json:"created_time_id"`
+		CreatedAt     time.Time `json:"created_at"`
 	}
 
-	// zNew was created before the dawn of time
-	zNew := ZeroTime{CreatedAt: time.Time{}.Add(-time.Millisecond)}
-	var z ZeroTime
-	_, err := testService.client.Post("/zero_times", &zNew, &z)
+	now := time.Now().UTC().Round(time.Millisecond) // round to postgres precision
+	cNew := CreatedTime{CreatedAt: now}
+	var c CreatedTime
+	_, err := testService.client.Post("/created_times", &cNew, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if z.ZeroTimeID == zNew.ZeroTimeID {
+	if c.CreatedTimeID == cNew.CreatedTimeID {
 		t.Fatal("null id was not replaced")
 	}
-	if z.CreatedAt != zNew.CreatedAt {
-		t.Fatal("zero created_at was not kept")
+	if c.CreatedAt != cNew.CreatedAt {
+		t.Fatal("created_at was not kept")
 	}
 
-	// the pre-zero created_at should be hidden from the collection list
-	var collection []ZeroTime
-	_, err = testService.client.Get("/zero_times", &collection)
+	// an empty created_at string should produce an error
+	emptyString := struct {
+		CreatedAt string `json:"created_at"`
+	}{
+		CreatedAt: "",
+	}
+	_, err = testService.client.Post("/created_times", &emptyString, &c)
+	if err == nil {
+		t.Fatal("eerror expected")
+	}
+
+}
+
+func TestHidden(t *testing.T) {
+	type Hidden struct {
+		HiddenID uuid.UUID `json:"hidden_id"`
+		Hidden   bool      `json:"hidden"`
+	}
+
+	hidden := Hidden{
+		Hidden: true,
+	}
+	var h Hidden
+	_, err := testService.client.Post("/hiddens", &hidden, &h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var collection []Hidden
+	_, err = testService.client.Get("/hiddens", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,21 +486,8 @@ func TestZeroTimeAndNullID(t *testing.T) {
 		t.Fatal("collection not empty as expected")
 	}
 
-	// update created_at from the hidden object and try again
-	now := time.Now().Round(time.Millisecond) // round to postgres precision
-	z.CreatedAt = now
-	var z2 ZeroTime
-	_, err = testService.client.Put("/zero_times", &z, &z2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// the timestamp should come back as UTC
-	if z2.CreatedAt != now.UTC() {
-		t.Fatal("created_at timestamp was not properly updated ")
-	}
-
-	// now the item should be visible in the collection
-	_, err = testService.client.Get("/zero_times", &collection)
+	//  the item should be visible in the collection with the hidden query parameter
+	_, err = testService.client.Get("/hiddens?hidden=true", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,25 +495,51 @@ func TestZeroTimeAndNullID(t *testing.T) {
 		t.Fatal("collection is empty, unexpected")
 	}
 
-	// check that we actually got the right object back
-	if collection[0].ZeroTimeID != z.ZeroTimeID {
-		t.Fatal("wrong object id in collection")
+	// create a visible item
+	visible := Hidden{
+		Hidden: false,
 	}
-
-	// an empty created_at string should also result in a zero time
-	emptyString := struct {
-		CreatedAt string `json:"created_at"`
-	}{
-		CreatedAt: "",
-	}
-	_, err = testService.client.Post("/zero_times", &emptyString, &z)
+	var v Hidden
+	_, err = testService.client.Post("/hiddens", &visible, &v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !z.CreatedAt.IsZero() {
-		t.Fatal("empty string did not produce a zero time")
+
+	// we should now have one visible and one hidden item
+	_, err = testService.client.Get("/hiddens", &collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collection) != 1 {
+		t.Fatal("visible collection does not have one item as expected")
+	}
+	_, err = testService.client.Get("/hiddens?hidden=true", &collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collection) != 1 {
+		t.Fatal("hidden collection does not have one item as expected")
 	}
 
+	// lets make the hidden item visible
+	h.Hidden = false
+	var h3 Hidden
+	_, err = testService.client.Put("/hiddens", &h, &h3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h3.Hidden == true {
+		t.Fatal("still hidden but should not")
+	}
+
+	// now the item should be visible in the collection, hence we have two items there
+	_, err = testService.client.Get("/hiddens", &collection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collection) != 2 {
+		t.Fatal("collection does not have two items, unexpected")
+	}
 }
 
 func TestBlob(t *testing.T) {

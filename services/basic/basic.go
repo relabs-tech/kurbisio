@@ -26,7 +26,7 @@ var configurationJSON string = `
 	],
 	"singletons": [
 	  {
-		"resource": "user/profile",
+		"resource": "user/profile"
 	  }
 	],
 	"relations": [

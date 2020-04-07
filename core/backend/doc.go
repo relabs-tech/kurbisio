@@ -187,12 +187,6 @@ Collections of resources are sorted by the created_at timestamp, with latest fir
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
 use the start time of each activity as created_at time.
 
-The creation time has one more useful side effect: Since the default timestamp for the from query parameter is
-"0001-01-01 00:00:00 +0000 UTC" (which happens to be the golang zero time), any resource that is created with
-an earlier timestamp ends up in a quasi hidden state. While it remains accessible with a fully qualified access path, it will not be
-listed in collections. This makes it possible to create a resource with child resources and relations, and only make it
-visible to applications when the entire set it ready.
-
 Query Parameters and Pagination
 
 The GET request on single resources - i.e. not on entire collections - can be customized with the "children" query parameter.
@@ -231,6 +225,17 @@ The primary resource identifier is not mandatory when creating resources. If the
 no identifier or a null identifier, then the system creates a new unique UUID for it. Yet it is possible to specify
 a primary identifier in the request, which will be honored by the system. This feature - and the choice of UUID for
 primary identifiers - makes it possible to easily transfer data between different databases.
+
+Hidden Resources
+
+Resources in a collection have one additional boolean property "hidden", which is not reported unless
+set to "true". The property makes it possible to create resources in a quasi hidden state. While an item
+remains accessible with a fully qualified access path, it will not be listed in the collection itself. This way
+you can create composite resources, i.e. resources with child resources and relations, and only make them  visible
+to applications once the entire set it ready. The mechanism can also be used to implement post-processing on newly
+created resources before they are made visible to the user.
+
+You can list hidden resources with the hidden=true query parameter on the collection GET request.
 
 Notifications
 

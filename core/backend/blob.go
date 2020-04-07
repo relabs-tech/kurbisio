@@ -148,12 +148,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND created_at>=$%d ",
-		propertiesIndex, propertiesIndex+1, propertiesIndex+2)
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
+		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+5)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+4, propertiesIndex+5)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC LIMIT $%d OFFSET $%d;", propertiesIndex+3, propertiesIndex+4)
+	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
@@ -303,25 +303,26 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+5)
+			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
 			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex-1+5+1)
+			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+5] = externalIndex
+			queryParameters[propertiesIndex-1+6] = externalIndex
 		}
 
 		// add before and after and pagination
 		queryParameters[propertiesIndex-1+0] = until.IsZero()
 		queryParameters[propertiesIndex-1+1] = until.UTC()
-		queryParameters[propertiesIndex-1+2] = from.UTC()
-		queryParameters[propertiesIndex-1+3] = limit
-		queryParameters[propertiesIndex-1+4] = (page - 1) * limit
+		queryParameters[propertiesIndex-1+2] = from.IsZero()
+		queryParameters[propertiesIndex-1+3] = from.UTC()
+		queryParameters[propertiesIndex-1+4] = limit
+		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
 
 		if relation != nil {
 			// ingest subquery for relation
