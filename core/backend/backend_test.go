@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joeshaw/envdecode"
+	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 
 	"github.com/relabs-tech/backends/core/client"
@@ -45,11 +46,20 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "state"
+	  },
+	  {
+		"resource":"notification"
+	  },
+	  {
+		"resource":"notification/normal"
 	  }
 	],
 	"singletons": [
 	  {
 		"resource": "o/s"
+	  },
+	  {
+		"resource":"notification/single"
 	  }
 	],
 	"blobs": [
@@ -627,6 +637,156 @@ func TestBlob(t *testing.T) {
 		t.Fatal("returned binary data is not equal")
 	}
 
+}
+
+func TestNotifications(t *testing.T) {
+
+	var (
+		createCount, updateCount, deleteCount, pointsCount int
+	)
+	createHandler := func(n Notification) bool {
+		createCount++
+		return false
+	}
+	updateHandler := func(n Notification) bool {
+		updateCount++
+		var object map[string]interface{}
+		err := json.Unmarshal(n.Payload, &object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if properties, ok := object["properties"].(map[string]interface{}); ok {
+			if points, ok := properties["points"].(float64); ok {
+				pointsCount += int(points)
+			}
+		}
+		return false
+	}
+	deleteHandler := func(n Notification) bool {
+		deleteCount++
+		return false
+	}
+
+	backend := testService.backend
+
+	backend.RequestNotification("notification", core.OperationCreate, "mystate", &createHandler)
+	backend.RequestNotification("notification/normal", core.OperationCreate, "mystate", &createHandler)
+	backend.RequestNotification("notification/single", core.OperationCreate, "mystate", &createHandler)
+
+	backend.RequestNotification("notification", core.OperationUpdate, "mystate", &updateHandler)
+	backend.RequestNotification("notification/normal", core.OperationUpdate, "mystate", &updateHandler)
+	backend.RequestNotification("notification/single", core.OperationUpdate, "mystate", &updateHandler)
+
+	backend.RequestNotification("notification", core.OperationDelete, "mystate", &deleteHandler)
+	backend.RequestNotification("notification/normal", core.OperationDelete, "mystate", &deleteHandler)
+	backend.RequestNotification("notification/single", core.OperationDelete, "mystate", &deleteHandler)
+
+	client := testService.client
+
+	// create root object
+	type G map[string]interface{}
+	nreq := G{"state": "mystate"}
+	var nres G
+	_, err := client.Post("/notifications", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nid, _ := nres["notification_id"].(string)
+
+	// update root object with 1 point
+	nres["properties"] = map[string]int64{"points": 1}
+	_, err = client.Put("/notifications", &nres, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create child collection object
+	nnreq := G{"state": "mystate", "notification_id": nid}
+	var nnres G
+	_, err = client.Post("/notifications/"+nid+"/normals", &nnreq, &nnres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// update child collection object with 5 points
+	nnres["properties"] = map[string]int64{"points": 5}
+	_, err = client.Put("/notifications/"+nid+"/normals", &nnres, &nnres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete child collection object
+	_, err = client.Delete("/notifications/" + nid + "/normals/" + nnres["normal_id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create child singleton object with collection path
+	nsreq := G{"state": "mystate", "notification_id": nid}
+	var nsres G
+	_, err = client.Post("/notifications/"+nid+"/singles", &nsreq, &nsres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// update child collection object with collection path and 2 points
+	nsres["properties"] = map[string]int64{"points": 2}
+	_, err = client.Put("/notifications/"+nid+"/singles", &nsres, &nsres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete child singleton object with wildcard path
+	_, err = client.Delete("/notifications/all/singles/" + nsres["single_id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// re-create child singleton object with singleton path
+	nsreq = G{"state": "mystate"}
+	_, err = client.Put("/notifications/"+nid+"/single", &nsreq, &nsres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// update child collection object with singleton path and 3 points
+	nsres["properties"] = map[string]int64{"points": 3}
+	_, err = client.Put("/notifications/"+nid+"/single", &nsres, &nsres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete child singleton object with singleton path
+	_, err = client.Delete("/notifications/" + nid + "/single")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// delete root object
+	_, err = client.Delete("/notifications/" + nid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if createCount != 4 {
+		t.Fatalf("unexpected number of creates: %d", createCount)
+	}
+	if updateCount != 4 {
+		t.Fatalf("unexpected number of updates: %d", updateCount)
+	}
+	if deleteCount != 4 {
+		t.Fatalf("unexpected number of deletes: %d", deleteCount)
+	}
+	if pointsCount != 11 {
+		t.Fatalf("unexpected number of points: %d", pointsCount)
+	}
+
+	removed := backend.RemoveNotificationHandler(&createHandler)
+	removed += backend.RemoveNotificationHandler(&updateHandler)
+	removed += backend.RemoveNotificationHandler(&deleteHandler)
+	if removed != 9 {
+		t.Fatalf("wrong number of removed handlers. Expected 9 but got %d", removed)
+	}
 }
 
 func asJSON(object interface{}) string {

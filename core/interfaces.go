@@ -35,5 +35,5 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 
 // Notifier is an interface to receive database notifications
 type Notifier interface {
-	Notify(resource string, operation Operation, payload []byte)
+	Notify(resource string, operation Operation, state string, payload []byte)
 }

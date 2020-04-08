@@ -19,15 +19,13 @@ type collectionConfiguration struct {
 	ExternalIndex        string          `json:"external_index"`
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
-	Notifications        []string        `json:"notifications"`
 	Permits              []access.Permit `json:"permits"`
 }
 
 // singletonConfiguration describes a singleton resource
 type singletonConfiguration struct {
-	Resource      string          `json:"resource"`
-	Notifications []string        `json:"notifications"`
-	Permits       []access.Permit `json:"permits"`
+	Resource string          `json:"resource"`
+	Permits  []access.Permit `json:"permits"`
 }
 
 // blobConfiguration describes a blob collection resource
@@ -36,7 +34,6 @@ type blobConfiguration struct {
 	ExternalIndex        string          `json:"external_index"`
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
-	Notifications        []string        `json:"notifications"`
 	MaxAgeCache          int             `json:"max_age_cache"`
 	Mutable              bool            `json:"mutable"`
 	Permits              []access.Permit `json:"permits"`

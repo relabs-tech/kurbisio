@@ -28,22 +28,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log.Println("create collection:", resource)
 	}
 
-	hasNotificationCreate := false
-	hasNotificationUpdate := false
-	hasNotificationDelete := false
-	for _, operation := range rc.Notifications {
-		switch operation {
-		case string(core.OperationCreate):
-			hasNotificationCreate = true
-		case string(core.OperationUpdate):
-			hasNotificationUpdate = true
-		case string(core.OperationDelete):
-			hasNotificationDelete = true
-		default:
-			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
-		}
-	}
-
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
 	owner := ""
@@ -164,7 +148,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	log.Println("  handle collection routes:", oneRoute, "GET,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, state FROM %s.\"%s\" ", schema, resource)
-	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex]) + ";"
+	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", created_at, state, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
@@ -184,10 +168,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if propertiesIndex > 1 {
 			sqlWhereSingle += "WHERE " + compareIDsString(columns[1:propertiesIndex])
 		}
-		sqlWhereSingle += ";"
 	}
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+	sqlReturnState := " RETURNING state;"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, state)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") RETURNING " + this + "_id;"
@@ -202,13 +186,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	insertUpdateQuery := ""
 	if singleton {
 		insertUpdateQuery += fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		insertUpdateQuery += "(" + strings.Join(columns, ", ") + ", created_at)"
-		insertUpdateQuery += " VALUES(" + parameterString(len(columns)+1) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
+		insertUpdateQuery += "(" + strings.Join(columns, ", ") + ", created_at, state)"
+		insertUpdateQuery += " VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
 		sets := make([]string, len(columns)-propertiesIndex)
 		for i := propertiesIndex; i < len(columns); i++ {
 			sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 		}
-		insertUpdateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1)
+		insertUpdateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
 		insertUpdateQuery += " RETURNING (xmax = 0) AS inserted, " + this + "_id;" // return whether we did insert or update, this is a psql trick
 	}
 
@@ -433,7 +417,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
@@ -458,7 +442,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// hide "state" from response unless defined
-		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+		state := *response["state"].(*string)
+		if len(state) == 0 {
 			delete(response, "state")
 		}
 
@@ -604,7 +589,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
@@ -615,14 +600,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// hide "state" from response unless defined
-		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+		state = *response["state"].(*string)
+		if len(state) == 0 {
 			delete(response, "state")
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if hasNotificationUpdate && b.notifier != nil {
-			b.notifier.Notify(resource, core.OperationUpdate, jsonData)
-		}
+		b.notify(resource, core.OperationUpdate, state, jsonData)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -644,30 +628,25 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 
-		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		var state string
+
+		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnState, queryParameters...).Scan(&state)
+		if err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		count, err := res.RowsAffected()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		if count == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			return
+		notification := make(map[string]interface{})
+		for i := 0; i < propertiesIndex; i++ {
+			notification[columns[i]] = params[columns[i]]
 		}
+		jsonData, _ := json.MarshalIndent(notification, state, " ")
+		b.notify(resource, core.OperationDelete, state, jsonData)
 
-		if hasNotificationDelete && b.notifier != nil {
-			notification := make(map[string]interface{})
-			for i := 0; i < propertiesIndex; i++ {
-				notification[columns[i]] = params[columns[i]]
-			}
-			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, core.OperationDelete, jsonData)
-		}
 		w.WriteHeader(http.StatusNoContent)
 
 	}
@@ -787,14 +766,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// hide "state" from response unless defined
-		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+		state = *response["state"].(*string)
+		if len(state) == 0 {
 			delete(response, "state")
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if hasNotificationCreate && b.notifier != nil {
-			b.notifier.Notify(resource, core.OperationCreate, jsonData)
-		}
+		b.notify(resource, core.OperationCreate, state, jsonData)
 
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
@@ -854,7 +832,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	insertUpdateSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -873,7 +850,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns)+1)
+		values := make([]interface{}, len(columns)+2)
 		// the primary resource identifier, use as specified or create a new one
 		primaryID, ok := bodyJSON[columns[0]]
 		if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
@@ -916,7 +893,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			sets[i-propertiesIndex] = k + " = $" + strconv.Itoa(i+1)
 		}
 
-		// last value is created_at
+		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
 			timestamp, ok := value.(string)
@@ -932,6 +909,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			createdAt = t.UTC()
 		}
 		values[i] = &createdAt
+		i++
+
+		// last value is state
+		var state string
+		if value, ok := bodyJSON["state"]; ok {
+			state, ok = value.(string)
+			if !ok {
+				http.Error(w, "state must be a string", http.StatusBadRequest)
+				return
+			}
+		}
+		values[i] = &state
 		i++
 
 		var inserted bool
@@ -954,21 +943,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		// hide "state" from response unless defined
-		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+		state = *response["state"].(*string)
+		if len(state) == 0 {
 			delete(response, "state")
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if b.notifier != nil {
-			if inserted {
-				if hasNotificationCreate {
-					b.notifier.Notify(resource, core.OperationCreate, jsonData)
-				}
-			} else {
-				if hasNotificationUpdate {
-					b.notifier.Notify(resource, core.OperationUpdate, jsonData)
-				}
-			}
+		if inserted {
+			b.notify(resource, core.OperationCreate, state, jsonData)
+		} else {
+			b.notify(resource, core.OperationUpdate, state, jsonData)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -985,7 +969,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
-		sqlQuery := readQuery + sqlWhereSingle
+		sqlQuery := readQuery + sqlWhereSingle + ";"
 		queryParameters := make([]interface{}, propertiesIndex-1)
 		for i := 1; i < propertiesIndex; i++ { // skip ID
 			queryParameters[i-1] = params[columns[i]]
@@ -1022,7 +1006,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		// hide "state" from response unless defined
-		if state, ok := response["state"].(string); !ok || len(state) == 0 {
+		state := *response["state"].(*string)
+		if len(state) == 0 {
 			delete(response, "state")
 		}
 
@@ -1038,7 +1023,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
-	deleteSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	doDeleteSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -1052,31 +1037,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		res, err := b.db.Exec(deleteQuery+sqlWhereSingle, queryParameters...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		var state string
+		err = b.db.QueryRow(deleteQuery+sqlWhereSingle+sqlReturnState, queryParameters...).Scan(&state)
+		if err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		count, err := res.RowsAffected()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		if count == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
 		w.WriteHeader(http.StatusNoContent)
-		if hasNotificationDelete && b.notifier != nil {
-			notification := make(map[string]interface{})
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				notification[columns[i]] = params[columns[i]]
-			}
-			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, core.OperationDelete, jsonData)
+		notification := make(map[string]interface{})
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			notification[columns[i]] = params[columns[i]]
 		}
+		jsonData, _ := json.MarshalIndent(notification, "", " ")
+		b.notify(resource, core.OperationDelete, state, jsonData)
 	}
 
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -1097,7 +1075,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		deleteSingletonWithAuth(w, r)
+		doDeleteSingletonWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 }

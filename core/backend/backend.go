@@ -24,7 +24,6 @@ import (
 // Backend is the generic rest backend
 type Backend struct {
 	config           backendConfiguration
-	notifier         core.Notifier
 	db               *sql.DB
 	router           *mux.Router
 	collectionHelper map[string]*collectionHelper
@@ -32,6 +31,7 @@ type Backend struct {
 	Registry             *registry.Registry
 	authorizationEnabled bool
 	updateSchema         bool
+	handlers             []notificationHandler
 }
 
 // Builder is a builder helper for the Backend
@@ -42,9 +42,6 @@ type Builder struct {
 	DB *sql.DB
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
-	// Notifier inserts a database notifier to the backend. If the configuration requests
-	// notifications, they will be sent to the notifier. This is optional.
-	Notifier core.Notifier
 	// If AuthorizationEnabled is true, the backend requires auhorization for each route
 	// in the request context, as specified in the configuration.
 	AuthorizationEnabled bool
@@ -70,7 +67,6 @@ func New(bb *Builder) *Backend {
 
 	b := &Backend{
 		config:               config,
-		notifier:             bb.Notifier,
 		db:                   bb.DB,
 		router:               bb.Router,
 		collectionHelper:     make(map[string]*collectionHelper),
@@ -151,9 +147,8 @@ func (b *Backend) handleRoutes(router *mux.Router) {
 		if rc.singleton != nil {
 			// a singleton is a a specialized collection
 			tmp := collectionConfiguration{
-				Resource:      rc.singleton.Resource,
-				Notifications: rc.singleton.Notifications,
-				Permits:       rc.singleton.Permits,
+				Resource: rc.singleton.Resource,
+				Permits:  rc.singleton.Permits,
 			}
 			b.createCollectionResource(router, tmp, true)
 		}
@@ -378,4 +373,70 @@ func jsonNameToCanonicalHeader(property string) string {
 		parts[i] = string(runes)
 	}
 	return strings.Join(parts, "-")
+}
+
+// Notification is a database notification. Receive them
+// with RequestNotification()
+type Notification struct {
+	Resource  string
+	Operation core.Operation
+	State     string
+	Payload   []byte
+}
+
+type notificationHandler struct {
+	resource  string
+	operation core.Operation
+	state     string
+	callback  *func(Notification) bool
+}
+
+// RequestNotification requests a specific type of database notifications.
+// The handlers are called in the same order the notification request have been received.
+// If a handler returns true, subsequent handlers for the same notification type will not be called.
+func (b *Backend) RequestNotification(resource string, operation core.Operation, state string, handler *func(Notification) bool) {
+	notifier := notificationHandler{
+		resource:  resource,
+		operation: operation,
+		state:     state,
+		callback:  handler,
+	}
+	log.Printf("install notification handler for %s - %s (state=\"%s\")", resource, operation, state)
+	b.handlers = append(b.handlers, notifier)
+}
+
+// RemoveNotificationHandler removes a previously installed notification handler. Returns the number
+// of instances that were removed
+func (b *Backend) RemoveNotificationHandler(handler *func(Notification) bool) int {
+	count := len(b.handlers)
+	remaining := b.handlers[:0]
+	for i := 0; i < len(b.handlers); i++ {
+		if b.handlers[i].callback != handler {
+			remaining = append(remaining, b.handlers[i])
+		} else {
+			log.Printf("remove notification handler for %s - %s (state=\"%s\")", b.handlers[i].resource, b.handlers[i].operation, b.handlers[i].state)
+		}
+	}
+	b.handlers = remaining
+	return count - len(b.handlers)
+}
+
+func (b *Backend) notify(resource string, operation core.Operation, state string, payload []byte) {
+	for _, handler := range b.handlers {
+		if handler.resource == resource &&
+			handler.operation == operation &&
+			handler.state == state {
+
+			notification := Notification{
+				Resource:  resource,
+				Operation: operation,
+				State:     state,
+				Payload:   payload,
+			}
+
+			if (*handler.callback)(notification) {
+				break
+			}
+		}
+	}
 }

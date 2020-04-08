@@ -23,22 +23,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	resource := rc.Resource
 	log.Println("create blob:", resource)
 
-	hasNotificationCreate := false
-	hasNotificationUpdate := false
-	hasNotificationDelete := false
-	for _, operation := range rc.Notifications {
-		switch operation {
-		case string(core.OperationCreate):
-			hasNotificationCreate = true
-		case string(core.OperationUpdate):
-			hasNotificationUpdate = true
-		case string(core.OperationDelete):
-			hasNotificationDelete = true
-		default:
-			panic(fmt.Errorf("invalid notification '%s' for resource %s", operation, resource))
-		}
-	}
-
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
 	dependencies := resources[:len(resources)-1]
@@ -543,9 +527,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if hasNotificationCreate && b.notifier != nil {
-			b.notifier.Notify(resource, core.OperationCreate, jsonData)
-		}
+		b.notify(resource, core.OperationCreate, "", jsonData)
 
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
@@ -631,9 +613,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if hasNotificationUpdate && b.notifier != nil {
-			b.notifier.Notify(resource, core.OperationUpdate, jsonData)
-		}
+		b.notify(resource, core.OperationUpdate, "", jsonData)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -672,14 +652,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		if hasNotificationDelete && b.notifier != nil {
-			notification := make(map[string]interface{})
-			for i := 0; i < propertiesIndex; i++ {
-				notification[columns[i]] = params[columns[i]]
-			}
-			jsonData, _ := json.MarshalIndent(notification, "", " ")
-			b.notifier.Notify(resource, core.OperationDelete, jsonData)
+		notification := make(map[string]interface{})
+		for i := 0; i < propertiesIndex; i++ {
+			notification[columns[i]] = params[columns[i]]
 		}
+		jsonData, _ := json.MarshalIndent(notification, "", " ")
+		b.notify(resource, core.OperationDelete, "", jsonData)
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 
