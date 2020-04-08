@@ -31,6 +31,7 @@ type Backend struct {
 	// Registry is the JSON object registry for this backend's schema
 	Registry             *registry.Registry
 	authorizationEnabled bool
+	updateSchema         bool
 }
 
 // Builder is a builder helper for the Backend
@@ -77,9 +78,19 @@ func New(bb *Builder) *Backend {
 		authorizationEnabled: bb.AuthorizationEnabled,
 	}
 
+	registry := b.Registry.Accessor("_backend_")
+	var currentVersion string
+	registry.Read("schema_version", &currentVersion)
+	newVersion := fmt.Sprintf("%x", sha1.Sum([]byte(bb.Config)))
+	b.updateSchema = newVersion != currentVersion
+	log.Println("new configuration - will update database schema")
+
 	b.handleCORS(b.router)
 	access.HandleAuthorizationRoute(b.router)
 	b.handleRoutes(b.router)
+	if b.updateSchema {
+		registry.Write("schema_version", newVersion)
+	}
 	return b
 }
 

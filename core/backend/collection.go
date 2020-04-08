@@ -140,9 +140,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createIndicesQuery
 
-	_, err := b.db.Query(createQuery)
-	if err != nil {
-		panic(err)
+	var err error
+	if b.updateSchema {
+		_, err = b.db.Query(createQuery)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	singletonRoute := ""

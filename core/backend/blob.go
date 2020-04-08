@@ -123,9 +123,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createIndicesQuery
 
-	_, err := b.db.Query(createQuery)
-	if err != nil {
-		panic(err)
+	var err error
+	if b.updateSchema {
+		_, err = b.db.Query(createQuery)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	collectionRoute := ""
