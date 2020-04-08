@@ -85,6 +85,35 @@ func (c *Client) Get(path string, result interface{}) (int, error) {
 	return status, err
 }
 
+// GetWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code and the header.
+//
+// result can be map[string]interface{} or a raw *[]byte
+func (c *Client) GetWithHeader(path string, result interface{}) (int, http.Header, error) {
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
+	rec := httptest.NewRecorder()
+	c.router.ServeHTTP(rec, r)
+
+	res := rec.Result()
+	status := rec.Code
+	if status == http.StatusNoContent {
+		return status, res.Header, nil
+
+	}
+
+	if status != http.StatusOK {
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
+	}
+
+	var err error
+	if raw, ok := result.(*[]byte); ok {
+		*raw = rec.Body.Bytes()
+	} else {
+		err = json.Unmarshal(rec.Body.Bytes(), result)
+	}
+	return status, res.Header, err
+}
+
 // BlobWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
 // flag an error. Returns the actual http status code and the return header
 func (c *Client) BlobWithHeader(path string, blob *[]byte) (int, http.Header, error) {

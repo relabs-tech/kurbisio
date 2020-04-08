@@ -79,7 +79,11 @@ func New(bb *Builder) *Backend {
 	registry.Read("schema_version", &currentVersion)
 	newVersion := fmt.Sprintf("%x", sha1.Sum([]byte(bb.Config)))
 	b.updateSchema = newVersion != currentVersion
-	log.Println("new configuration - will update database schema")
+	if b.updateSchema {
+		log.Println("new configuration - will update database schema")
+	} else {
+		log.Println("user previous schema version")
+	}
 
 	b.handleCORS(b.router)
 	access.HandleAuthorizationRoute(b.router)
