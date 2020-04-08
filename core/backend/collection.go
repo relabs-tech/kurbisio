@@ -682,11 +682,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			k := columns[i]
 			value, ok := bodyJSON[k]
 			param, _ := params[k]
+			// identifiers in the url parameters must match the ones in the json document
 			if ok && param != "all" && param != value.(string) {
 				http.Error(w, "illegal "+k, http.StatusBadRequest)
 				return
 			}
-			values[i] = param
+			// if we have no identifier in the url parameters, but in the json document, use
+			// the ones from the json document
+			if param == "all" && ok && value != "00000000-0000-0000-0000-000000000000" {
+				values[i] = value
+			} else {
+				values[i] = param
+			}
 		}
 
 		// the dynamic properties
