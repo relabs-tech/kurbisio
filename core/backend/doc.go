@@ -163,7 +163,7 @@ This would create these additional REST routes for the authenticated user:
 	GET /user/devices/{device_id}
 	DELETE /user/devices/{device_id}
 
-Effectively, the path segement /user/{user_id} is replaced with the shortcut /user for all generated routes.
+Effectively, the path segement /users/{user_id} is replaced with the shortcut /user for all generated routes.
 
 Wildcard Queries
 
@@ -208,7 +208,7 @@ In our example, the resource "user" has an external index "identity", hence we c
 
 The system supports pagination and filtering of responses by creation time.
 	  ?limit=n  sets a page limit of n items
-	  ?page=n   selects page number n
+	  ?page=n   selects page number n. The first page is page 1
 	  ?from=t   selects items created at or after the timestamp t
 	  ?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
 
