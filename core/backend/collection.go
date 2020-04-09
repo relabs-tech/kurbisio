@@ -134,18 +134,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	singletonRoute := ""
 	collectionRoute := ""
-	oneRoute := ""
+	itemRoute := ""
 	for _, r := range resources {
-		singletonRoute = oneRoute + "/" + r
-		collectionRoute = oneRoute + "/" + plural(r)
-		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
+		singletonRoute = itemRoute + "/" + r
+		collectionRoute = itemRoute + "/" + core.Plural(r)
+		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
 	if singleton {
 		log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
 	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
-	log.Println("  handle collection routes:", oneRoute, "GET,DELETE")
+	log.Println("  handle collection routes:", itemRoute, "GET,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, state FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
@@ -255,7 +255,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
-	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -372,6 +372,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if len(state) == 0 {
 				delete(object, "state")
 			}
+			// if we did not have from, take it from the first object
+			if from.IsZero() {
+				from = *object["created_at"].(*time.Time)
+			}
 			response = append(response, object)
 		}
 
@@ -387,11 +391,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
 		w.Header().Set("Pagination-Page-Count", strconv.Itoa((totalCount/limit)+1))
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+		if !from.IsZero() {
+			w.Header().Set("Pagination-Until", from.Format(time.RFC3339))
+		}
 		w.Write(jsonData)
 
 	}
 
-	getAllWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getCollectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -401,10 +408,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		getAll(w, r, nil)
+		getCollection(w, r, nil)
 	}
 
-	getOne := func(w http.ResponseWriter, r *http.Request) {
+	getItem := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -469,7 +476,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		getOne(w, r)
+		getItem(w, r)
 	}
 
 	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -792,8 +799,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	collection := collectionHelper{
-		getAll: getAll,
-		getOne: getOne,
+		getCollection: getCollection,
+		getItem:       getItem,
 	}
 
 	// store the collection helper for later usage in relations
@@ -812,16 +819,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	// UPDATE with fully qualified path
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	// PATCH (READ + UPDATE)
-	b.createPatchRoute(router, oneRoute)
+	b.createPatchRoute(router, itemRoute)
 
 	// READ
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		getOneWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
@@ -829,11 +836,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getAllWithAuth(w, r, nil)
+		getCollectionWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		doDeleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
@@ -990,7 +997,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		if propertiesIndex > 1 && queryParameters[propertiesIndex-2].(string) == "all" {
-			http.Error(w, "all is not a valid "+owner+" for requesting a single "+this+". Did you want to say "+plural(this)+"?", http.StatusBadRequest)
+			http.Error(w, "all is not a valid "+owner+" for requesting a single "+this+". Did you want to say "+core.Plural(this)+"?", http.StatusBadRequest)
 			return
 		}
 

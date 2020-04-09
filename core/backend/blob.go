@@ -72,7 +72,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
-		jsonToHeader[property] = jsonNameToCanonicalHeader(property)
+		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
 	}
 
 	searchablePropertiesIndex := len(columns) // where searchable properties start
@@ -84,7 +84,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			schema, resource, property)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
-		jsonToHeader[property] = jsonNameToCanonicalHeader(property)
+		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
 	}
 
 	propertiesEndIndex := len(columns) // where properties end
@@ -98,7 +98,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			schema, resource, name)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, name)
-		jsonToHeader[name] = jsonNameToCanonicalHeader(name)
+		jsonToHeader[name] = core.PropertyNameToCanonicalHeader(name)
 	}
 
 	// the actual blob data as bytea
@@ -116,14 +116,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	collectionRoute := ""
-	oneRoute := ""
+	itemRoute := ""
 	for _, r := range resources {
-		collectionRoute = oneRoute + "/" + plural(r)
-		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
+		collectionRoute = itemRoute + "/" + core.Plural(r)
+		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
 	log.Println("  handle blob routes:", collectionRoute, "GET,POST")
-	log.Println("  handle blob routes:", oneRoute, "GET,PUT, DELETE")
+	log.Println("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", blob, created_at FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
@@ -237,7 +237,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		return values, object
 	}
 
-	getAll := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -345,20 +345,33 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			// if we did not have from, take it from the first object
+			if from.IsZero() {
+				from = *object["created_at"].(*time.Time)
+			}
 			response = append(response, object)
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
+		etag := bytesToEtag(jsonData)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
 		w.Header().Set("Pagination-Page-Count", strconv.Itoa((totalCount/limit)+1))
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+		if !from.IsZero() {
+			w.Header().Set("Pagination-Until", from.Format(time.RFC3339))
+		}
 		w.Write(jsonData)
 
 	}
 
-	getAllWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	getCollectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -368,10 +381,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		getAll(w, r, nil)
+		getCollection(w, r, nil)
 	}
 
-	getOne := func(w http.ResponseWriter, r *http.Request) {
+	getItem := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -435,7 +448,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(blob)
 	}
 
-	getOneWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	getItemWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -444,7 +457,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-		getOne(w, r)
+		getItem(w, r)
 	}
 
 	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -663,8 +676,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	collection := collectionHelper{
-		getAll: getAll,
-		getOne: getOne,
+		getCollection: getCollection,
+		getItem:       getItem,
 	}
 
 	// store the collection helper for later usage in relations
@@ -677,27 +690,27 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}).Methods(http.MethodOptions, http.MethodPost)
 
 	// READ
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
-		getOneWithAuth(w, r)
+		getItemWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getAllWithAuth(w, r, nil)
+		getCollectionWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// UPDATE
 	if rc.Mutable {
-		router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+		router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 			log.Println("called route for", r.URL, r.Method)
 			updateWithAuth(w, r)
 		}).Methods(http.MethodOptions, http.MethodPut)

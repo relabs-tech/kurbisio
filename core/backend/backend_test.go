@@ -137,7 +137,7 @@ func TestCollectionA(t *testing.T) {
 
 	a := A{}
 
-	_, err := testService.client.Post("/as", &aNew, &a)
+	_, err := testService.client.RawPost("/as", &aNew, &a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestCollectionA(t *testing.T) {
 	}
 
 	aGet := A{}
-	_, err = testService.client.Get("/as/"+a.AID.String(), &aGet)
+	_, err = testService.client.RawGet("/as/"+a.AID.String(), &aGet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestCollectionA(t *testing.T) {
 	aPut := aGet
 	aRes := A{}
 	aPut.StaticProp = "new value for static property"
-	_, err = testService.client.Put("/as", &aPut, &aRes)
+	_, err = testService.client.RawPut("/as", &aPut, &aRes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +181,11 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
-	_, err = testService.client.Delete("/as/" + a.AID.String())
+	_, err = testService.client.RawDelete("/as/" + a.AID.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := testService.client.Get("/as/"+a.AID.String(), &aGet)
+	status, err := testService.client.RawGet("/as/"+a.AID.String(), &aGet)
 	if status != http.StatusNotFound {
 		t.Fatal("not deleted")
 	}
@@ -212,19 +212,19 @@ func TestResourceBCD(t *testing.T) {
 	empty := Empty{}
 	b := B{}
 
-	_, err := testService.client.Post("/bs", &empty, &b)
+	_, err := testService.client.RawPost("/bs", &empty, &b)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	c := C{}
-	_, err = testService.client.Post("/bs/"+b.BID.String()+"/cs", &empty, &c)
+	_, err = testService.client.RawPost("/bs/"+b.BID.String()+"/cs", &empty, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	d := D{}
-	_, err = testService.client.Post("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
+	_, err = testService.client.RawPost("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds", &empty, &d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestResourceBCD(t *testing.T) {
 	}
 
 	// delete the root object b, this should cascade to all child objects
-	status, err := testService.client.Delete("/bs/" + b.BID.String())
+	status, err := testService.client.RawDelete("/bs/" + b.BID.String())
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -243,7 +243,7 @@ func TestResourceBCD(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.client.Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, err = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -258,7 +258,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	empty := Empty{}
 	b := B{}
 
-	_, err := testService.client.Post("/bs", &empty, &b)
+	_, err := testService.client.RawPost("/bs", &empty, &b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	authenticatedClient := testService.client.WithAuthorization(&auth)
 
 	bl := B{}
-	_, err = authenticatedClient.Get("/b", &bl)
+	_, err = authenticatedClient.RawGet("/b", &bl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,13 +280,13 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	}
 
 	c := C{}
-	_, err = authenticatedClient.Post("/b/cs", &empty, &c)
+	_, err = authenticatedClient.RawPost("/b/cs", &empty, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	d := D{}
-	_, err = authenticatedClient.Post("/b/cs/"+c.CID.String()+"/ds", &empty, &d)
+	_, err = authenticatedClient.RawPost("/b/cs/"+c.CID.String()+"/ds", &empty, &d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	}
 
 	// delete the root object b, this should cascade to all child objects
-	status, err := authenticatedClient.Delete("/b")
+	status, err := authenticatedClient.RawDelete("/b")
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -305,7 +305,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.client.Get("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, err = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -329,7 +329,7 @@ func TestSingletonOS(t *testing.T) {
 
 	// create o instance
 	o := O{}
-	_, err := testService.client.Post("/os", &empty, &o)
+	_, err := testService.client.RawPost("/os", &empty, &o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestSingletonOS(t *testing.T) {
 		},
 	}
 	sResult := S{}
-	_, err = testService.client.Put("/os/"+o.OID.String()+"/s", &s, &sResult)
+	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &s, &sResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 	sUpdateResult := S{}
 
-	status, err := testService.client.Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	status, err := testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestSingletonOS(t *testing.T) {
 	// put another update to s and try to give it a new id. This will ingore the new
 	// uid and simply update the rest of the object
 	sUpdate.SID = newUID
-	status, err = testService.client.Put("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// delete single s
-	status, err = testService.client.Delete("/os/" + o.OID.String() + "/s")
+	status, err = testService.client.RawDelete("/os/" + o.OID.String() + "/s")
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -395,7 +395,7 @@ func TestSingletonOS(t *testing.T) {
 
 	// cross check that the delete worked
 	sGet := S{}
-	status, err = testService.client.Get("/os/"+o.OID.String()+"/s", &sGet)
+	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 		if err != nil {
@@ -407,7 +407,7 @@ func TestSingletonOS(t *testing.T) {
 	sResult2 := S{}
 
 	s.SID = newUID
-	_, err = testService.client.Put("/os/"+o.OID.String()+"/s", &s, &sResult2)
+	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &s, &sResult2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// delete the owner o, this should also delete the single s
-	status, err = testService.client.Delete("/os/" + o.OID.String())
+	status, err = testService.client.RawDelete("/os/" + o.OID.String())
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed")
 	}
@@ -428,7 +428,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// cross check that the cascade worked: deleting o has also deleted s
-	status, err = testService.client.Get("/os/"+o.OID.String()+"/s", &sGet)
+	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -448,7 +448,7 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 	now := time.Now().UTC().Round(time.Millisecond) // round to postgres precision
 	cNew := CreatedTime{CreatedAt: now}
 	var c CreatedTime
-	_, err := testService.client.Post("/created_times", &cNew, &c)
+	_, err := testService.client.RawPost("/created_times", &cNew, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 	}{
 		CreatedAt: "",
 	}
-	_, err = testService.client.Post("/created_times", &emptyString, &c)
+	_, err = testService.client.RawPost("/created_times", &emptyString, &c)
 	if err == nil {
 		t.Fatal("eerror expected")
 	}
@@ -482,13 +482,13 @@ func TestState(t *testing.T) {
 		State: "partial",
 	}
 	var h State
-	_, err := testService.client.Post("/states", &state, &h)
+	_, err := testService.client.RawPost("/states", &state, &h)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var collection []State
-	_, err = testService.client.Get("/states", &collection)
+	_, err = testService.client.RawGet("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func TestState(t *testing.T) {
 	}
 
 	//  the item should be visible in the collection with the state query parameter
-	_, err = testService.client.Get("/states?state=partial", &collection)
+	_, err = testService.client.RawGet("/states?state=partial", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,20 +510,20 @@ func TestState(t *testing.T) {
 		State: "",
 	}
 	var v State
-	_, err = testService.client.Post("/states", &visible, &v)
+	_, err = testService.client.RawPost("/states", &visible, &v)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// we should now have one visible and one state item
-	_, err = testService.client.Get("/states", &collection)
+	_, err = testService.client.RawGet("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(collection) != 1 {
 		t.Fatal("visible collection does not have one item as expected")
 	}
-	_, err = testService.client.Get("/states?state=partial", &collection)
+	_, err = testService.client.RawGet("/states?state=partial", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestState(t *testing.T) {
 	// lets make the state item visible
 	h.State = ""
 	var h3 State
-	_, err = testService.client.Put("/states", &h, &h3)
+	_, err = testService.client.RawPut("/states", &h, &h3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestState(t *testing.T) {
 	}
 
 	// now the item should be visible in the collection, hence we have two items there
-	_, err = testService.client.Get("/states", &collection)
+	_, err = testService.client.RawGet("/states", &collection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,13 +570,13 @@ func TestBlob(t *testing.T) {
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
 	}
-	_, err = testService.client.PostBlob("/blobs", header, data, &br)
+	_, err = testService.client.RawPostBlob("/blobs", header, data, &br)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	list := []Blob{}
-	_, err = testService.client.Get("/blobs", &list)
+	_, err = testService.client.RawGet("/blobs", &list)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +591,7 @@ func TestBlob(t *testing.T) {
 	}
 
 	var dataReturn []byte
-	_, headerReturn, err := testService.client.BlobWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
+	_, headerReturn, err := testService.client.RawBlobWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
 
 	if err != nil {
 		t.Fatal(err)
@@ -614,13 +614,13 @@ func TestBlob(t *testing.T) {
 		"Content-Type": "something weird",
 	}
 	uData := []byte("binary stuff")
-	_, err = testService.client.PutBlob("/blobs/"+br.BlobID.String(), uHeader, uData, &ubr)
+	_, err = testService.client.RawPutBlob("/blobs/"+br.BlobID.String(), uHeader, uData, &ubr)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var uDataReturn []byte
-	_, uHeaderReturn, err := testService.client.BlobWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
+	_, uHeaderReturn, err := testService.client.RawBlobWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
 
 	if err != nil {
 		t.Fatal(err)
@@ -687,7 +687,7 @@ func TestNotifications(t *testing.T) {
 	type G map[string]interface{}
 	nreq := G{"state": "mystate"}
 	var nres G
-	_, err := client.Post("/notifications", &nreq, &nres)
+	_, err := client.RawPost("/notifications", &nreq, &nres)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +695,7 @@ func TestNotifications(t *testing.T) {
 
 	// update root object with 1 point
 	nres["properties"] = map[string]int64{"points": 1}
-	_, err = client.Put("/notifications", &nres, &nres)
+	_, err = client.RawPut("/notifications", &nres, &nres)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,20 +703,20 @@ func TestNotifications(t *testing.T) {
 	// create child collection object
 	nnreq := G{"state": "mystate", "notification_id": nid}
 	var nnres G
-	_, err = client.Post("/notifications/"+nid+"/normals", &nnreq, &nnres)
+	_, err = client.RawPost("/notifications/"+nid+"/normals", &nnreq, &nnres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// update child collection object with 5 points
 	nnres["properties"] = map[string]int64{"points": 5}
-	_, err = client.Put("/notifications/"+nid+"/normals", &nnres, &nnres)
+	_, err = client.RawPut("/notifications/"+nid+"/normals", &nnres, &nnres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// delete child collection object
-	_, err = client.Delete("/notifications/" + nid + "/normals/" + nnres["normal_id"].(string))
+	_, err = client.RawDelete("/notifications/" + nid + "/normals/" + nnres["normal_id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,46 +724,46 @@ func TestNotifications(t *testing.T) {
 	// create child singleton object with collection path
 	nsreq := G{"state": "mystate", "notification_id": nid}
 	var nsres G
-	_, err = client.Post("/notifications/"+nid+"/singles", &nsreq, &nsres)
+	_, err = client.RawPost("/notifications/"+nid+"/singles", &nsreq, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// update child collection object with collection path and 2 points
 	nsres["properties"] = map[string]int64{"points": 2}
-	_, err = client.Put("/notifications/"+nid+"/singles", &nsres, &nsres)
+	_, err = client.RawPut("/notifications/"+nid+"/singles", &nsres, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// delete child singleton object with wildcard path
-	_, err = client.Delete("/notifications/all/singles/" + nsres["single_id"].(string))
+	_, err = client.RawDelete("/notifications/all/singles/" + nsres["single_id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// re-create child singleton object with singleton path
 	nsreq = G{"state": "mystate"}
-	_, err = client.Put("/notifications/"+nid+"/single", &nsreq, &nsres)
+	_, err = client.RawPut("/notifications/"+nid+"/single", &nsreq, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// update child collection object with singleton path and 3 points
 	nsres["properties"] = map[string]int64{"points": 3}
-	_, err = client.Put("/notifications/"+nid+"/single", &nsres, &nsres)
+	_, err = client.RawPut("/notifications/"+nid+"/single", &nsres, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// delete child singleton object with singleton path
-	_, err = client.Delete("/notifications/" + nid + "/single")
+	_, err = client.RawDelete("/notifications/" + nid + "/single")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// delete root object
-	_, err = client.Delete("/notifications/" + nid)
+	_, err = client.RawDelete("/notifications/" + nid)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -76,18 +76,18 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(resourceColumns))
 
-	allRoute := ""
-	oneRoute := ""
+	collectionRoute := ""
+	itemRoute := ""
 	for _, r := range resources {
-		allRoute = oneRoute + "/" + plural(r)
-		oneRoute = oneRoute + "/" + plural(r) + "/{" + r + "_id}"
+		collectionRoute = itemRoute + "/" + core.Plural(r)
+		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", allRoute, "GET,POST,PUT")
-	log.Println("  handle routes:", oneRoute, "GET,DELETE")
+	log.Println("  handle routes:", collectionRoute, "GET,POST,PUT")
+	log.Println("  handle routes:", itemRoute, "GET,DELETE")
 
 	// READ ALL
-	router.HandleFunc(allRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
@@ -108,11 +108,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		collection.getAll(w, r, injectRelation)
+		collection.getCollection(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -122,11 +122,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				return
 			}
 		}
-		collection.getOne(w, r)
+		collection.getItem(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// CREATE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
@@ -160,7 +160,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	// DELETE
-	router.HandleFunc(oneRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)

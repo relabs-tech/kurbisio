@@ -32,3 +32,17 @@ func TestOperations_JSON_Unmarshalling(t *testing.T) {
 	}
 
 }
+
+func TestCanonicalNames(t *testing.T) {
+
+	header := "Content-Type"
+	property := "content_type"
+
+	if s := CanonicalHeaderToPropertyName(header); s != property {
+		t.Fatal("CanonicalHeaderToPropertyName failed:", s)
+	}
+	if s := PropertyNameToCanonicalHeader(property); s != header {
+		t.Fatal("PropertyNameToCanonicalHeader failed:", s)
+	}
+
+}

@@ -13,8 +13,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 )
 
@@ -58,11 +62,182 @@ func (c *Client) context() context.Context {
 	return context.Background()
 }
 
-// Get gets the resource from path. Expects http.StatusOK as response, otherwise it will
+// Collection represents a collection of particular resource
+type Collection struct {
+	client     *Client
+	resource   string
+	selectors  map[string]uuid.UUID
+	parameters []string
+}
+
+// Collection returns a new collection client
+func (c *Client) Collection(resource string) Collection {
+	return Collection{
+		client:   c,
+		resource: resource,
+	}
+}
+
+// WithSelector returns a new collection client with a selector added
+func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
+	// we want a true copy to avoid side effects
+	selectors := map[string]uuid.UUID{strings.TrimSuffix(key, "_id"): value}
+	for k, v := range r.selectors {
+		selectors[k] = v
+	}
+	return Collection{
+		client:     r.client,
+		resource:   r.resource,
+		selectors:  selectors,
+		parameters: r.parameters,
+	}
+}
+
+// WithFilter returns a new collection client with a URL parameter added.
+// Filters apply only to lists.
+func (r Collection) WithFilter(key string, value string) Collection {
+
+	parameter := key + "=" + value
+	return Collection{
+		client:    r.client,
+		resource:  r.resource,
+		selectors: r.selectors,
+		// we want a true copy to avoid side effects
+		parameters: append(append([]string{}, r.parameters...), parameter),
+	}
+}
+
+func (r Collection) paths() (collectionPath, itemPath, singletonPath string) {
+	resources := strings.Split(r.resource, "/")
+
+	for _, resource := range resources {
+		singletonPath = itemPath + "/" + resource
+		collectionPath = itemPath + "/" + core.Plural(resource)
+		param := "all"
+		if selector, ok := r.selectors[resource]; ok {
+			param = selector.String()
+		}
+		itemPath = itemPath + "/" + core.Plural(resource) + "/" + param
+	}
+	if len(r.parameters) > 0 {
+		collectionPath += "?" + strings.Join(r.parameters, "&")
+	}
+
+	return
+}
+
+// CollectionPath returns the created path for the collection plus optional query strings
+func (r Collection) CollectionPath() string {
+	path, _, _ := r.paths()
+	return path
+}
+
+// ItemPath returns the created path for an item inside the collection
+func (r Collection) ItemPath() string {
+	_, path, _ := r.paths()
+	return path
+}
+
+// SingletonPath returns the created path for a singleton
+func (r Collection) SingletonPath() string {
+	_, _, path := r.paths()
+	return path
+}
+
+// Item gets an item from a collection
+func (r Collection) Item(item string, result interface{}) error {
+	_, err := r.client.RawGet(r.ItemPath()+"/"+item, result)
+	return err
+}
+
+// ItemID gets an item by ID from a collection
+func (r Collection) ItemID(id uuid.UUID, result interface{}) error {
+	_, err := r.client.RawGet(r.ItemPath()+"/"+id.String(), result)
+	return err
+}
+
+// List gets the entire collection up until the specified limit.
+//
+// If you potentially need multiple pages, use FirstPage() instead.
+//
+func (r Collection) List(result interface{}) error {
+	_, err := r.client.RawGet(r.CollectionPath(), result)
+	return err
+}
+
+// Create creates a new item
+func (r Collection) Create(body interface{}, result interface{}) error {
+	_, err := r.client.RawPost(r.CollectionPath(), body, result)
+	return err
+}
+
+// Put updates an item
+func (r Collection) Put(body interface{}, result interface{}) error {
+	_, err := r.client.RawPut(r.CollectionPath(), body, result)
+	return err
+}
+
+// Page is a requester for one page in a collection
+type Page struct {
+	r         Collection
+	page      int
+	pageCount int
+}
+
+// FirstPage returns a requester for the first page of a collection
+//
+// Do not specify the page filter when using the page requester, as
+// it manages page itself. You can set all others filters, including
+// limit.
+func (r Collection) FirstPage() Page {
+	return Page{page: 1, r: r}
+}
+
+// HasData returns true if the page has data
+func (p Page) HasData() bool {
+	return p.page == 1 || p.page <= p.pageCount
+}
+
+// Get gets one page of the collection
+func (p *Page) Get(result interface{}) error {
+	path := p.r.WithFilter("page", strconv.Itoa(p.page)).CollectionPath()
+	_, header, err := p.r.client.RawGetWithHeader(path, result)
+	if err != nil {
+		return err
+	}
+	pageCount, err := strconv.Atoi(header.Get("Pagination-Page-Count"))
+	if err == nil {
+		p.pageCount = pageCount
+	}
+	found := false
+	for i := 0; i < len(p.r.parameters) && !found; i++ {
+		found = p.r.parameters[i] == "until"
+	}
+	if !found {
+		until := header.Get("Pagination-Until")
+		if len(until) > 0 {
+			p.r = p.r.WithFilter("until", until)
+		}
+	}
+	return nil
+}
+
+// Next returns the next page
+func (p Page) Next() Page {
+	return Page{
+		r:         p.r,
+		page:      p.page + 1,
+		pageCount: p.pageCount,
+	}
+}
+
+// RawGet gets the resource from path. Expects http.StatusOK as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
+// The path can be extend with query strings.
+//
 // result can be map[string]interface{} or a raw *[]byte
-func (c *Client) Get(path string, result interface{}) (int, error) {
+func (c *Client) RawGet(path string, result interface{}) (int, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
@@ -85,11 +260,13 @@ func (c *Client) Get(path string, result interface{}) (int, error) {
 	return status, err
 }
 
-// GetWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
+// RawGetWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
 // flag an error. Returns the actual http status code and the header.
 //
+// The path can be extend with query strings.
+//
 // result can be map[string]interface{} or a raw *[]byte
-func (c *Client) GetWithHeader(path string, result interface{}) (int, http.Header, error) {
+func (c *Client) RawGetWithHeader(path string, result interface{}) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
@@ -114,9 +291,13 @@ func (c *Client) GetWithHeader(path string, result interface{}) (int, http.Heade
 	return status, res.Header, err
 }
 
-// BlobWithHeader gets the resource from path. Expects http.StatusOK as response, otherwise it will
-// flag an error. Returns the actual http status code and the return header
-func (c *Client) BlobWithHeader(path string, blob *[]byte) (int, http.Header, error) {
+// RawBlobWithHeader gets a binary resource from path. Expects http.StatusOK as response, otherwise it will
+// flag an error.
+//
+// The path can be extend with query strings.
+//
+// Returns the actual http status code and the return header
+func (c *Client) RawBlobWithHeader(path string, blob *[]byte) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
@@ -136,11 +317,13 @@ func (c *Client) BlobWithHeader(path string, blob *[]byte) (int, http.Header, er
 	return status, res.Header, nil
 }
 
-// Post posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
+// The path can be extend with query strings.
+//
 // result can be map[string]interface{} or a raw *[]byte
-func (c *Client) Post(path string, body interface{}, result interface{}) (int, error) {
+func (c *Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
 
 	j, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
@@ -164,11 +347,12 @@ func (c *Client) Post(path string, body interface{}, result interface{}) (int, e
 	return status, err
 }
 
-// PostBlob posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// RawPostBlob posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
-// result can be map[string]interface{} or a raw *[]byte
-func (c *Client) PostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
+// The path can be extend with query strings.
+//
+func (c *Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(blob))
 	for key, value := range header {
@@ -181,20 +365,17 @@ func (c *Client) PostBlob(path string, header map[string]string, blob []byte, re
 	if status != http.StatusCreated {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
 	}
-	var err error
-	if raw, ok := result.(*[]byte); ok {
-		*raw = rec.Body.Bytes()
-	} else {
-		err = json.Unmarshal(rec.Body.Bytes(), result)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), result)
 	return status, err
 }
 
-// Put puts a resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
+// RawPut puts a resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
 // otherwise it will flag an error. Returns the actual http status code.
 //
-// result can be map[string]interface{} or a raw *[]byte
-func (c *Client) Put(path string, body interface{}, result interface{}) (int, error) {
+// The path can be extend with query strings.
+//
+// result can also be raw *[]byte
+func (c *Client) RawPut(path string, body interface{}, result interface{}) (int, error) {
 
 	j, err := json.MarshalIndent(body, "", "  ")
 	if err != nil {
@@ -218,9 +399,13 @@ func (c *Client) Put(path string, body interface{}, result interface{}) (int, er
 	return status, err
 }
 
-// PutBlob puts a resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
-// otherwise it will flag an error. Returns the actual http status code.
-func (c *Client) PutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
+// RawPutBlob puts a binary resource to path. Expects http.StatusOK or http.StatusNoContent as valid responses,
+// otherwise it will flag an error.
+//
+// The path can be extend with query strings.
+//
+// Returns the actual http status code.
+func (c *Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(blob))
 	for key, value := range header {
@@ -238,9 +423,13 @@ func (c *Client) PutBlob(path string, header map[string]string, blob []byte, res
 	return status, err
 }
 
-// Delete deletes the resource at path. Expects http.StatusNoContent as response, otherwise it will
-// flag an error. Returns the actual http status code.
-func (c *Client) Delete(path string) (int, error) {
+// RawDelete deletes the resource at path. Expects http.StatusNoContent as response, otherwise it will
+// flag an error.
+//
+// The path can be extend with query strings.
+//
+// Returns the actual http status code.
+func (c *Client) RawDelete(path string) (int, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)

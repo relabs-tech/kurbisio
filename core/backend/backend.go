@@ -176,15 +176,8 @@ type relationInjection struct {
 }
 
 type collectionHelper struct {
-	getAll func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	getOne func(w http.ResponseWriter, r *http.Request)
-}
-
-func plural(s string) string {
-	if strings.HasSuffix(s, "y") {
-		return strings.TrimSuffix(s, "y") + "ies"
-	}
-	return s + "s"
+	getCollection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	getItem       func(w http.ResponseWriter, r *http.Request)
 }
 
 // returns $1,...,$n
@@ -243,7 +236,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 			return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
 		}
 		var childJSON interface{}
-		status, err := client.Get(r.URL.Path+"/"+child, &childJSON)
+		status, err := client.RawGet(r.URL.Path+"/"+child, &childJSON)
 		if err != nil {
 			return status, fmt.Errorf("cannot get child %s", child)
 		}
@@ -279,7 +272,7 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 		client := client.New(b.router).WithContext(r.Context())
 
 		var objectJSON map[string]interface{}
-		status, err := client.Get(r.URL.Path, &objectJSON)
+		status, err := client.RawGet(r.URL.Path, &objectJSON)
 		if err != nil {
 			http.Error(w, "patch: cannot read object: "+err.Error(), status)
 			return
@@ -288,7 +281,7 @@ func (b *Backend) createPatchRoute(router *mux.Router, route string) {
 		patchObject(objectJSON, patchJSON)
 
 		var response []byte
-		status, err = client.Put(r.URL.Path, objectJSON, &response)
+		status, err = client.RawPut(r.URL.Path, objectJSON, &response)
 		if err != nil {
 			http.Error(w, "patch: cannot update object: "+err.Error(), status)
 			return
@@ -310,8 +303,8 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 	var matchPrefix string
 	var targetDoc string
 	for _, s := range targetResources {
-		targetDoc += "/" + plural(s) + "/{" + s + "_id}"
-		matchPrefix += "/" + plural(s) + "/" + s + "_id"
+		targetDoc += "/" + core.Plural(s) + "/{" + s + "_id}"
+		matchPrefix += "/" + core.Plural(s) + "/" + s + "_id"
 	}
 
 	log.Println("create shortcut from", shortcut, "to", targetDoc)
@@ -347,7 +340,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 				http.Error(w, fmt.Sprintf("missing selector for %s", s), http.StatusBadRequest)
 				return
 			}
-			newPrefix += "/" + plural(s) + "/" + id
+			newPrefix += "/" + core.Plural(s) + "/" + id
 		}
 		r.URL.Path = newPrefix + tail
 		log.Println("redirect shortcut route to:", r.URL)
@@ -355,28 +348,6 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 	}
 	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
-}
-
-// propertyNameToCanonicalHeader converts kurbisio JSON property names
-// to their canonical header representation. Example: "content_type"
-// becomes "Content-Type".
-func jsonNameToCanonicalHeader(property string) string {
-	parts := strings.Split(property, "_")
-	for i := 0; i < len(parts); i++ {
-		s := parts[i]
-		if len(s) == 0 {
-			continue
-		}
-		s = strings.ToLower(s)
-		runes := []rune(s)
-		r := runes[0]
-		if 'A' <= r && r <= 'Z' {
-			r += 'a' - 'A'
-			runes[0] = r
-		}
-		parts[i] = string(runes)
-	}
-	return strings.Join(parts, "-")
 }
 
 // Notification is a database notification. Receive them

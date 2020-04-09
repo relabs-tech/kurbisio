@@ -217,10 +217,11 @@ The response carries the following custom headers for pagination:
 	  "Pagination-Total-Count"  the total number of items in the collection
 	  "Pagination-Page-Count"   the total number of pages in the collection
 	  "Pagination-Current-Page" the currently selected page
+	  "Pagination-Until"	    the created_at time of the first item in the response
 
 The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
-avoids page drift. A well-behaving application would get the first page without any filter, and then use the created_at
-value of the first received item as until-parameter for querying pages further down.
+avoids page drift. A well-behaving application would get the first page without any filter, and then use the timestamp
+reported in the "Pagination-Until" header as until-parameter for querying pages further down.
 
 Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
 if the requested page is out of range.
