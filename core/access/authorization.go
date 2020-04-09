@@ -164,7 +164,7 @@ func NewAuthorizationCache() *AuthorizationCache {
 
 // Read returns an authorization from in-process cache.
 // Token should be the temporary token the authorization was derived from, not any of the ids.
-// This function is go-route safe
+// This function is go-routine safe
 func (a *AuthorizationCache) Read(token string) *Authorization {
 	a.mutex.RLock()
 	auth, ok := a.cache[token]
@@ -177,7 +177,7 @@ func (a *AuthorizationCache) Read(token string) *Authorization {
 
 // Write stores an authorization in the in-memory cache.
 // Token should be the temporary token it was derived from, not any of the ids.
-// This function is go-route safe
+// This function is go-routine safe
 func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 	a.mutex.Lock()
 	a.cache[token] = auth
