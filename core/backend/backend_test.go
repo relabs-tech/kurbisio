@@ -3,6 +3,7 @@ package backend
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -67,7 +68,13 @@ var configurationJSON string = `{
 		"resource": "blob",
 		"searchable_properties":["content_type"],
 		"mutable": true
+	  },
+	  {
+		"resource": "blob2",
+		"searchable_properties":["content_type"],
+		"mutable": true
 	  }
+
 	],
 	"relations": [],
 	"shortcuts": [
@@ -112,16 +119,16 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestCollectionA(t *testing.T) {
+type A struct {
+	AID            uuid.UUID         `json:"a_id"`
+	Properties     map[string]string `json:"properties"`
+	ExternalID     string            `json:"external_id"`
+	StaticProp     string            `json:"static_prop"`
+	SearchableProp string            `json:"searchable_prop"`
+	CreatedAt      time.Time         `json:"created_at"`
+}
 
-	type A struct {
-		AID            uuid.UUID         `json:"a_id"`
-		Properties     map[string]string `json:"properties"`
-		ExternalID     string            `json:"external_id"`
-		StaticProp     string            `json:"static_prop"`
-		SearchableProp string            `json:"searchable_prop"`
-		CreatedAt      time.Time         `json:"created_at"`
-	}
+func TestCollectionA(t *testing.T) {
 
 	someJSON := map[string]string{
 		"foo": "bar",
@@ -552,14 +559,13 @@ func TestState(t *testing.T) {
 	}
 }
 
+type Blob struct {
+	BlobID      uuid.UUID `json:"blob_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	ContentType string    `json:"content_type"`
+}
+
 func TestBlob(t *testing.T) {
-
-	type Blob struct {
-		BlobID      uuid.UUID `json:"blob_id"`
-		CreatedAt   time.Time `json:"created_at"`
-		ContentType string    `json:"content_type"`
-	}
-
 	data, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
 	if err != nil {
 		t.Fatal(err)
@@ -786,6 +792,142 @@ func TestNotifications(t *testing.T) {
 	removed += backend.RemoveNotificationHandler(&deleteHandler)
 	if removed != 9 {
 		t.Fatalf("wrong number of removed handlers. Expected 9 but got %d", removed)
+	}
+}
+
+func TestPaginationCollection(t *testing.T) {
+	// Populate the DB with elements created at two created_at times
+	numberOfElements := 205
+	createdAtFirst50 := time.Now().UTC().Round(time.Millisecond)
+	createdAtRemaining := time.Now().UTC().Round(time.Millisecond).Add(time.Minute)
+	for i := 1; i <= numberOfElements; i++ {
+		aNew := A{
+			ExternalID: fmt.Sprint(i),
+			CreatedAt:  createdAtFirst50,
+		}
+		if i > 50 {
+			aNew.CreatedAt = createdAtRemaining
+		}
+
+		if _, err := testService.client.RawPost("/as", &aNew, &A{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testCases := []struct {
+		path           string
+		expectedStatus int
+		expectedLength int
+		expectedError  bool
+		valid          func(*testing.T, A)
+	}{
+		{"/as", http.StatusOK, 100, false, nil},
+		{"/as?limit=10", http.StatusOK, 10, false, nil},
+		{"/as?limit=10&page=1", http.StatusOK, 10, false, nil},
+		{"/as?limit=10&page=10", http.StatusOK, 10, false, nil},
+		{"/as?page=0", http.StatusBadRequest, 0, true, nil},
+		{"/as?until=" + createdAtFirst50.Add(time.Second).Format(time.RFC3339), http.StatusOK, 50, false, func(tc *testing.T, a A) {
+			if a.CreatedAt.After(createdAtFirst50) {
+				tc.Fatal("Got too recent record")
+			}
+		}},
+		{"/as?limit=45&from=" + createdAtRemaining.Format(time.RFC3339), http.StatusOK, 45, false, func(tc *testing.T, a A) {
+			if a.CreatedAt.Before(createdAtRemaining) {
+				tc.Fatal("Got too old record:", a.CreatedAt)
+			}
+		}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.path, func(t *testing.T) {
+			var as []A
+			status, err := testService.client.RawGet(tc.path, &as)
+			if !tc.expectedError && err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.expectedStatus {
+				t.Fatalf("Expected status %d, got status: %d", tc.expectedStatus, status)
+			}
+			if len(as) != tc.expectedLength {
+				t.Fatalf("The expected returned size is %d, but %d were received", tc.expectedLength, len(as))
+			}
+			if tc.valid != nil {
+				for _, a := range as {
+					tc.valid(t, a)
+				}
+			}
+		})
+	}
+
+	// Verify that we can get all elements by iterating through pages
+	limit := 10
+	var received = make(map[uuid.UUID]A)
+	for page := 1; page <= numberOfElements/limit+1; page++ {
+		path := fmt.Sprintf("/as?limit=%d&page=%d", limit, page)
+		var as []A
+		if status, err := testService.client.RawGet(path, &as); err != nil || status != http.StatusOK {
+			t.Fatal("error: ", err, "status: ", status)
+		}
+		for _, a := range as {
+			if _, ok := received[a.AID]; ok {
+				t.Fatalf("Received the same UUID: %s multiple times", a.AID)
+			}
+			received[a.AID] = a
+		}
+	}
+	if len(received) != numberOfElements {
+		t.Fatalf("Did not get %d elements, only got %d", numberOfElements, len(received))
+	}
+
+}
+
+func TestPaginationBlob(t *testing.T) {
+	numberOfElements := 10
+	beforeCreation := time.Now().UTC().Add(-time.Second)
+	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	for i := 1; i <= numberOfElements; i++ {
+		if _, err = testService.client.RawPostBlob("/blob2s", header, blobData, &Blob{}); err != nil {
+			t.Fatal(err)
+		}
+
+	}
+	afterCreation := time.Now().UTC().Add(time.Second)
+
+	testCases := []struct {
+		path           string
+		expectedStatus int
+		expectedLength int
+		expectedError  bool
+	}{
+		{"/blob2s", http.StatusOK, 10, false},
+		{"/blob2s?limit=5", http.StatusOK, 5, false},
+		{"/blob2s?limit=4&page=1", http.StatusOK, 4, false},
+		{"/blob2s?limit=4&page=3", http.StatusOK, 2, false},
+		{"/blob2s?page=0", http.StatusBadRequest, 0, true},
+		{"/blob2s?until=" + afterCreation.Format(time.RFC3339), http.StatusOK, 10, false},
+		{"/blob2s?from=" + beforeCreation.Format(time.RFC3339), http.StatusOK, 10, false},
+		{"/blob2s?limit=4&until=" + afterCreation.Format(time.RFC3339), http.StatusOK, 4, false},
+		{"/blob2s?limit=4&from=" + beforeCreation.Format(time.RFC3339), http.StatusOK, 4, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.path, func(t *testing.T) {
+			var blobs []Blob
+			status, err := testService.client.RawGet(tc.path, &blobs)
+			if !tc.expectedError && err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.expectedStatus {
+				t.Fatalf("Expected status %d, got status: %d", tc.expectedStatus, status)
+			}
+			if len(blobs) != tc.expectedLength {
+				t.Fatalf("The expected returned size is %d, but %d were received", tc.expectedLength, len(blobs))
+			}
+		})
 	}
 }
 
