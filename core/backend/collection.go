@@ -78,10 +78,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
 	// query to create all indices after the table creation
-	uuidStr := this + "_id"
-	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(created_at, %s);",
+	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(created_at);",
 		"sort_index_"+this+"_created_at",
-		schema, resource, uuidStr)
+		schema, resource)
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
 
@@ -160,7 +159,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND state=$%d ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
 
-	sqlPagination := fmt.Sprintf("ORDER BY (created_at, %s) DESC LIMIT $%d OFFSET $%d;", uuidStr, propertiesIndex+5, propertiesIndex+6)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at, %s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
