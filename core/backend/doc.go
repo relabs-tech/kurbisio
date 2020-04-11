@@ -72,6 +72,7 @@ The models look like this:
 		"properties":  JSON
 		"identity": STRING
 		"created_at": TIMESTAMP
+		"revision": INTEGER
 	}
 
 	Profile
@@ -80,6 +81,7 @@ The models look like this:
 		"user_id": UUID,
 		"properties":  JSON
 		"created_at": TIMESTAMP
+		"revision": INTEGER
 	}
 
 	Device
@@ -88,6 +90,7 @@ The models look like this:
 		"properties":  JSON
 		"thing": STRING
 		"created_at": TIMESTAMP
+		"revision": INTEGER
 	}
 
 
@@ -164,6 +167,13 @@ This would create these additional REST routes for the authenticated user:
 	DELETE /user/devices/{device_id}
 
 Effectively, the path segement /users/{user_id} is replaced with the shortcut /user for all generated routes.
+
+Revisions
+
+Every item has an integer property "revision", which is incremented every time the item is updated. Revisions can be
+used to make updates safe in systems with multiple concurrent writers. If a PUT or PATCH request contains a
+non-zero revision number which does not match the item's current revision, then the request is discarded and
+an error message (409 - Conflict) is returned.
 
 Wildcard Queries
 

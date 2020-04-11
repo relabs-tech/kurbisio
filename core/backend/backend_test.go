@@ -404,7 +404,7 @@ func TestSingletonOS(t *testing.T) {
 	sGet := S{}
 	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
-		t.Fatal("delete failed")
+		t.Fatal("delete failed, got status ", status)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -929,9 +929,4 @@ func TestPaginationBlob(t *testing.T) {
 			}
 		})
 	}
-}
-
-func asJSON(object interface{}) string {
-	j, _ := json.MarshalIndent(object, "", "  ")
-	return string(j)
 }

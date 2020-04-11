@@ -125,7 +125,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	log.Println("  handle blob routes:", collectionRoute, "GET,POST")
 	log.Println("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", blob, created_at FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex]) + ";"
 
@@ -162,8 +162,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		maxAge = fmt.Sprintf("max-age=%d", rc.MaxAgeCache)
 	}
 
-	createScanValuesAndObject := func(createdAt *time.Time) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+1)
+	createScanValuesAndObject := func(createdAt *time.Time, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+1, len(columns)+1+len(extra))
 		object := map[string]interface{}{}
 		var i int
 		for ; i < propertiesIndex; i++ {
@@ -183,57 +183,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		values[i] = createdAt
 		object["created_at"] = createdAt
-		return values, object
-	}
-
-	createScanValuesAndObjectWithBlob := func(blob *[]byte, createdAt *time.Time) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+2)
-		object := map[string]interface{}{}
-		var i int
-		for ; i < propertiesIndex; i++ {
-			values[i] = &uuid.UUID{}
-			object[columns[i]] = values[i]
-		}
-		values[i] = &json.RawMessage{}
-		object[columns[i]] = values[i]
-		i++
-
-		for ; i < len(columns); i++ {
-			str := ""
-			values[i] = &str
-			object[columns[i]] = values[i]
-
-		}
-		values[i] = blob
-		i++
-		values[i] = createdAt
-		object["created_at"] = createdAt
-		return values, object
-	}
-
-	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+2)
-		object := map[string]interface{}{}
-		var i int
-		for ; i < propertiesIndex; i++ {
-			values[i] = &uuid.UUID{}
-			object[columns[i]] = values[i]
-		}
-		values[i] = &json.RawMessage{}
-		object[columns[i]] = values[i]
-		i++
-
-		for ; i < len(columns); i++ {
-			str := ""
-			values[i] = &str
-			object[columns[i]] = values[i]
-
-		}
-		createdAt := &time.Time{}
-		values[i] = createdAt
-		object["created_at"] = createdAt
-		i++
-		values[i] = totalCount
+		values = append(values, extra...)
 		return values, object
 	}
 
@@ -339,7 +289,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		defer rows.Close()
 		var totalCount int
 		for rows.Next() {
-			values, object := createScanValuesAndObjectForCollection(&totalCount)
+			var createdAt time.Time
+			values, object := createScanValuesAndObject(&createdAt, &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -347,7 +298,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
-				from = *object["created_at"].(*time.Time)
+				from = createdAt
 			}
 			response = append(response, object)
 		}
@@ -421,7 +372,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		var blob []byte
 		var createdAt time.Time
-		values, response := createScanValuesAndObjectWithBlob(&blob, &createdAt)
+		values, response := createScanValuesAndObject(&createdAt, &blob)
 
 		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
@@ -675,13 +626,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 
-	collection := collectionHelper{
-		getCollection: getCollection,
-		getItem:       getItem,
+	collection := collectionFunctions{
+		collection: getCollection,
+		item:       getItem,
 	}
 
 	// store the collection helper for later usage in relations
-	b.collectionHelper[this] = &collection
+	b.collectionFunctions[this] = &collection
 
 	// CREATE
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {

@@ -4,7 +4,6 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"sort"
 	"strconv"
@@ -23,10 +22,10 @@ import (
 
 // Backend is the generic rest backend
 type Backend struct {
-	config           backendConfiguration
-	db               *sql.DB
-	router           *mux.Router
-	collectionHelper map[string]*collectionHelper
+	config              backendConfiguration
+	db                  *sql.DB
+	router              *mux.Router
+	collectionFunctions map[string]*collectionFunctions
 	// Registry is the JSON object registry for this backend's schema
 	Registry             *registry.Registry
 	authorizationEnabled bool
@@ -69,7 +68,7 @@ func New(bb *Builder) *Backend {
 		config:               config,
 		db:                   bb.DB,
 		router:               bb.Router,
-		collectionHelper:     make(map[string]*collectionHelper),
+		collectionFunctions:  make(map[string]*collectionFunctions),
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
 	}
@@ -175,9 +174,9 @@ type relationInjection struct {
 	queryParameters []interface{}
 }
 
-type collectionHelper struct {
-	getCollection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	getItem       func(w http.ResponseWriter, r *http.Request)
+type collectionFunctions struct {
+	collection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	item       func(w http.ResponseWriter, r *http.Request)
 }
 
 // returns $1,...,$n
@@ -225,6 +224,25 @@ func bytesToEtag(b []byte) string {
 	return fmt.Sprintf("\"%x\"", sha1.Sum(b))
 }
 
+func asJSON(object interface{}) string {
+	j, _ := json.MarshalIndent(object, "", "  ")
+	return string(j)
+}
+
+// clever recursive function to patch a generic json object.
+func patchObject(object map[string]interface{}, patch map[string]interface{}) {
+
+	for k, v := range patch {
+		oc, ocok := object[k].(map[string]interface{})
+		pc, pcok := v.(map[string]interface{})
+		if ocok && pcok {
+			patchObject(oc, pc)
+		} else {
+			object[k] = v
+		}
+	}
+}
+
 func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {
 	var all []string
 	for _, child := range children {
@@ -243,55 +261,6 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 		response[child] = &childJSON
 	}
 	return http.StatusOK, nil
-}
-
-// clever recursive function to patch a generic json object.
-func patchObject(object map[string]interface{}, patch map[string]interface{}) {
-	for k, v := range patch {
-		oc, ocok := object[k].(map[string]interface{})
-		pc, pcok := v.(map[string]interface{})
-		if ocok && pcok {
-			patchObject(oc, pc)
-		} else {
-			object[k] = v
-		}
-	}
-}
-
-func (b *Backend) createPatchRoute(router *mux.Router, route string) {
-	router.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method, "- will do GET and PUT")
-		patch, _ := ioutil.ReadAll(r.Body)
-		var patchJSON map[string]interface{}
-		err := json.Unmarshal(patch, &patchJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		client := client.New(b.router).WithContext(r.Context())
-
-		var objectJSON map[string]interface{}
-		status, err := client.RawGet(r.URL.Path, &objectJSON)
-		if err != nil {
-			http.Error(w, "patch: cannot read object: "+err.Error(), status)
-			return
-		}
-
-		patchObject(objectJSON, patchJSON)
-
-		var response []byte
-		status, err = client.RawPut(r.URL.Path, objectJSON, &response)
-		if err != nil {
-			http.Error(w, "patch: cannot update object: "+err.Error(), status)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(response)
-
-	}).Methods(http.MethodOptions, http.MethodPatch)
 }
 
 func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {

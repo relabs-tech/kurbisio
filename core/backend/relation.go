@@ -70,7 +70,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		panic(err)
 	}
 
-	collection := b.collectionHelper[this]
+	collection := b.collectionFunctions[this]
 
 	sqlInjectRelation := fmt.Sprintf("AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", this, this, schema, resource)
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
@@ -108,7 +108,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		collection.getCollection(w, r, injectRelation)
+		collection.collection(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ
@@ -122,7 +122,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				return
 			}
 		}
-		collection.getItem(w, r)
+		collection.item(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// CREATE

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"net/http"
+	"net/http/httptest"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -44,6 +45,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
 		"created_at timestamp NOT NULL DEFAULT now()",
 		"state VARCHAR NOT NULL DEFAULT ''",
+		"revision INTEGER NOT NULL DEFAULT 1",
 	}
 
 	columns := []string{this + "_id"}
@@ -65,6 +67,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// enforce a unique constraint on all our identifying indices. This enables child
 	// resources to have a composite foreign key on us
+	singletonConstraint := ""
 	if len(columns) > 1 {
 		createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
 		createColumns = append(createColumns, createColumn)
@@ -72,7 +75,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	if singleton {
 		// force the resource itself to be singleton resource
-		createColumn := "UNIQUE (" + owner + "_id )"
+		singletonConstraint = fmt.Sprintf("only_one_%s_per_%s", this, owner)
+		createColumn := "CONSTRAINT " + singletonConstraint + " UNIQUE (" + strings.Join(columns, ",") + ")"
 		createColumns = append(createColumns, createColumn)
 	}
 
@@ -147,11 +151,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
 	log.Println("  handle collection routes:", itemRoute, "GET,DELETE")
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, state FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", created_at, state, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", created_at, revision, state, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
@@ -163,41 +167,26 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
-	sqlWhereSingle := ""
-	if singleton {
-		if propertiesIndex > 1 {
-			sqlWhereSingle += "WHERE " + compareIDsString(columns[1:propertiesIndex])
-		}
-	}
-
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	sqlReturnState := " RETURNING state;"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, state)"
-	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") RETURNING " + this + "_id;"
+	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ")"
+	if singleton {
+		insertQuery += "ON CONFLICT ON CONSTRAINT \"" + singletonConstraint + "\" DO NOTHING"
+	}
+	insertQuery += " RETURNING " + this + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne
+	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
+	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + this + "_id"
 
-	insertUpdateQuery := ""
-	if singleton {
-		insertUpdateQuery += fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource)
-		insertUpdateQuery += "(" + strings.Join(columns, ", ") + ", created_at, state)"
-		insertUpdateQuery += " VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT (" + owner + "_id) DO UPDATE SET "
-		sets := make([]string, len(columns)-propertiesIndex)
-		for i := propertiesIndex; i < len(columns); i++ {
-			sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
-		}
-		insertUpdateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
-		insertUpdateQuery += " RETURNING (xmax = 0) AS inserted, " + this + "_id;" // return whether we did insert or update, this is a psql trick
-	}
-
-	createScanValuesAndObject := func() ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+2)
+	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
 		object := map[string]interface{}{}
 		var i int
 		for ; i < propertiesIndex; i++ {
@@ -215,47 +204,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		}
 
-		createdAt := &time.Time{}
 		values[i] = createdAt
 		object["created_at"] = createdAt
 		i++
-		var state string
-		values[i] = &state
-		object["state"] = &state
+		values[i] = revision
+		object["revision"] = revision
+		values = append(values, extra...)
 		return values, object
 	}
 
-	createScanValuesAndObjectForCollection := func(totalCount *int) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, len(columns)+3)
-		object := map[string]interface{}{}
-		var i int
-		for ; i < propertiesIndex; i++ {
-			values[i] = &uuid.UUID{}
-			object[columns[i]] = values[i]
-		}
-		values[i] = &json.RawMessage{}
-		object[columns[i]] = values[i]
-		i++
-
-		for ; i < len(columns); i++ {
-			str := ""
-			values[i] = &str
-			object[columns[i]] = values[i]
-
-		}
-		createdAt := &time.Time{}
-		values[i] = createdAt
-		object["created_at"] = createdAt
-		i++
-		var state string
-		values[i] = &state
-		object["state"] = &state
-		i++
-		values[i] = totalCount
-		return values, object
-	}
-
-	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	collection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -362,19 +320,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		defer rows.Close()
 		var totalCount int
 		for rows.Next() {
-			values, object := createScanValuesAndObjectForCollection(&totalCount)
+			var createdAt time.Time
+			values, object := createScanValuesAndObject(&createdAt, new(int), &state, &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			// hide "state" from response unless requested
-			if len(state) == 0 {
-				delete(object, "state")
+			if len(state) > 0 {
+				object["state"] = &state
 			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
-				from = *object["created_at"].(*time.Time)
+				from = createdAt
 			}
 			response = append(response, object)
 		}
@@ -398,7 +356,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	getCollectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	collectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -408,24 +366,42 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		getCollection(w, r, nil)
+		collection(w, r, nil)
 	}
 
-	getItem := func(w http.ResponseWriter, r *http.Request) {
+	item := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
+
+		if singleton {
+			if len(params[columns[0]]) == 0 || params[columns[0]] == "all" {
+				// no primary id, we need an owner
+				ownerID := params[owner+"_id"]
+				if len(ownerID) == 0 || ownerID == "all" {
+					http.Error(w, "all is not a valid "+owner+" for requesting a single "+this+". Did you want to say "+core.Plural(this)+"?", http.StatusBadRequest)
+					return
+				}
+				params[columns[0]] = "all"
+			}
+		} else {
+			if params[columns[0]] == "all" {
+				http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+				return
+			}
+		}
+
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
 
-		if queryParameters[0].(string) == "all" {
-			http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
-			return
-		}
-
-		values, response := createScanValuesAndObject()
+		var state string
+		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
 		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
+			if singleton {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
@@ -448,10 +424,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// hide "state" from response unless defined
-		state := *response["state"].(*string)
-		if len(state) == 0 {
-			delete(response, "state")
+		if len(state) > 0 {
+			response["state"] = &state
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
@@ -466,7 +440,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
-	getOneWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	itemWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -476,148 +450,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		getItem(w, r)
-	}
-
-	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		body, _ := ioutil.ReadAll(r.Body)
-		params := mux.Vars(r)
-
-		var bodyJSON map[string]interface{}
-		err := json.Unmarshal(body, &bodyJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		values := make([]interface{}, len(columns)+2)
-
-		// primary id can come from parameter (fully qualified put) or from body json (collection put)
-		if len(params[columns[0]]) == 0 {
-			primaryID, ok := bodyJSON[columns[0]].(string)
-			if !ok {
-				http.Error(w, "missing "+columns[0], http.StatusBadRequest)
-				return
-			}
-			params[columns[0]] = primaryID
-		}
-
-		// now we have all parameters and can authorize
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var i int
-
-		// add and validate core identifiers
-		for i = 0; i < propertiesIndex; i++ {
-			key := columns[i]
-			param := params[key]
-			values[i] = param
-			value, ok := bodyJSON[key]
-			if ok && param != "all" && param != value.(string) {
-				http.Error(w, "illegal "+key, http.StatusBadRequest)
-				return
-			}
-		}
-
-		// build the update set
-		properties, ok := bodyJSON["properties"]
-		if ok {
-			propertiesJSON, _ := json.Marshal(properties)
-			values[i] = propertiesJSON
-		} else {
-			values[i] = []byte("{}")
-		}
-		i++
-
-		for ; i < len(columns); i++ {
-			value, ok := bodyJSON[columns[i]]
-			if !ok {
-				http.Error(w, "missing property or index"+columns[i], http.StatusBadRequest)
-				return
-			}
-			values[i] = value
-		}
-
-		// next value is created_at
-		createdAt := time.Now().UTC()
-		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, ok := value.(string)
-			if !ok {
-				http.Error(w, "illegal created_at", http.StatusBadRequest)
-				return
-			}
-			t, err := time.Parse(time.RFC3339, timestamp)
-			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-				return
-			}
-			createdAt = t.UTC()
-		}
-		values[i] = &createdAt
-		i++
-
-		// last value is state
-		var state string
-		if value, ok := bodyJSON["state"]; ok {
-			state, ok = value.(string)
-			if !ok {
-				http.Error(w, "state must be a string", http.StatusBadRequest)
-				return
-			}
-		}
-		values[i] = &state
-		i++
-
-		res, err := b.db.Exec(updateQuery, values...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count != 1 {
-			http.Error(w, "no such "+this, http.StatusBadRequest)
-			return
-		}
-
-		// re-read new values
-		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// hide "state" from response unless defined
-		state = *response["state"].(*string)
-		if len(state) == 0 {
-			delete(response, "state")
-		}
-
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		b.notify(resource, core.OperationUpdate, state, jsonData)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+		item(w, r)
 	}
 
 	doDeleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -628,6 +461,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
+		}
+
+		// for singleton, primary id can be "all"
+		if singleton && len(params[columns[0]]) == 0 {
+			params[columns[0]] = "all"
 		}
 
 		queryParameters := make([]interface{}, propertiesIndex)
@@ -658,21 +496,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
 		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
+		if bodyJSON == nil {
+			body, _ := ioutil.ReadAll(r.Body)
+			err := json.Unmarshal(body, &bodyJSON)
+			if err != nil {
+				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 				return
 			}
-		}
-		body, _ := ioutil.ReadAll(r.Body)
-		var bodyJSON map[string]interface{}
-		err := json.Unmarshal(body, &bodyJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
-			return
 		}
 
 		// build insert query and validate that we have all parameters
@@ -700,8 +532,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			// if we have no identifier in the url parameters, but in the json document, use
 			// the ones from the json document
-			if param == "all" && ok && value != "00000000-0000-0000-0000-000000000000" {
-				values[i] = value
+			if param == "all" {
+				if ok && value != "00000000-0000-0000-0000-000000000000" {
+					values[i] = value
+				} else {
+					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
+					return
+				}
 			} else {
 				values[i] = param
 			}
@@ -770,23 +607,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if err == sql.ErrNoRows {
+			http.Error(w, "singleton "+this+" already exists", http.StatusConflict)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject()
+		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
 		err = b.db.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// hide "state" from response unless defined
-		state = *response["state"].(*string)
-		if len(state) == 0 {
-			delete(response, "state")
+		if len(state) > 0 {
+			response["state"] = state
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
@@ -798,60 +636,59 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	collection := collectionHelper{
-		getCollection: getCollection,
-		getItem:       getItem,
+	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		create(w, r, nil)
 	}
 
-	// store the collection helper for later usage in relations
-	b.collectionHelper[this] = &collection
-
-	// CREATE
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		createWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodPost)
-
-	// UPDATE
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		updateWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodPut)
-
-	// UPDATE with fully qualified path
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		updateWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodPut)
-
-	// PATCH (READ + UPDATE)
-	b.createPatchRoute(router, itemRoute)
-
-	// READ
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		getOneWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		getCollectionWithAuth(w, r, nil)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// DELETE
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		doDeleteWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodDelete)
-
-	if !singleton {
-		return
-	}
-
-	insertUpdateSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
+
+		var bodyJSON map[string]interface{}
+		err = json.Unmarshal(body, &bodyJSON)
+		if err != nil {
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// primary id can come from parameter (fully qualified put) or from body json (collection put).
+		// For singleton, primary id can be "all", but then we need an owner
+		primaryID := params[columns[0]]
+		var ownerID string
+		if len(primaryID) == 0 {
+			if singleton {
+				primaryID = "all"
+				ownerID = params[owner+"_id"]
+				if len(ownerID) == 0 || ownerID == "all" {
+					var ok bool
+					ownerID, ok = bodyJSON[owner+"_id"].(string)
+					if !ok {
+						http.Error(w, "missing "+owner+"_id", http.StatusBadRequest)
+						return
+					}
+					params[owner+"_id"] = ownerID
+				}
+			} else {
+				var ok bool
+				primaryID, ok = bodyJSON[columns[0]].(string)
+				if !ok {
+					http.Error(w, "missing "+columns[0], http.StatusBadRequest)
+					return
+				}
+			}
+			params[columns[0]] = primaryID
+		}
+
+		// now we have all parameters and can authorize
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
@@ -860,33 +697,84 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		var bodyJSON map[string]interface{}
-		err := json.Unmarshal(body, &bodyJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+		revision := 0
+		if r, ok := bodyJSON["revision"].(float64); ok {
+			revision = int(r)
+		}
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+
+		var currentRevision int
+	Retry:
+		values, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
+		if singleton && primaryID == "all" {
+			err = tx.QueryRow(readQuery+"WHERE "+owner+"_id = $1 FOR UPDATE;", &ownerID).Scan(values...)
+		} else {
+			log.Println(primaryID)
+			err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1 FOR UPDATE;", &primaryID).Scan(values...)
+		}
+		if err == sql.ErrNoRows {
+			if singleton {
+				rec := httptest.NewRecorder()
+				create(rec, r, bodyJSON)
+				if rec.Code == http.StatusCreated {
+					// all is good, we are done
+					tx.Rollback()
+					w.WriteHeader(http.StatusCreated)
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(rec.Body.Bytes())
+					return
+				} else if rec.Code == http.StatusConflict {
+					// race condition: somebody else has create the object right now
+					goto Retry
+				}
+			}
+			tx.Rollback()
+			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
+		}
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if revision != 0 && revision != currentRevision {
+			tx.Rollback()
+			http.Error(w, this+" revision does not match", http.StatusConflict)
+			return
+		}
+		if singleton {
+			primaryID = values[0].(*uuid.UUID).String()
+		}
+
+		// for MethodPatch we get the existing object from the database and patch property by property
+		if r.Method == http.MethodPatch {
+
+			// convert object into generic json for patching (the datatypes are different compared to the database) in the database)
+			body, _ := json.Marshal(object)
+			var objectJSON map[string]interface{}
+			json.Unmarshal(body, &objectJSON)
+
+			// now bodyJSON from the request becomes a patch
+			patchObject(objectJSON, bodyJSON)
+
+			// rewrite this put request to contain the entire (patched) object
+			bodyJSON = objectJSON
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns)+2)
-		// the primary resource identifier, use as specified or create a new one
-		primaryID, ok := bodyJSON[columns[0]]
-		if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
-			primaryID = uuid.New()
-		}
-		values[0] = primaryID
+		values = make([]interface{}, len(columns)+2)
+
 		var i int
 
 		// add and validate core identifiers
-		for i = 1; i < propertiesIndex; i++ {
+		for i = 0; i < propertiesIndex; i++ {
 			key := columns[i]
 			param := params[key]
 			values[i] = param
 			value, ok := bodyJSON[key]
-			// zero uuid counts as no uuid for creation
-			ok = ok && value != "00000000-0000-0000-0000-000000000000"
-
 			if ok && param != "all" && param != value.(string) {
+				tx.Rollback()
 				http.Error(w, "illegal "+key, http.StatusBadRequest)
 				return
 			}
@@ -900,18 +788,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		} else {
 			values[i] = []byte("{}")
 		}
-		sets[i-propertiesIndex] = "properties = $" + strconv.Itoa(i+1)
 		i++
 
 		for ; i < len(columns); i++ {
-			k := columns[i]
-			value, ok := bodyJSON[k]
+			value, ok := bodyJSON[columns[i]]
 			if !ok {
-				http.Error(w, "missing property or index"+k, http.StatusBadRequest)
+				tx.Rollback()
+				http.Error(w, "missing property or index"+columns[i], http.StatusBadRequest)
 				return
 			}
 			values[i] = value
-			sets[i-propertiesIndex] = k + " = $" + strconv.Itoa(i+1)
 		}
 
 		// next value is created_at
@@ -919,11 +805,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if value, ok := bodyJSON["created_at"]; ok {
 			timestamp, ok := value.(string)
 			if !ok {
+				tx.Rollback()
 				http.Error(w, "illegal created_at", http.StatusBadRequest)
 				return
 			}
 			t, err := time.Parse(time.RFC3339, timestamp)
 			if err != nil {
+				tx.Rollback()
 				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -932,11 +820,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = &createdAt
 		i++
 
-		// last value is state
+		// then state
 		var state string
 		if value, ok := bodyJSON["state"]; ok {
 			state, ok = value.(string)
 			if !ok {
+				tx.Rollback()
 				http.Error(w, "state must be a string", http.StatusBadRequest)
 				return
 			}
@@ -944,159 +833,107 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = &state
 		i++
 
-		var inserted bool
-		var id uuid.UUID
-		err = b.db.QueryRow(insertUpdateQuery, values...).Scan(&inserted, &id)
-		if err != nil {
+		err = tx.QueryRow(updateQuery, values...).Scan(&primaryID)
+		if err == sql.ErrNoRows {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
-		}
-
-		// re-read data and return as json
-		values, response := createScanValuesAndObject()
-		err = b.db.QueryRow(readQuery+"WHERE "+this+"_id = $1;", &id).Scan(values...)
-		if err == sql.ErrNoRows {
-			http.Error(w, "no such "+this, http.StatusNotFound)
-			return
-		}
-		if err != nil {
+		} else if err != nil {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// hide "state" from response unless defined
-		state = *response["state"].(*string)
-		if len(state) == 0 {
-			delete(response, "state")
+
+		// re-read new values
+		values, response := createScanValuesAndObject(&time.Time{}, &revision, &state)
+		err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err = tx.Commit(); err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if len(state) > 0 {
+			response["state"] = state
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		if inserted {
-			b.notify(resource, core.OperationCreate, state, jsonData)
-		} else {
-			b.notify(resource, core.OperationUpdate, state, jsonData)
-		}
+		b.notify(resource, core.OperationUpdate, state, jsonData)
 
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
 	}
 
-	getOneSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		params := mux.Vars(r)
-
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		sqlQuery := readQuery + sqlWhereSingle + ";"
-		queryParameters := make([]interface{}, propertiesIndex-1)
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			queryParameters[i-1] = params[columns[i]]
-		}
-
-		if propertiesIndex > 1 && queryParameters[propertiesIndex-2].(string) == "all" {
-			http.Error(w, "all is not a valid "+owner+" for requesting a single "+this+". Did you want to say "+core.Plural(this)+"?", http.StatusBadRequest)
-			return
-		}
-
-		values, response := createScanValuesAndObject()
-		err := b.db.QueryRow(sqlQuery, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			// not an error, singleton resources do always exist conceptually
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		urlQuery := r.URL.Query()
-		for key, array := range urlQuery {
-			switch key {
-			case "children":
-				status, err := b.addChildrenToGetResponse(array, r, response)
-				if err != nil {
-					http.Error(w, err.Error(), status)
-					return
-				}
-			default:
-				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
-			}
-		}
-		// hide "state" from response unless defined
-		state := *response["state"].(*string)
-		if len(state) == 0 {
-			delete(response, "state")
-		}
-
-		jsonData, _ := json.MarshalIndent(response, "", " ")
-		etag := bytesToEtag(jsonData)
-		if r.Header.Get("If-None-Match") == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		w.Header().Set("Etag", etag)
-		w.Header().Set("Content-Type", "application/json")
-
-		w.Write(jsonData)
+	// store the collection functions  for later usage in relations
+	b.collectionFunctions[this] = &collectionFunctions{
+		collection: collection,
+		item:       item,
 	}
 
-	doDeleteSingletonWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		queryParameters := make([]interface{}, propertiesIndex-1)
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			queryParameters[i-1] = params[columns[i]]
-		}
+	// CREATE
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		createWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPost)
 
-		var state string
-		err = b.db.QueryRow(deleteQuery+sqlWhereSingle+sqlReturnState, queryParameters...).Scan(&state)
-		if err == sql.ErrNoRows {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	// UPDATE
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		updateWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
-		w.WriteHeader(http.StatusNoContent)
-		notification := make(map[string]interface{})
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			notification[columns[i]] = params[columns[i]]
-		}
-		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		b.notify(resource, core.OperationDelete, state, jsonData)
+	// UPDATE with fully qualified path
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		updateWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
+
+	// READ
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		itemWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// READ ALL
+	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		collectionWithAuth(w, r, nil)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// DELETE
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		doDeleteWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	if !singleton {
+		return
 	}
 
+	// READ
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getOneSingletonWithAuth(w, r)
+		itemWithAuth(w, r)
 
 	}).Methods(http.MethodOptions, http.MethodGet)
 
-	// CREATE - UPDATE
+	// UPDATE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		insertUpdateSingletonWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodPut)
-
-	// PATCH (READ + UPDATE)
-	b.createPatchRoute(router, singletonRoute)
+		updateWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		doDeleteSingletonWithAuth(w, r)
+		doDeleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 }
