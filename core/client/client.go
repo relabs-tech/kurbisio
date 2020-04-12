@@ -93,6 +93,22 @@ func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 	}
 }
 
+// WithPrimary returns a new collection client with a primary selector added
+func (r Collection) WithPrimary(primaryID uuid.UUID) Collection {
+	if len(r.resources) < 1 {
+		panic("no primary resource to select")
+	}
+	return r.WithSelector(r.resources[len(r.resources)-1], primaryID)
+}
+
+// WithParent returns a new collection client with a parent selector added
+func (r Collection) WithParent(parentID uuid.UUID) Collection {
+	if len(r.resources) < 2 {
+		panic("no parent resource to select")
+	}
+	return r.WithSelector(r.resources[len(r.resources)-2], parentID)
+}
+
 // WithFilter returns a new collection client with a URL parameter added.
 // Filters apply only to lists.
 func (r Collection) WithFilter(key string, value string) Collection {
