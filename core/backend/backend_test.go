@@ -930,3 +930,29 @@ func TestPaginationBlob(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidPaths(t *testing.T) {
+	testCases := []struct {
+		path           string
+		expectedStatus int
+		expectedError  bool
+	}{
+		{"/as/invalid-uuid", http.StatusBadRequest, true},
+		{"/blobs/invalid-uuid", http.StatusBadRequest, true},
+		{"/as/273cf448-b8e0-4e7b-9f80-e378050eb719", http.StatusNotFound, true},
+		{"/blobs/273cf448-b8e0-4e7b-9f80-e378050eb719", http.StatusNotFound, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.path, func(t *testing.T) {
+			var blobs []Blob
+			status, err := testService.client.RawGet(tc.path, &blobs)
+			if !tc.expectedError && err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.expectedStatus {
+				t.Fatalf("Expected status %d, got status: %d", tc.expectedStatus, status)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/lib/pq"
 	"io/ioutil"
 	"log"
 	"strconv"
@@ -406,7 +407,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+
+			// Invalid UUIDs are reported as "invalid_text_representation" which is Code 22P02
+			if err, ok := err.(*pq.Error); ok && err.Code == "22P02" {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 
