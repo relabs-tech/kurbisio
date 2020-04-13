@@ -340,11 +340,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
+		w.Header().Set("Etag", etag)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
@@ -437,11 +437,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
+		w.Header().Set("Etag", etag)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)

@@ -306,11 +306,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
+		// ETag must also be provided in headers in case If-None-Match is set
+		w.Header().Set("Etag", etag)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Etag", etag)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
@@ -365,6 +366,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					return
 				}
 				if timeToEtag(createdAt) == ifNoneMatch {
+					// ETag must also be provided in headers in case If-None-Match is set
+					w.Header().Set("Etag", timeToEtag(createdAt))
 					w.WriteHeader(http.StatusNotModified)
 					return
 				}
