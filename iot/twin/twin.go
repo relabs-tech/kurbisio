@@ -1,6 +1,7 @@
 package twin
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io/ioutil"
 	"log"
@@ -9,24 +10,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/iot"
 )
 
 // API is the IoT appliance RESTful interface for the device twin.
 type API struct {
-	db        *sql.DB
-	publisher iot.MessagePublisher
+	db                   *csql.DB
+	publisher            iot.MessagePublisher
+	authorizationEnabled bool
 }
 
 // Builder is a builder helper for the IoT API
 type Builder struct {
 	// DB is a postgres database. This is mandatory.
-	DB *sql.DB
+	DB *csql.DB
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// Publisher is an iot.MessagePublisher
 	Publisher iot.MessagePublisher
+	// If AuthorizationEnabled is true, the twin rest api requires admin authorization
+	AuthorizationEnabled bool
 }
 
 // NewAPI realizes the actual API. It creates the sql relations for the device twin
@@ -44,8 +49,9 @@ func NewAPI(b *Builder) *API {
 	CreateTwinTableIfNotExists(b.DB)
 
 	s := &API{
-		db:        b.DB,
-		publisher: b.Publisher,
+		db:                   b.DB,
+		publisher:            b.Publisher,
+		authorizationEnabled: b.AuthorizationEnabled,
 	}
 	s.handleRoutes(b.Router)
 
@@ -68,6 +74,14 @@ func (s *API) handleRoutes(router *mux.Router) {
 	log.Println("twin: handle route /devices/{device_id}/twin/{key}/report GET,PUT")
 
 	router.HandleFunc("/devices/{device_id}/twin", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -102,6 +116,14 @@ func (s *API) handleRoutes(router *mux.Router) {
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -128,6 +150,14 @@ func (s *API) handleRoutes(router *mux.Router) {
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -154,6 +184,14 @@ func (s *API) handleRoutes(router *mux.Router) {
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -180,6 +218,14 @@ func (s *API) handleRoutes(router *mux.Router) {
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -225,6 +271,14 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
+		if s.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		params := mux.Vars(r)
 		deviceID, err := uuid.Parse(params["device_id"])
 		if err != nil {
@@ -271,7 +325,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 //
 // The function requires that the database manages a resource "device".
 // The twin table is a system table and named "_twin_".
-func CreateTwinTableIfNotExists(db *sql.DB) {
+func CreateTwinTableIfNotExists(db *csql.DB) {
 	// poor man's database migrations
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_twin_"
 (device_id uuid references ` + db.Schema + `.device(device_id) ON DELETE CASCADE,

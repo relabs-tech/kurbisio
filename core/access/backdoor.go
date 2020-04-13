@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/relabs-tech/backends/core/sql"
-
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core/csql"
 )
 
 // BackdoorMiddlewareBuilder is a helper builder for JwtMiddelware
@@ -20,7 +19,7 @@ type BackdoorMiddlewareBuilder struct {
 	VIPs map[string]string
 	// DB is the postgres database. Must have a collection resource "account" with an external index
 	// "identity". The database is only used for VIP tickets.
-	DB *sql.DB
+	DB *csql.DB
 }
 
 // NewBackdoorMiddelware returns a middleware handler for a backdoor
@@ -48,7 +47,8 @@ func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			auth := AuthorizationFromContext(r.Context())
-			if auth != nil { // already authorized?
+			identity := IdentityFromContext(r.Context())
+			if auth != nil || len(identity) > 0 { // already authorized or at least authenticated?
 				h.ServeHTTP(w, r)
 				return
 			}
@@ -76,29 +76,29 @@ func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 			// check vip tickets
 			if auth == nil && bmb.VIPs != nil {
 				if vip, ok := bmb.VIPs[tokenString]; ok {
+
+					// at least we have an identity
+					identity = vip
+					// maybe we also have an authorization
 					var authID uuid.UUID
 					var properties json.RawMessage
 					err := bmb.DB.QueryRow(authQuery, vip).Scan(&authID, &properties)
 
-					if err == sql.ErrNoRows {
-						http.Error(w, "no authorization for "+vip, http.StatusUnauthorized)
-						return
+					if err == nil {
+						auth = &Authorization{}
+						json.Unmarshal(properties, auth)
 					}
-
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
-						return
-					}
-					auth = &Authorization{}
-					json.Unmarshal(properties, auth)
 				}
 			}
 
-			if auth != nil {
-				ctx := auth.ContextWithAuthorization(r.Context())
-				r = r.WithContext(ctx)
+			ctx := r.Context()
+			if len(identity) > 0 {
+				ctx = ContextWithIdentity(ctx, identity)
 			}
-			h.ServeHTTP(w, r)
+			if auth != nil {
+				ctx = ContextWithAuthorization(ctx, auth)
+			}
+			h.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 

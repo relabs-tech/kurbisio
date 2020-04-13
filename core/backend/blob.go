@@ -1,14 +1,16 @@
 package backend
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/lib/pq"
 	"io/ioutil"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 
 	"net/http"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/sql"
 )
 
 func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
@@ -128,7 +129,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
-	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex]) + ";"
+	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
+	sqlReturnID := " RETURNING " + this + "_id;"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
@@ -154,7 +156,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
-	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne
+	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + ";"
 
 	maxAge := ""
 	if !rc.Mutable {
@@ -306,7 +308,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		etag := bytesToEtag(jsonData)
+		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
 		// ETag must also be provided in headers in case If-None-Match is set
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
@@ -357,7 +359,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				// loading the entire binary blob into memory for no good reason
 				var createdAt time.Time
 				values, _ := createScanValuesAndObject(&createdAt)
-				err = b.db.QueryRow(readQueryMetaDataOnly+sqlWhereOne, queryParameters...).Scan(values...)
+				err = b.db.QueryRow(readQueryMetaDataOnly+sqlWhereOne+";", queryParameters...).Scan(values...)
 				if err == sql.ErrNoRows {
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
@@ -366,9 +368,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				if ifNoneMatchFound(ifNoneMatch, timeToEtag(createdAt)) {
+				etag := timeToEtag(createdAt)
+				if ifNoneMatchFound(ifNoneMatch, etag) {
 					// ETag must also be provided in headers in case If-None-Match is set
-					w.Header().Set("Etag", timeToEtag(createdAt))
+					w.Header().Set("Etag", etag)
 					w.WriteHeader(http.StatusNotModified)
 					return
 				}
@@ -379,7 +382,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var createdAt time.Time
 		values, response := createScanValuesAndObject(&createdAt, &blob)
 
-		err = b.db.QueryRow(readQuery+sqlWhereOne, queryParameters...).Scan(values...)
+		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
@@ -486,28 +489,39 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createdAt := time.Now().UTC()
 		values[i] = &createdAt
 
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		var id uuid.UUID
-		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
+		err = tx.QueryRow(insertQuery, values...).Scan(&id)
 		if err != nil {
 			status := http.StatusBadRequest
 			// Non unique external keys are reported as code Code 23505
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
 				status = http.StatusConflict
 			}
+			tx.Rollback()
 			http.Error(w, err.Error(), status)
 			return
 		}
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", id).Scan(values...)
+		err = tx.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		b.notify(resource, core.OperationCreate, "", jsonData)
+		err = b.commitWithNotification(tx, resource, "", core.OperationCreate, id, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
@@ -568,7 +582,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createdAt := time.Now().UTC()
 		values[i] = &createdAt
 
-		res, err := b.db.Exec(updateQuery, values...)
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		res, err := tx.Exec(updateQuery, values...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -580,6 +600,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		if count != 1 {
+			tx.Rollback()
 			http.Error(w, "no such "+this, http.StatusBadRequest)
 			return
 		}
@@ -588,16 +609,22 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		values, response := createScanValuesAndObject(&time.Time{})
 		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", params[columns[0]]).Scan(values...)
 		if err == sql.ErrNoRows {
+			tx.Rollback()
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		b.notify(resource, core.OperationUpdate, "", jsonData)
+		err = b.commitWithNotification(tx, resource, "", core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -620,19 +647,21 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			queryParameters[i] = params[columns[i]]
 		}
 
-		res, err := b.db.Exec(deleteQuery+sqlWhereOne, queryParameters...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		count, err := res.RowsAffected()
+		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		if count == 0 {
+		var id uuid.UUID
+		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnID, queryParameters...).Scan(&id)
+		if err == sql.ErrNoRows {
+			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -641,7 +670,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			notification[columns[i]] = params[columns[i]]
 		}
 		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		b.notify(resource, core.OperationDelete, "", jsonData)
+		err = b.commitWithNotification(tx, resource, "", core.OperationDelete, id, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}

@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 
 	"github.com/joeshaw/envdecode"
 
@@ -72,7 +72,7 @@ func main() {
 		panic(err)
 	}
 
-	db := sql.OpenWithSchema(service.Postgres, "fleet")
+	db := csql.OpenWithSchema(service.Postgres, "fleet")
 	defer db.Close()
 
 	router := mux.NewRouter()

@@ -15,7 +15,7 @@ func TestMain(m *testing.M) {
 
 func TestCient(t *testing.T) {
 
-	client := New(nil)
+	client := NewWithRouter(nil)
 
 	parentID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9b")
 	childID := uuid.MustParse("c46da255-eb72-4cc6-8835-1b34a9917826")

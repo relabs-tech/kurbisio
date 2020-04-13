@@ -30,14 +30,23 @@ type Client struct {
 	ctx    context.Context
 }
 
-// New creates a client to make pseudo-REST requests to the backend.
+// NewWithRouter creates a client to make pseudo-REST requests to the backend,
+// through the mux router
 //
 // WithAuthorization() adds an authorization to the request context.
 // WithContext() specifies a different base context all together.
-func New(router *mux.Router) Client {
+func NewWithRouter(router *mux.Router) Client {
 	return Client{
 		router: router,
 	}
+}
+
+// WithAdminAuthorization returns a new client with admin authorizations
+func (c Client) WithAdminAuthorization() Client {
+	c.auth = &access.Authorization{
+		Roles: []string{"admin"},
+	}
+	return c
 }
 
 // WithAuthorization returns a new client with specific authorizations
@@ -52,12 +61,12 @@ func (c Client) WithContext(ctx context.Context) Client {
 	return c
 }
 
-func (c *Client) context() context.Context {
+func (c Client) context() context.Context {
 	if c.ctx != nil {
 		return c.ctx
 	}
 	if c.auth != nil {
-		return c.auth.ContextWithAuthorization(context.Background())
+		return access.ContextWithAuthorization(context.Background(), c.auth)
 	}
 	return context.Background()
 }
@@ -71,9 +80,9 @@ type Collection struct {
 }
 
 // Collection returns a new collection client
-func (c *Client) Collection(resource string) Collection {
+func (c Client) Collection(resource string) Collection {
 	return Collection{
-		client:    c,
+		client:    &c,
 		resources: strings.Split(resource, "/"),
 	}
 }
@@ -185,8 +194,8 @@ func (r Collection) Create(body interface{}, result interface{}) error {
 	return err
 }
 
-// Put updates an item
-func (r Collection) Put(body interface{}, result interface{}) error {
+// Update updates an item
+func (r Collection) Update(body interface{}, result interface{}) error {
 	var path string
 	// if we have a selector for the final resource, we use the item path, because
 	// we cannot be sure that the body contains the id
@@ -199,7 +208,7 @@ func (r Collection) Put(body interface{}, result interface{}) error {
 	return err
 }
 
-// Patch updates an item
+// Patch updates selected fields of an item
 func (r Collection) Patch(body interface{}, result interface{}) error {
 	var path string
 	// if we have a selector for the final resource, we use the item path, because
@@ -273,7 +282,7 @@ func (p Page) Next() Page {
 // The path can be extend with query strings.
 //
 // result can be map[string]interface{} or a raw *[]byte
-func (c *Client) RawGet(path string, result interface{}) (int, error) {
+func (c Client) RawGet(path string, result interface{}) (int, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
@@ -288,7 +297,7 @@ func (c *Client) RawGet(path string, result interface{}) (int, error) {
 	}
 
 	var err error
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {
@@ -325,7 +334,8 @@ func (c *Client) RawGetWithHeader(path string, header map[string]string, result 
 	}
 
 	var err error
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
+		fmt.Println("RawGetWithHeader", string(rec.Body.Bytes()))
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {
@@ -372,12 +382,16 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 //
 // The path can be extend with query strings.
 //
-// result can be map[string]interface{} or a raw *[]byte
-func (c *Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
+// body can also be a []byte, result can also be raw *[]byte
+func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
 
-	j, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return http.StatusBadRequest, err
+	var err error
+	j, ok := body.([]byte)
+	if !ok {
+		j, err = json.MarshalIndent(body, "", "  ")
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
 	}
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(j))
@@ -389,7 +403,7 @@ func (c *Client) RawPost(path string, body interface{}, result interface{}) (int
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
 	}
 
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {
@@ -404,7 +418,7 @@ func (c *Client) RawPost(path string, body interface{}, result interface{}) (int
 //
 // The path can be extend with query strings.
 //
-func (c *Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
+func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(blob))
 	for key, value := range header {
@@ -418,7 +432,7 @@ func (c *Client) RawPostBlob(path string, header map[string]string, blob []byte,
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
 	}
 	var err error
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		err = json.Unmarshal(rec.Body.Bytes(), result)
 	}
 	return status, err
@@ -429,12 +443,16 @@ func (c *Client) RawPostBlob(path string, header map[string]string, blob []byte,
 //
 // The path can be extend with query strings.
 //
-// result can also be raw *[]byte
-func (c *Client) RawPut(path string, body interface{}, result interface{}) (int, error) {
+// body can also be a []byte, result can also be raw *[]byte
+func (c Client) RawPut(path string, body interface{}, result interface{}) (int, error) {
 
-	j, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return http.StatusBadRequest, err
+	var err error
+	j, ok := body.([]byte)
+	if !ok {
+		j, err = json.MarshalIndent(body, "", "  ")
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
 	}
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(j))
@@ -445,7 +463,7 @@ func (c *Client) RawPut(path string, body interface{}, result interface{}) (int,
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
 	}
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {
@@ -461,7 +479,7 @@ func (c *Client) RawPut(path string, body interface{}, result interface{}) (int,
 // The path can be extend with query strings.
 //
 // Returns the actual http status code.
-func (c *Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
+func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(blob))
 	for key, value := range header {
@@ -476,7 +494,7 @@ func (c *Client) RawPutBlob(path string, header map[string]string, blob []byte, 
 	}
 
 	var err error
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		err = json.Unmarshal(rec.Body.Bytes(), result)
 	}
 	return status, err
@@ -487,12 +505,16 @@ func (c *Client) RawPutBlob(path string, header map[string]string, blob []byte, 
 //
 // The path can be extend with query strings.
 //
-// result can also be raw *[]byte
-func (c *Client) RawPatch(path string, body interface{}, result interface{}) (int, error) {
+// body can also be a []byte, result can also be raw *[]byte
+func (c Client) RawPatch(path string, body interface{}, result interface{}) (int, error) {
 
-	j, err := json.MarshalIndent(body, "", "  ")
-	if err != nil {
-		return http.StatusBadRequest, err
+	var err error
+	j, ok := body.([]byte)
+	if !ok {
+		j, err = json.MarshalIndent(body, "", "  ")
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
 	}
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPatch, path, bytes.NewBuffer(j))
@@ -503,7 +525,7 @@ func (c *Client) RawPatch(path string, body interface{}, result interface{}) (in
 	if status != http.StatusOK && status != http.StatusNoContent {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
 	}
-	if rec.Body != nil {
+	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {
@@ -519,7 +541,7 @@ func (c *Client) RawPatch(path string, body interface{}, result interface{}) (in
 // The path can be extend with query strings.
 //
 // Returns the actual http status code.
-func (c *Client) RawDelete(path string) (int, error) {
+func (c Client) RawDelete(path string) (int, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, path, nil)
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -12,13 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/google/uuid"
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 
 	"github.com/relabs-tech/backends/core/client"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -110,7 +111,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := sql.OpenWithSchema(testService.Postgres, "_core_unit_test_")
+	db := csql.OpenWithSchema(testService.Postgres, "_core_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -120,7 +121,7 @@ func TestMain(m *testing.M) {
 		DB:     db,
 		Router: router,
 	})
-	testService.client = client.New(router)
+	testService.client = client.NewWithRouter(router)
 
 	code := m.Run()
 	os.Exit(code)
@@ -657,42 +658,84 @@ func TestNotifications(t *testing.T) {
 	var (
 		createCount, updateCount, deleteCount, pointsCount int
 	)
-	createHandler := func(n Notification) bool {
+	createHandler := func(n Notification) error {
 		createCount++
-		return false
+		return nil
 	}
-	updateHandler := func(n Notification) bool {
+	updateHandler := func(n Notification) error {
 		updateCount++
 		var object map[string]interface{}
 		err := json.Unmarshal(n.Payload, &object)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if properties, ok := object["properties"].(map[string]interface{}); ok {
 			if points, ok := properties["points"].(float64); ok {
 				pointsCount += int(points)
 			}
 		}
-		return false
+		return nil
 	}
-	deleteHandler := func(n Notification) bool {
+	deleteHandler := func(n Notification) error {
 		deleteCount++
-		return false
+		return nil
 	}
 
 	backend := testService.backend
 
-	backend.RequestNotification("notification", core.OperationCreate, "mystate", &createHandler)
-	backend.RequestNotification("notification/normal", core.OperationCreate, "mystate", &createHandler)
-	backend.RequestNotification("notification/single", core.OperationCreate, "mystate", &createHandler)
+	backend.RequestNotifications(createHandler,
+		NotificationRequest{
+			Resource:   "notification",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationCreate},
+		},
+		NotificationRequest{
+			Resource:   "notification/normal",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationCreate},
+		},
+		NotificationRequest{
+			Resource:   "notification/single",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationCreate},
+		},
+	)
 
-	backend.RequestNotification("notification", core.OperationUpdate, "mystate", &updateHandler)
-	backend.RequestNotification("notification/normal", core.OperationUpdate, "mystate", &updateHandler)
-	backend.RequestNotification("notification/single", core.OperationUpdate, "mystate", &updateHandler)
+	backend.RequestNotifications(updateHandler,
+		NotificationRequest{
+			Resource:   "notification",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationUpdate},
+		},
+		NotificationRequest{
+			Resource:   "notification/normal",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationUpdate},
+		},
+		NotificationRequest{
+			Resource:   "notification/single",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationUpdate},
+		},
+	)
 
-	backend.RequestNotification("notification", core.OperationDelete, "mystate", &deleteHandler)
-	backend.RequestNotification("notification/normal", core.OperationDelete, "mystate", &deleteHandler)
-	backend.RequestNotification("notification/single", core.OperationDelete, "mystate", &deleteHandler)
+	backend.RequestNotifications(deleteHandler,
+		NotificationRequest{
+			Resource:   "notification",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationDelete},
+		},
+		NotificationRequest{
+			Resource:   "notification/normal",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationDelete},
+		},
+		NotificationRequest{
+			Resource:   "notification/single",
+			State:      "mystate",
+			Operations: []core.Operation{core.OperationDelete},
+		},
+	)
 
 	client := testService.client
 
@@ -781,6 +824,9 @@ func TestNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// do notification processing
+	backend.ProcessNotifications()
+
 	if createCount != 4 {
 		t.Fatalf("unexpected number of creates: %d", createCount)
 	}
@@ -794,12 +840,6 @@ func TestNotifications(t *testing.T) {
 		t.Fatalf("unexpected number of points: %d", pointsCount)
 	}
 
-	removed := backend.RemoveNotificationHandler(&createHandler)
-	removed += backend.RemoveNotificationHandler(&updateHandler)
-	removed += backend.RemoveNotificationHandler(&deleteHandler)
-	if removed != 9 {
-		t.Fatalf("wrong number of removed handlers. Expected 9 but got %d", removed)
-	}
 }
 
 func TestPaginationCollection(t *testing.T) {

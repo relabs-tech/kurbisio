@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 
 	_ "github.com/lib/pq"
 )
@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := sql.OpenWithSchema(testService.Postgres, "_core_registry_unit_test_")
+	db := csql.OpenWithSchema(testService.Postgres, "_core_registry_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

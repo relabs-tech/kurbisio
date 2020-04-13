@@ -19,6 +19,7 @@ type contextKey string
 // the predefined context key
 const (
 	contextKeyAuthorization contextKey = "_authorization_"
+	contextKeyIdentity      contextKey = "_identity_"
 )
 
 /*Authorization is a context object which stores authorization information
@@ -132,8 +133,11 @@ func (a *Authorization) IsAuthorized(resources []string, operation core.Operatio
 	return false
 }
 
-// ContextWithAuthorization returns a new context with this authorization added to it
-func (a *Authorization) ContextWithAuthorization(ctx context.Context) context.Context {
+// ContextWithAuthorization returns a new context with any non-nil authorization added to it
+func ContextWithAuthorization(ctx context.Context, a *Authorization) context.Context {
+	if a == nil {
+		return ctx
+	}
 	return context.WithValue(ctx, contextKeyAuthorization, a)
 
 }
@@ -145,6 +149,20 @@ func AuthorizationFromContext(ctx context.Context) *Authorization {
 		return a
 	}
 	return nil
+}
+
+// ContextWithIdentity returns a new context with the (authenticated) identity added to it
+func ContextWithIdentity(ctx context.Context, identity string) context.Context {
+	return context.WithValue(ctx, contextKeyIdentity, identity)
+}
+
+// IdentityFromContext retrieves the (authenticated) identity from the context
+func IdentityFromContext(ctx context.Context) string {
+	a, ok := ctx.Value(contextKeyIdentity).(string)
+	if ok {
+		return a
+	}
+	return ""
 }
 
 // AuthorizationCache is an in-memory cache for authorizations. It is used by

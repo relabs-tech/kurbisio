@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -18,7 +19,7 @@ import (
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/iot/twin"
 
 	"github.com/google/uuid"
@@ -32,7 +33,7 @@ type Broker struct {
 // Builder is a builder helper for the Broker
 type Builder struct {
 	// DB is a postgres database. This is mandatory.
-	DB *sql.DB
+	DB *csql.DB
 	// CACertFile is the file path to the X.509 certificate of the certificate authority.
 	// This is mandatory
 	CACertFile string
@@ -50,7 +51,7 @@ type plugin struct {
 
 	service gmqtt.Server
 
-	db *sql.DB
+	db *csql.DB
 }
 
 // NewBroker returns a new broker. The broker will not

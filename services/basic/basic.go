@@ -6,7 +6,7 @@ import (
 
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/backends/core/backend"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -51,7 +51,7 @@ func main() {
 		panic(err)
 	}
 
-	db := sql.OpenWithSchema(service.Postgres, "basic")
+	db := csql.OpenWithSchema(service.Postgres, "basic")
 	defer db.Close()
 
 	router := mux.NewRouter()

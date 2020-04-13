@@ -3,11 +3,9 @@ package backend
 import (
 	"log"
 	"net/http"
-
-	"github.com/gorilla/mux"
 )
 
-func (b *Backend) handleCORS(router *mux.Router) {
+func (b *Backend) handleCORS() {
 
 	corseMiddleware := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,5 +20,5 @@ func (b *Backend) handleCORS(router *mux.Router) {
 			h.ServeHTTP(w, r)
 		})
 	}
-	router.Use(corseMiddleware)
+	b.router.Use(corseMiddleware)
 }

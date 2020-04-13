@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 )
 
 // New creates a new registry for the specified database
-func New(db *sql.DB) *Registry {
+func New(db *csql.DB) *Registry {
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_registry_" 
 (key varchar NOT NULL, 
 value json NOT NULL, 
@@ -29,7 +29,7 @@ PRIMARY KEY(key)
 
 // Registry provides a persistent registry of objects in a sql database.
 type Registry struct {
-	db *sql.DB
+	db *csql.DB
 }
 
 // Accessor is an accessor with optional prefix
@@ -62,7 +62,7 @@ func (r *Accessor) Read(key string, value interface{}) (time.Time, error) {
 	err := r.Registry.db.QueryRow(
 		`SELECT value, created_at FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
 		key).Scan(&rawValue, &createdAt)
-	if err == sql.ErrNoRows {
+	if err == csql.ErrNoRows {
 		return createdAt, nil
 	}
 	if err != nil {

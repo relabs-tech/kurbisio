@@ -1,6 +1,7 @@
 package access
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,8 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/registry"
-	"github.com/relabs-tech/backends/core/sql"
 )
 
 // JwtMiddlewareBuilder is a helper builder for JwtMiddelware
@@ -25,7 +26,7 @@ type JwtMiddlewareBuilder struct {
 	Issuer string
 	// DB is the postgres database. Must have a collection resource "account" with an external index
 	// "identity".
-	DB *sql.DB
+	DB *csql.DB
 }
 
 // NewJwtMiddelware returns a middleware handler to validate
@@ -79,13 +80,13 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 	jwksLookup := func(token *jwt.Token) (interface{}, error) {
 		kid := token.Header["kid"].(string)
-		log.Println("kid:" + kid + ":")
+		log.Println("kid:", kid)
 		key, ok := wellKnownKeys[kid]
 		if ok {
 			log.Println("jwksLookup: got key for kid", kid)
 			return key, nil
 		}
-		log.Println(wellKnownKeys)
+		log.Printf("have %d well known keys, but not this one", len(wellKnownKeys))
 		return nil, errors.New("cannot verify token")
 	}
 
@@ -95,7 +96,8 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			auth := AuthorizationFromContext(r.Context())
-			if auth != nil { // already authorized?
+			identity := IdentityFromContext(r.Context())
+			if auth != nil || len(identity) > 0 { // already authorized or at least authenticated?
 				h.ServeHTTP(w, r)
 				return
 			}
@@ -134,7 +136,10 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			}
 
 			// identity is a combination of issuer and email
-			identity := claims.Issuer + "|" + claims.EMail
+			identity = claims.Issuer + "|" + claims.EMail
+
+			// now that we have authenticated the requester, we store their identity in the context
+			ctx := ContextWithIdentity(r.Context(), identity)
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by identity, so the frontend can enforce a new database lookup with a new token.
@@ -145,21 +150,18 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				var properties json.RawMessage
 				err = jmb.DB.QueryRow(authQuery, identity).Scan(&authID, &properties)
 
-				if err == sql.ErrNoRows {
-					http.Error(w, "no authorization for "+identity, http.StatusUnauthorized)
-					return
-				}
-
-				if err != nil {
+				if err != nil && err != sql.ErrNoRows {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				auth = &Authorization{}
-				json.Unmarshal(properties, auth)
-				authCache.Write(tokenString, auth)
+				if err == nil {
+					auth = &Authorization{}
+					json.Unmarshal(properties, auth)
+					authCache.Write(tokenString, auth)
+				}
 			}
 
-			ctx := auth.ContextWithAuthorization(r.Context())
+			ctx = ContextWithAuthorization(ctx, auth)
 			r = r.WithContext(ctx)
 			h.ServeHTTP(w, r)
 		})

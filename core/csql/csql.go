@@ -1,4 +1,4 @@
-package sql
+package csql
 
 import (
 	"database/sql"

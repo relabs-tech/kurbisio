@@ -3,12 +3,12 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/lib/pq"
-	"io/ioutil"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 )
 
 func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration, singleton bool) {
@@ -164,12 +164,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND state=$%d ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at, %s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
-	sqlReturnState := " RETURNING state;"
+	sqlReturnState := " RETURNING " + this + "_id, state;"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, state)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ")"
@@ -184,7 +184,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
-	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + this + "_id"
+	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + this + "_id;"
 
 	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
@@ -339,7 +339,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		etag := bytesToEtag(jsonData)
+		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
@@ -398,7 +398,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var state string
 		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
 		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
+		if err == csql.ErrNoRows {
 			if singleton {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -480,14 +480,21 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		var state string
-
-		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnState, queryParameters...).Scan(&state)
-		if err == sql.ErrNoRows {
+		var primaryID uuid.UUID
+		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnState, queryParameters...).Scan(&primaryID, &state)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -496,8 +503,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		for i := 0; i < propertiesIndex; i++ {
 			notification[columns[i]] = params[columns[i]]
 		}
-		jsonData, _ := json.MarshalIndent(notification, state, " ")
-		b.notify(resource, core.OperationDelete, state, jsonData)
+		jsonData, _ := json.MarshalIndent(notification, "", " ")
+		err = b.commitWithNotification(tx, resource, state, core.OperationDelete, primaryID, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 
@@ -506,8 +517,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
 		params := mux.Vars(r)
 		if bodyJSON == nil {
-			body, _ := ioutil.ReadAll(r.Body)
-			err := json.Unmarshal(body, &bodyJSON)
+			err := json.NewDecoder(r.Body).Decode(&bodyJSON)
 			if err != nil {
 				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 				return
@@ -612,9 +622,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = &state
 		i++
 
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		var id uuid.UUID
-		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
-		if err == sql.ErrNoRows {
+		err = tx.QueryRow(insertQuery, values...).Scan(&id)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
 			http.Error(w, "singleton "+this+" already exists", http.StatusConflict)
 			return
 		} else if err != nil {
@@ -623,14 +639,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
 				status = http.StatusConflict
 			}
+			tx.Rollback()
 			http.Error(w, err.Error(), status)
 			return
 		}
 
 		// re-read data and return as json
 		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
-		err = b.db.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
+		err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
+			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -640,7 +658,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		b.notify(resource, core.OperationCreate, state, jsonData)
+		err = b.commitWithNotification(tx, resource, state, core.OperationCreate, id, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
@@ -662,11 +684,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		body, _ := ioutil.ReadAll(r.Body)
 		params := mux.Vars(r)
-
 		var bodyJSON map[string]interface{}
-		err = json.Unmarshal(body, &bodyJSON)
+		err := json.NewDecoder(r.Body).Decode(&bodyJSON)
 		if err != nil {
 			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return
@@ -715,33 +735,48 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		var currentRevision int
+		retried := false
 	Retry:
+
 		values, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
 		if singleton && primaryID == "all" {
 			err = tx.QueryRow(readQuery+"WHERE "+owner+"_id = $1 FOR UPDATE;", &ownerID).Scan(values...)
 		} else {
-			log.Println(primaryID)
 			err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1 FOR UPDATE;", &primaryID).Scan(values...)
 		}
-		if err == sql.ErrNoRows {
-			if singleton {
-				rec := httptest.NewRecorder()
-				create(rec, r, bodyJSON)
-				if rec.Code == http.StatusCreated {
-					// all is good, we are done
+		if err == csql.ErrNoRows {
+			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
+			// we are forced to return 404 Not Found
+			if b.authorizationEnabled {
+				auth := access.AuthorizationFromContext(r.Context())
+				if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
 					tx.Rollback()
-					w.WriteHeader(http.StatusCreated)
-					w.Header().Set("Content-Type", "application/json")
-					w.Write(rec.Body.Bytes())
+					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
-				} else if rec.Code == http.StatusConflict {
-					// race condition: somebody else has create the object right now
-					goto Retry
 				}
 			}
-			tx.Rollback()
+
+			rec := httptest.NewRecorder()
+			create(rec, r, bodyJSON)
+			if rec.Code == http.StatusCreated {
+				// all is good, we are done, we can rollback this transaction
+				tx.Rollback()
+				w.WriteHeader(http.StatusCreated)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(rec.Body.Bytes())
+				return
+			} else if rec.Code == http.StatusConflict && !retried {
+				// race condition: somebody else has create the object right now
+				retried = true
+				goto Retry
+			}
+			err = tx.Rollback()
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
@@ -779,16 +814,34 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		var i int
 
-		// add and validate core identifiers
-		for i = 0; i < propertiesIndex; i++ {
-			key := columns[i]
-			param := params[key]
-			values[i] = param
-			value, ok := bodyJSON[key]
+		for i = 0; i < propertiesIndex; i++ { // the core identifiers
+			k := columns[i]
+			value, ok := bodyJSON[k]
+
+			// zero uuid counts as no uuid for creation
+			ok = ok && value != "00000000-0000-0000-0000-000000000000"
+
+			param, _ := params[k]
+			// identifiers in the url parameters must match the ones in the json document
 			if ok && param != "all" && param != value.(string) {
 				tx.Rollback()
-				http.Error(w, "illegal "+key, http.StatusBadRequest)
+				http.Error(w, "illegal "+k, http.StatusBadRequest)
 				return
+			}
+			// if we have no identifier in the url parameters, but in the json document, use
+			// the ones from the json document
+			if param == "all" {
+				if ok && value != "00000000-0000-0000-0000-000000000000" {
+					values[i] = value
+				} else if !singleton || i > 0 {
+					tx.Rollback()
+					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
+					return
+				} else {
+					values[i] = param
+				}
+			} else {
+				values[i] = param
 			}
 		}
 
@@ -846,7 +899,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		i++
 
 		err = tx.QueryRow(updateQuery, values...).Scan(&primaryID)
-		if err == sql.ErrNoRows {
+		if err == csql.ErrNoRows {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -865,18 +918,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		if err = tx.Commit(); err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
 		if len(state) > 0 {
 			response["state"] = state
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		b.notify(resource, core.OperationUpdate, state, jsonData)
+		err = b.commitWithNotification(tx, resource, state, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -18,19 +19,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/sql"
+	"github.com/relabs-tech/backends/core/csql"
 )
 
 // API is the IoT appliance RESTful interface for providing device credentials to things
 type API struct {
-	db               *sql.DB
+	db               *csql.DB
 	kurbisioThingKey string
 }
 
 // Builder is a builder helper for the API
 type Builder struct {
 	// DB is a postgres database. This is mandatory.
-	DB *sql.DB
+	DB *csql.DB
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// CACertFile is the file path to the X509 certificate of the certificate authority.
@@ -98,8 +99,7 @@ func (a *API) addMiddleware(router *mux.Router) {
 						Selectors: map[string]string{"thing": thing},
 						Roles:     []string{"thing"},
 					}
-					ctx := auth.ContextWithAuthorization(r.Context())
-					r = r.WithContext(ctx)
+					r = r.WithContext(access.ContextWithAuthorization(r.Context(), &auth))
 				}
 
 				token := r.Header.Get("Kurbisio-Device-Token")
@@ -109,7 +109,7 @@ func (a *API) addMiddleware(router *mux.Router) {
 						var deviceID uuid.UUID
 						err := a.db.QueryRow(authQuery, token).Scan(&deviceID)
 
-						if err == sql.ErrNoRows {
+						if err == csql.ErrNoRows {
 							http.Error(w, "invalid device token", http.StatusUnauthorized)
 							return
 						}
@@ -124,8 +124,7 @@ func (a *API) addMiddleware(router *mux.Router) {
 						}
 					}
 
-					ctx := auth.ContextWithAuthorization(r.Context())
-					r = r.WithContext(ctx)
+					r = r.WithContext(access.ContextWithAuthorization(r.Context(), auth))
 				}
 
 				h.ServeHTTP(w, r)

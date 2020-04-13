@@ -16,21 +16,26 @@ import (
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
+	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/registry"
-	"github.com/relabs-tech/backends/core/sql"
 )
 
 // Backend is the generic rest backend
 type Backend struct {
 	config              backendConfiguration
-	db                  *sql.DB
+	db                  *csql.DB
 	router              *mux.Router
 	collectionFunctions map[string]*collectionFunctions
 	// Registry is the JSON object registry for this backend's schema
-	Registry             *registry.Registry
-	authorizationEnabled bool
-	updateSchema         bool
-	handlers             []notificationHandler
+	Registry                 *registry.Registry
+	authorizationEnabled     bool
+	updateSchema             bool
+	handlers                 map[string]notificationHandler
+	triggerNotifications     func()
+	pipelineConcurrency      int
+	pipelineMaxAttempts      int
+	notificationsUpdateQuery string
+	notificationsDeleteQuery string
 }
 
 // Builder is a builder helper for the Backend
@@ -38,12 +43,19 @@ type Builder struct {
 	// Config is the JSON description of all resources and relations. This is mandatory.
 	Config string
 	// DB is a postgres database. This is mandatory.
-	DB *sql.DB
+	DB *csql.DB
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// If AuthorizationEnabled is true, the backend requires auhorization for each route
 	// in the request context, as specified in the configuration.
 	AuthorizationEnabled bool
+
+	// TriggerNotifications - if not nil - is called to trigger notification pipeline processing
+	TriggerNotifications func()
+	// Number of concurrent pipeline executors. Default is 20.
+	PipelineConcurrency int
+	// Maximum number of attemts for pipeline execution. Default is 3.
+	PipelineMaxAttempts int
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -64,6 +76,15 @@ func New(bb *Builder) *Backend {
 		panic("Router is missing")
 	}
 
+	pipelineConcurrency := 20
+	if bb.PipelineConcurrency > 0 {
+		pipelineConcurrency = bb.PipelineConcurrency
+	}
+	pipelineMaxAttempts := 3
+	if bb.PipelineMaxAttempts > 0 {
+		pipelineMaxAttempts = bb.PipelineMaxAttempts
+	}
+
 	b := &Backend{
 		config:               config,
 		db:                   bb.DB,
@@ -71,6 +92,26 @@ func New(bb *Builder) *Backend {
 		collectionFunctions:  make(map[string]*collectionFunctions),
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
+		handlers:             make(map[string]notificationHandler),
+		triggerNotifications: bb.TriggerNotifications,
+		pipelineConcurrency:  pipelineConcurrency,
+		pipelineMaxAttempts:  pipelineMaxAttempts,
+	}
+
+	if b.triggerNotifications == nil {
+		trigger := make(chan struct{}, 10)
+		go func() {
+			for {
+				<-trigger
+				time.Sleep(time.Second)
+				b.ProcessNotifications()
+			}
+		}()
+		b.triggerNotifications = func() {
+			if len(trigger) == 0 {
+				trigger <- struct{}{}
+			}
+		}
 	}
 
 	registry := b.Registry.Accessor("_backend_")
@@ -84,9 +125,11 @@ func New(bb *Builder) *Backend {
 		log.Println("user previous schema version")
 	}
 
-	b.handleCORS(b.router)
+	b.handleNotifications()
+
+	b.handleCORS()
 	access.HandleAuthorizationRoute(b.router)
-	b.handleRoutes(b.router)
+	b.handleRoutes()
 	if b.updateSchema {
 		registry.Write("schema_version", newVersion)
 	}
@@ -114,9 +157,10 @@ func (r byDepth) Less(i, j int) bool {
 }
 
 // HandleRoutes adds all necessary handlers for the specified configuration
-func (b *Backend) handleRoutes(router *mux.Router) {
+func (b *Backend) handleRoutes() {
 
 	log.Println("backend: HandleRoutes")
+	router := b.router
 
 	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of
 	// resources must be generated first, otherwise we cannot enforce those dependencies via sql
@@ -223,6 +267,9 @@ func timeToEtag(t time.Time) string {
 func bytesToEtag(b []byte) string {
 	return fmt.Sprintf("\"%x\"", sha1.Sum(b))
 }
+func bytesPlusTotalCountToEtag(b []byte, t int) string {
+	return fmt.Sprintf("\"%x%x\"", sha1.Sum(b), t)
+}
 
 func asJSON(object interface{}) string {
 	j, _ := json.MarshalIndent(object, "", "  ")
@@ -248,7 +295,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 	for _, child := range children {
 		all = append(all, strings.Split(child, ",")...)
 	}
-	client := client.New(b.router).WithContext(r.Context())
+	client := client.NewWithRouter(b.router).WithContext(r.Context())
 	for _, child := range all {
 		if strings.ContainsRune(child, '/') {
 			return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
@@ -317,70 +364,4 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 	}
 	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
-}
-
-// Notification is a database notification. Receive them
-// with RequestNotification()
-type Notification struct {
-	Resource  string
-	Operation core.Operation
-	State     string
-	Payload   []byte
-}
-
-type notificationHandler struct {
-	resource  string
-	operation core.Operation
-	state     string
-	callback  *func(Notification) bool
-}
-
-// RequestNotification requests a specific type of database notifications.
-// The handlers are called in the same order the notification request have been received.
-// If a handler returns true, subsequent handlers for the same notification type will not be called.
-func (b *Backend) RequestNotification(resource string, operation core.Operation, state string, handler *func(Notification) bool) {
-	notifier := notificationHandler{
-		resource:  resource,
-		operation: operation,
-		state:     state,
-		callback:  handler,
-	}
-	log.Printf("install notification handler for %s - %s (state=\"%s\")", resource, operation, state)
-	b.handlers = append(b.handlers, notifier)
-}
-
-// RemoveNotificationHandler removes a previously installed notification handler. Returns the number
-// of instances that were removed
-func (b *Backend) RemoveNotificationHandler(handler *func(Notification) bool) int {
-	count := len(b.handlers)
-	remaining := b.handlers[:0]
-	for i := 0; i < len(b.handlers); i++ {
-		if b.handlers[i].callback != handler {
-			remaining = append(remaining, b.handlers[i])
-		} else {
-			log.Printf("remove notification handler for %s - %s (state=\"%s\")", b.handlers[i].resource, b.handlers[i].operation, b.handlers[i].state)
-		}
-	}
-	b.handlers = remaining
-	return count - len(b.handlers)
-}
-
-func (b *Backend) notify(resource string, operation core.Operation, state string, payload []byte) {
-	for _, handler := range b.handlers {
-		if handler.resource == resource &&
-			handler.operation == operation &&
-			handler.state == state {
-
-			notification := Notification{
-				Resource:  resource,
-				Operation: operation,
-				State:     state,
-				Payload:   payload,
-			}
-
-			if (*handler.callback)(notification) {
-				break
-			}
-		}
-	}
 }
