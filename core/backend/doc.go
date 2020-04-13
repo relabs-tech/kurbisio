@@ -221,6 +221,7 @@ The system supports pagination and filtering of responses by creation time.
 	  ?page=n   selects page number n. The first page is page 1
 	  ?from=t   selects items created at or after the timestamp t
 	  ?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
+	  Timestamps must be formatted following RFC3339 (https://tools.ietf.org/html/rfc3339).
 
 The response carries the following custom headers for pagination:
 	  "Pagination-Limit"        the page limit
