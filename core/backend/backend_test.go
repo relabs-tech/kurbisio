@@ -597,7 +597,7 @@ func TestBlob(t *testing.T) {
 	}
 
 	var dataReturn []byte
-	_, headerReturn, err := testService.client.RawBlobWithHeader("/blobs/"+br.BlobID.String(), &dataReturn)
+	_, headerReturn, err := testService.client.RawGetBlobWithHeader("/blobs/"+br.BlobID.String(), map[string]string{}, &dataReturn)
 
 	if err != nil {
 		t.Fatal(err)
@@ -626,7 +626,7 @@ func TestBlob(t *testing.T) {
 	}
 
 	var uDataReturn []byte
-	_, uHeaderReturn, err := testService.client.RawBlobWithHeader("/blobs/"+br.BlobID.String(), &uDataReturn)
+	_, uHeaderReturn, err := testService.client.RawGetBlobWithHeader("/blobs/"+br.BlobID.String(), map[string]string{}, &uDataReturn)
 
 	if err != nil {
 		t.Fatal(err)

@@ -237,7 +237,7 @@ func (p Page) HasData() bool {
 // Get gets one page of the collection
 func (p *Page) Get(result interface{}) error {
 	path := p.r.WithFilter("page", strconv.Itoa(p.page)).CollectionPath()
-	_, header, err := p.r.client.RawGetWithHeader(path, result)
+	_, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
 	if err != nil {
 		return err
 	}
@@ -304,8 +304,12 @@ func (c *Client) RawGet(path string, result interface{}) (int, error) {
 // The path can be extend with query strings.
 //
 // result can be map[string]interface{} or a raw *[]byte
-func (c *Client) RawGetWithHeader(path string, result interface{}) (int, http.Header, error) {
+func (c *Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
+	for key, value := range header {
+		r.Header.Add(key, value)
+	}
+
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
 	res := rec.Result()
@@ -331,14 +335,18 @@ func (c *Client) RawGetWithHeader(path string, result interface{}) (int, http.He
 	return status, res.Header, err
 }
 
-// RawBlobWithHeader gets a binary resource from path. Expects http.StatusOK as response, otherwise it will
+// RawGetBlobWithHeader gets a binary resource from path. Expects http.StatusOK as response, otherwise it will
 // flag an error.
 //
 // The path can be extend with query strings.
 //
 // Returns the actual http status code and the return header
-func (c *Client) RawBlobWithHeader(path string, blob *[]byte) (int, http.Header, error) {
+func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blob *[]byte) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
+	for key, value := range header {
+		r.Header.Add(key, value)
+	}
+
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, r)
 
