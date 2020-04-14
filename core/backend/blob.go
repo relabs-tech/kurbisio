@@ -308,7 +308,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		etag := bytesToEtag(jsonData)
 		// ETag must also be provided in headers in case If-None-Match is set
 		w.Header().Set("Etag", etag)
-		if r.Header.Get("If-None-Match") == etag {
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -365,7 +365,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				if timeToEtag(createdAt) == ifNoneMatch {
+				if ifNoneMatchFound(ifNoneMatch, timeToEtag(createdAt)) {
 					// ETag must also be provided in headers in case If-None-Match is set
 					w.Header().Set("Etag", timeToEtag(createdAt))
 					w.WriteHeader(http.StatusNotModified)
@@ -677,4 +677,27 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}).Methods(http.MethodOptions, http.MethodPut)
 	}
 
+}
+
+// ifNoneMatchFound returns true if etag is found in ifNoneMatch. The format of ifNoneMatch is one
+// of the following:
+// If-None-Match: "<etag_value>"
+// If-None-Match: "<etag_value>", "<etag_value>", …
+// If-None-Match: *
+func ifNoneMatchFound(ifNoneMatch, etag string) bool {
+	ifNoneMatch = strings.Trim(ifNoneMatch, " ")
+	if len(ifNoneMatch) == 0 {
+		return false
+	}
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, s := range strings.Split(ifNoneMatch, ",") {
+		s = strings.Trim(s, " \"")
+		t := strings.Trim(etag, " \"")
+		if s == t {
+			return true
+		}
+	}
+	return false
 }

@@ -341,7 +341,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
-		if r.Header.Get("If-None-Match") == etag {
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -438,7 +438,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
-		if r.Header.Get("If-None-Match") == etag {
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
