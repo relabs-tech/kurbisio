@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -870,9 +872,15 @@ func TestPaginationCollection(t *testing.T) {
 	for page := 1; page <= numberOfElements/limit+1; page++ {
 		path := fmt.Sprintf("/as?limit=%d&page=%d", limit, page)
 		var as []A
-		if status, err := testService.client.RawGet(path, &as); err != nil || status != http.StatusOK {
+		status, h, err := testService.client.RawGetWithHeader(path, map[string]string{}, &as)
+		if err != nil || status != http.StatusOK {
 			t.Fatal("error: ", err, "status: ", status)
 		}
+		assert.Equal(t, strconv.Itoa(limit), h.Get("Pagination-Limit"))
+		assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
+		assert.Equal(t, strconv.Itoa(numberOfElements/limit+1), h.Get("Pagination-Page-Count"))
+		assert.Equal(t, strconv.Itoa(page), h.Get("Pagination-Current-Page"))
+
 		for _, a := range as {
 			if _, ok := received[a.AID]; ok {
 				t.Fatalf("Received the same UUID: %s multiple times", a.AID)
@@ -922,9 +930,13 @@ func TestPaginationBlob(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.path, func(t *testing.T) {
 			var blobs []Blob
-			status, err := testService.client.RawGet(tc.path, &blobs)
-			if !tc.expectedError && err != nil {
-				t.Fatal(err)
+			status, h, err := testService.client.RawGetWithHeader(tc.path, map[string]string{}, &blobs)
+			if !tc.expectedError {
+				if err != nil {
+					t.Fatal(err)
+				} else {
+					assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
+				}
 			}
 			if status != tc.expectedStatus {
 				t.Fatalf("Expected status %d, got status: %d", tc.expectedStatus, status)
@@ -932,6 +944,7 @@ func TestPaginationBlob(t *testing.T) {
 			if len(blobs) != tc.expectedLength {
 				t.Fatalf("The expected returned size is %d, but %d were received", tc.expectedLength, len(blobs))
 			}
+
 		})
 	}
 }
