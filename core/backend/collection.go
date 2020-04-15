@@ -618,7 +618,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "singleton "+this+" already exists", http.StatusConflict)
 			return
 		} else if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			// Non unique external keys are reported as code Code 23505
+			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 

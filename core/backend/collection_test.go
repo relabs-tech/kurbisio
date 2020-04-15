@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"testing"
 )
@@ -180,4 +181,13 @@ func TestEtagCollectionRegenerated(t *testing.T) {
 	if h1.Get("ETag") == h2.Get("ETag") {
 		t.Fatal("ETag was not updated: ", h2.Get("ETag"))
 	}
+}
+
+func TestCollectionExternalID(t *testing.T) {
+	a := A{ExternalID: "an external id"}
+	if _, err := testService.client.RawPost("/as", a, &a); err != nil {
+		t.Fatal(err)
+	}
+	status, err := testService.client.RawPost("/as", a, &a)
+	assert.Equal(t, http.StatusConflict, status, err)
 }

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"
 	"testing"
@@ -200,4 +201,21 @@ func TestEtagBlobCollectionRegenerated(t *testing.T) {
 	if h1.Get("ETag") == h2.Get("ETag") {
 		t.Fatal("ETag was not updated: ", h2.Get("ETag"))
 	}
+}
+
+func TestBlobExternalID(t *testing.T) {
+	type B3 struct {
+		Blob
+		ExternalID string `json:"external_id"`
+	}
+
+	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+		"External-Id":        "1",
+	}
+	status, err := testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
+	status, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
+	assert.Equal(t, http.StatusConflict, status, err)
 }

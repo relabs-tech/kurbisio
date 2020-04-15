@@ -489,7 +489,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var id uuid.UUID
 		err = b.db.QueryRow(insertQuery, values...).Scan(&id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			status := http.StatusBadRequest
+			// Non unique external keys are reported as code Code 23505
+			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 
