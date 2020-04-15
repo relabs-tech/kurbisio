@@ -153,7 +153,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1) + " " + sqlWhereOne
+	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
+	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne
 
 	maxAge := ""
 	if !rc.Mutable {
@@ -536,7 +537,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		values := make([]interface{}, len(columns)+1)
+		values := make([]interface{}, len(columns)+2)
 		var i int
 
 		// first add the values for the where-query
@@ -557,6 +558,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		// next is the blob itself
 		values[i] = &blob
 		i++
+
+		// last value is created_at
+		createdAt := time.Now().UTC()
+		values[i] = &createdAt
 
 		res, err := b.db.Exec(updateQuery, values...)
 		if err != nil {
