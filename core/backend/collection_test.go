@@ -129,7 +129,7 @@ func TestEtagRegenerated(t *testing.T) {
 	a := A{
 		ExternalID: t.Name(),
 		StaticProp: "a property",
-		CreatedAt:  time.Now().Add(-time.Hour),
+		CreatedAt:  time.Now().Add(time.Hour),
 	}
 	if _, err := testService.client.RawPost("/as", a, &a); err != nil {
 		t.Fatal(err)

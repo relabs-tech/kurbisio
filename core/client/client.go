@@ -335,7 +335,6 @@ func (c *Client) RawGetWithHeader(path string, header map[string]string, result 
 
 	var err error
 	if rec.Body != nil && result != nil {
-		fmt.Println("RawGetWithHeader", string(rec.Body.Bytes()))
 		if raw, ok := result.(*[]byte); ok {
 			*raw = rec.Body.Bytes()
 		} else {

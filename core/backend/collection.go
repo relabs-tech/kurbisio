@@ -790,9 +790,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, this+" revision does not match", http.StatusConflict)
 			return
 		}
-		if singleton {
-			primaryID = values[0].(*uuid.UUID).String()
-		}
+
+		primaryID = values[0].(*uuid.UUID).String()
 
 		// for MethodPatch we get the existing object from the database and patch property by property
 		if r.Method == http.MethodPatch {
@@ -813,8 +812,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values = make([]interface{}, len(columns)+2)
 
 		var i int
+		values[0] = primaryID
 
-		for i = 0; i < propertiesIndex; i++ { // the core identifiers
+		for i = 1; i < propertiesIndex; i++ { // the core identifiers
 			k := columns[i]
 			value, ok := bodyJSON[k]
 
