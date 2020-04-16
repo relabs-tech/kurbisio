@@ -100,7 +100,7 @@ func TestEtagGetCollection(t *testing.T) {
 				header["If-None-Match"] = tc.etag
 			}
 			var receivedBuffer []byte
-			status, h, _ := testService.client.RawGetWithHeader("/as", header, &[]Blob{})
+			status, h, _ := testService.client.RawGetWithHeader("/as", header, &[]A{})
 
 			if status != tc.expectedStatus {
 				t.Fatalf("Expected return status %d, got: %d", tc.expectedStatus, status)
@@ -123,8 +123,8 @@ func TestEtagGetCollection(t *testing.T) {
 	}
 }
 
-// TestEtagRegenerated checks that if the binary data of a mutable blob is modified through a
-// PUT request, the ETag is modified
+// TestEtagRegenerated checks that if a property of an element is modified through a PUT request,
+// the ETag is modified
 func TestEtagRegenerated(t *testing.T) {
 	a := A{
 		ExternalID: t.Name(),
@@ -135,7 +135,7 @@ func TestEtagRegenerated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, h1, err := testService.client.RawGetWithHeader("/as", map[string]string{}, &[]A{})
+	_, h1, err := testService.client.RawGetWithHeader("/as/"+a.AID.String(), map[string]string{}, &A{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestEtagRegenerated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, h2, err := testService.client.RawGetWithHeader("/as", map[string]string{}, &[]A{})
+	_, h2, err := testService.client.RawGetWithHeader("/as/"+a.AID.String(), map[string]string{}, &A{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +186,8 @@ func TestEtagCollectionRegenerated(t *testing.T) {
 	}
 }
 
+// TestCollectionExternalID verifies that if we try to create twice an element with the same
+// external id, we get a 409 error
 func TestCollectionExternalID(t *testing.T) {
 	a := A{ExternalID: "an external id"}
 	if _, err := testService.client.RawPost("/as", a, &a); err != nil {
