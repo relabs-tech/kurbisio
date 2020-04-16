@@ -141,7 +141,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at, %s  DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC, %s  DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
