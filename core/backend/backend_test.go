@@ -838,7 +838,7 @@ func TestNotifications(t *testing.T) {
 
 func TestPaginationCollection(t *testing.T) {
 	// Populate the DB with elements created at two created_at times
-	numberOfElements := 205
+	numberOfElements := 210
 	createdAtFirst50 := time.Now().UTC().Round(time.Millisecond)
 	createdAtRemaining := time.Now().UTC().Round(time.Millisecond).Add(time.Minute)
 	for i := 1; i <= numberOfElements; i++ {
@@ -903,7 +903,7 @@ func TestPaginationCollection(t *testing.T) {
 	// Verify that we can get all elements by iterating through pages
 	limit := 10
 	var received = make(map[uuid.UUID]A)
-	for page := 1; page <= numberOfElements/limit+1; page++ {
+	for page := 1; page <= (numberOfElements-1)/limit+1; page++ {
 		path := fmt.Sprintf("/as?limit=%d&page=%d", limit, page)
 		var as []A
 		status, h, err := testService.client.RawGetWithHeader(path, map[string]string{}, &as)
@@ -912,7 +912,7 @@ func TestPaginationCollection(t *testing.T) {
 		}
 		assert.Equal(t, strconv.Itoa(limit), h.Get("Pagination-Limit"))
 		assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
-		assert.Equal(t, strconv.Itoa(numberOfElements/limit+1), h.Get("Pagination-Page-Count"))
+		assert.Equal(t, strconv.Itoa((numberOfElements-1)/limit+1), h.Get("Pagination-Page-Count"))
 		assert.Equal(t, strconv.Itoa(page), h.Get("Pagination-Current-Page"))
 
 		for _, a := range as {
