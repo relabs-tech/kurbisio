@@ -744,11 +744,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		retried := false
 	Retry:
 
-		values, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
+		current, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
 		if singleton && primaryID == "all" {
-			err = tx.QueryRow(readQuery+"WHERE "+owner+"_id = $1 FOR UPDATE;", &ownerID).Scan(values...)
+			err = tx.QueryRow(readQuery+"WHERE "+owner+"_id = $1 FOR UPDATE;", &ownerID).Scan(current...)
 		} else {
-			err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1 FOR UPDATE;", &primaryID).Scan(values...)
+			err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		}
 		if err == csql.ErrNoRows {
 			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
@@ -791,7 +791,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		primaryID = values[0].(*uuid.UUID).String()
+		primaryID = current[0].(*uuid.UUID).String()
 
 		// for MethodPatch we get the existing object from the database and patch property by property
 		if r.Method == http.MethodPatch {
@@ -809,39 +809,37 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values = make([]interface{}, len(columns)+2)
+		values := make([]interface{}, len(columns)+2)
 
 		var i int
-		values[0] = primaryID
 
-		for i = 1; i < propertiesIndex; i++ { // the core identifiers
+		// validate core identifiers
+		// Rationale: we have authorized the resource based on the parameters
+		// in the URL, so we have to ensure that that the object to update
+		// is that very object, and that the update does not try to
+		// change its identity
+		for i = 0; i < propertiesIndex; i++ {
 			k := columns[i]
-			value, ok := bodyJSON[k]
 
-			// zero uuid counts as no uuid for creation
-			ok = ok && value != "00000000-0000-0000-0000-000000000000"
+			values[i] = current[i]
+			idAsString := values[i].(*uuid.UUID).String()
 
-			param, _ := params[k]
-			// identifiers in the url parameters must match the ones in the json document
-			if ok && param != "all" && param != value.(string) {
+			// validate that the paramaters  match the object
+			values[i] = current[i]
+			if params[k] != "all" && params[k] != idAsString {
 				tx.Rollback()
-				http.Error(w, "illegal "+k, http.StatusBadRequest)
+				http.Error(w, "no such "+this, http.StatusNotFound)
 				return
 			}
-			// if we have no identifier in the url parameters, but in the json document, use
-			// the ones from the json document
-			if param == "all" {
-				if ok && value != "00000000-0000-0000-0000-000000000000" {
-					values[i] = value
-				} else if !singleton || i > 0 {
-					tx.Rollback()
-					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
-					return
-				} else {
-					values[i] = param
-				}
-			} else {
-				values[i] = param
+
+			// validate that the body json matches the object
+			value, ok := bodyJSON[k]
+			// zero uuid counts as no uuid
+			ok = ok && value.(string) != "00000000-0000-0000-0000-000000000000"
+			if ok && value.(string) != idAsString {
+				tx.Rollback()
+				http.Error(w, "illegal "+k, http.StatusConflict)
+				return
 			}
 		}
 

@@ -384,19 +384,13 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal("got a new object, should have gotten the same object")
 	}
 
-	oldUID := sResult.SID
 	newUID := uuid.New()
 
-	// put another update to s and try to give it a new id. This will ingore the new
-	// uid and simply update the rest of the object
+	// // put another update to s and try to give it a new id. This will fail.
 	sUpdate.SID = newUID
 	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if sUpdateResult.SID != oldUID {
-		t.Fatal("singleton id changed")
+	if err == nil {
+		t.Fatal("was allowed to change the primary id")
 	}
 
 	// delete single s

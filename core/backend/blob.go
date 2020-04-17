@@ -156,7 +156,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
-	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + ";"
+	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
+
+	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, created_at)"
+	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT " + this + "_id SET "
+	insertUpdateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
+	insertUpdateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
 	maxAge := ""
 	if !rc.Mutable {
@@ -455,12 +460,21 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns)+2)
-		values[0] = uuid.New()
 		var i int
 
-		for i = 1; i < propertiesIndex; i++ { // the core identifiers
+		for i = 0; i < propertiesIndex; i++ { // the core identifiers
 			param, _ := params[columns[i]]
-			values[i] = param
+			if param == "all" || len(param) == 0 {
+				if i == 0 {
+					values[0] = uuid.New()
+				} else {
+					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
+					return
+				}
+
+			} else {
+				values[i] = param
+			}
 		}
 		// the dynamic properties
 		values[i] = metaData
@@ -503,7 +517,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				status = http.StatusConflict
 			}
 			tx.Rollback()
-			http.Error(w, err.Error(), status)
+			http.Error(w, "cannot create "+this+": "+err.Error(), status)
 			return
 		}
 
@@ -528,14 +542,16 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(jsonData)
 	}
 
-	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	insertUpdateWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
+		authorizedForCreate := false
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
+			authorizedForCreate = auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits)
 		}
 
 		blob, err := ioutil.ReadAll(r.Body)
@@ -588,26 +604,30 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		res, err := tx.Exec(updateQuery, values...)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		var primaryID uuid.UUID
+		query := updateQuery
+		if authorizedForCreate {
+			query = insertUpdateQuery
 		}
-		count, err := res.RowsAffected()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if count != 1 {
+		err = tx.QueryRow(query, values...).Scan(&primaryID)
+		if err == sql.ErrNoRows {
 			tx.Rollback()
-			http.Error(w, "no such "+this, http.StatusBadRequest)
+			if authorizedForCreate {
+				http.Error(w, "cannot create "+this, http.StatusConflict)
+			} else {
+				http.Error(w, "no such "+this, http.StatusNotFound)
+			}
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", params[columns[0]]).Scan(values...)
+		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
 		if err == sql.ErrNoRows {
 			tx.Rollback()
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -712,14 +732,15 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
-	// UPDATE
-	if rc.Mutable {
-		router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-			log.Println("called route for", r.URL, r.Method)
-			updateWithAuth(w, r)
-		}).Methods(http.MethodOptions, http.MethodPut)
-	}
-
+	// CREATE OR UPDATE
+	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		if rc.Mutable {
+			insertUpdateWithAuth(w, r)
+		} else {
+			createWithAuth(w, r)
+		}
+	}).Methods(http.MethodOptions, http.MethodPut)
 }
 
 // ifNoneMatchFound returns true if etag is found in ifNoneMatch. The format of ifNoneMatch is one
