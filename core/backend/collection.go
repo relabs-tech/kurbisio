@@ -683,7 +683,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		create(w, r, nil)
 	}
 
-	createUpdateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		var bodyJSON map[string]interface{}
 		err := json.NewDecoder(r.Body).Decode(&bodyJSON)
@@ -947,13 +947,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// UPDATE/CREATE with id
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		createUpdateWithAuth(w, r)
+		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// UPDATE/CREATE with fully qualified path
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		createUpdateWithAuth(w, r)
+		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// READ
@@ -988,7 +988,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// UPDATE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		createUpdateWithAuth(w, r)
+		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE
