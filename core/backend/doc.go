@@ -371,5 +371,32 @@ simply response to that subsequent with a 304 Not Modified in case the resource 
 the resource was changed, the request will be answered as usual.
 
 
+Statistics
+
+Statistics about the backend can be retrieved by doing a GET request to:
+
+   /statistics
+
+This returns a JSON body like this:
+{
+	"resources": [
+		{
+			"name": "user"
+			"type": "collection"
+			"count": 123,
+			"size_mb": 0.117,
+			"average_size_b": 599
+		},
+		{
+			"name": "device"
+			"type": "collection"
+			"count": 56483,
+			"size_mb": 12,
+			"average_size_b": 558
+		}
+	]
+}
+
+
 */
 package backend

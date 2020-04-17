@@ -210,6 +210,7 @@ func (b *Backend) handleRoutes() {
 	for _, sc := range b.config.Shortcuts {
 		b.createShortcut(router, sc)
 	}
+	b.createStatistics(router)
 }
 
 type relationInjection struct {
