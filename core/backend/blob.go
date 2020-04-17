@@ -542,7 +542,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(jsonData)
 	}
 
-	insertUpdateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		authorizedForCreate := false
 		if b.authorizationEnabled {
@@ -732,11 +732,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
-	// CREATE OR UPDATE
+	// UPDATE / CREATE with id
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		if rc.Mutable {
-			insertUpdateWithAuth(w, r)
+			updateWithAuth(w, r)
 		} else {
 			createWithAuth(w, r)
 		}

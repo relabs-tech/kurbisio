@@ -188,16 +188,22 @@ func (r Collection) List(result interface{}) error {
 	return err
 }
 
-// Create creates a new item
+// Create creates a new item. It uses PUT if it has a primary identifier,
+// otherwise it uses POST.
 func (r Collection) Create(body interface{}, result interface{}) error {
-	_, err := r.client.RawPost(r.CollectionPath(), body, result)
+	var err error
+	if _, ok := r.selectors[r.resources[len(r.resources)-1]]; ok {
+		_, err = r.client.RawPut(r.ItemPath(), body, result)
+	} else {
+		_, err = r.client.RawPost(r.CollectionPath(), body, result)
+	}
 	return err
 }
 
 // Update updates an item
 func (r Collection) Update(body interface{}, result interface{}) error {
 	var path string
-	// if we have a selector for the final resource, we use the item path, because
+	// if we have a primar selector, we use the item path, because
 	// we cannot be sure that the body contains the id
 	if _, ok := r.selectors[r.resources[len(r.resources)-1]]; ok {
 		path = r.ItemPath()
