@@ -677,59 +677,17 @@ func TestNotifications(t *testing.T) {
 
 	backend := testService.backend
 
-	backend.RequestNotifications(createHandler,
-		NotificationRequest{
-			Resource:   "notification",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationCreate},
-		},
-		NotificationRequest{
-			Resource:   "notification/normal",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationCreate},
-		},
-		NotificationRequest{
-			Resource:   "notification/single",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationCreate},
-		},
-	)
+	backend.HandleResource("notification", "mystate", createHandler, core.OperationCreate)
+	backend.HandleResource("notification/normal", "mystate", createHandler, core.OperationCreate)
+	backend.HandleResource("notification/single", "mystate", createHandler, core.OperationCreate)
 
-	backend.RequestNotifications(updateHandler,
-		NotificationRequest{
-			Resource:   "notification",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationUpdate},
-		},
-		NotificationRequest{
-			Resource:   "notification/normal",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationUpdate},
-		},
-		NotificationRequest{
-			Resource:   "notification/single",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationUpdate},
-		},
-	)
+	backend.HandleResource("notification", "mystate", updateHandler, core.OperationUpdate)
+	backend.HandleResource("notification/normal", "mystate", updateHandler, core.OperationUpdate)
+	backend.HandleResource("notification/single", "mystate", updateHandler, core.OperationUpdate)
 
-	backend.RequestNotifications(deleteHandler,
-		NotificationRequest{
-			Resource:   "notification",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationDelete},
-		},
-		NotificationRequest{
-			Resource:   "notification/normal",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationDelete},
-		},
-		NotificationRequest{
-			Resource:   "notification/single",
-			State:      "mystate",
-			Operations: []core.Operation{core.OperationDelete},
-		},
-	)
+	backend.HandleResource("notification", "mystate", deleteHandler, core.OperationDelete)
+	backend.HandleResource("notification/normal", "mystate", deleteHandler, core.OperationDelete)
+	backend.HandleResource("notification/single", "mystate", deleteHandler, core.OperationDelete)
 
 	client := testService.client
 
@@ -819,7 +777,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessNotifications()
+	backend.ProcessJobs()
 
 	if createCount != 4 {
 		t.Fatalf("unexpected number of creates: %d", createCount)

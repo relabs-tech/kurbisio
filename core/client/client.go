@@ -132,6 +132,12 @@ func (r Collection) WithFilter(key string, value string) Collection {
 	}
 }
 
+// WithState returns a new collection client with a URL parameter for state added.
+// Filters apply only to lists.
+func (r Collection) WithState(state string) Collection {
+	return r.WithFilter("state", state)
+}
+
 func (r Collection) paths() (collectionPath, itemPath, singletonPath string) {
 	for _, resource := range r.resources {
 		singletonPath = itemPath + "/" + resource
@@ -168,14 +174,20 @@ func (r Collection) SingletonPath() string {
 }
 
 // Item gets an item from a collection
-func (r Collection) Item(item string, result interface{}) error {
-	_, err := r.client.RawGet(r.ItemPath()+"/"+item, result)
+func (r Collection) Item(result interface{}) error {
+	_, err := r.client.RawGet(r.ItemPath(), result)
 	return err
 }
 
-// ItemID gets an item by ID from a collection
-func (r Collection) ItemID(id uuid.UUID, result interface{}) error {
-	_, err := r.client.RawGet(r.ItemPath()+"/"+id.String(), result)
+// Delete deletes an item from a collection
+func (r Collection) Delete() error {
+	_, err := r.client.RawDelete(r.ItemPath())
+	return err
+}
+
+// DeleteID deletes an item by ID from a collection
+func (r Collection) DeleteID(id uuid.UUID) error {
+	_, err := r.client.RawDelete(r.ItemPath() + "/" + id.String())
 	return err
 }
 
@@ -262,7 +274,7 @@ func (p *Page) Get(result interface{}) error {
 	}
 	found := false
 	for i := 0; i < len(p.r.parameters) && !found; i++ {
-		found = p.r.parameters[i] == "until"
+		found = strings.HasPrefix(p.r.parameters[i], "until=")
 	}
 	if !found {
 		until := header.Get("Pagination-Until")

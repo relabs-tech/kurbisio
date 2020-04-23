@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"net/http"
@@ -27,15 +28,17 @@ type Backend struct {
 	router              *mux.Router
 	collectionFunctions map[string]*collectionFunctions
 	// Registry is the JSON object registry for this backend's schema
-	Registry                 *registry.Registry
-	authorizationEnabled     bool
-	updateSchema             bool
-	handlers                 map[string]notificationHandler
-	triggerNotifications     func()
-	pipelineConcurrency      int
-	pipelineMaxAttempts      int
-	notificationsUpdateQuery string
-	notificationsDeleteQuery string
+	Registry             registry.Registry
+	authorizationEnabled bool
+	updateSchema         bool
+
+	callbacks map[string]jobHandler
+
+	triggerJobs         func()
+	pipelineConcurrency int
+	pipelineMaxAttempts int
+	jobsUpdateQuery     string
+	jobsDeleteQuery     string
 }
 
 // Builder is a builder helper for the Backend
@@ -50,9 +53,9 @@ type Builder struct {
 	// in the request context, as specified in the configuration.
 	AuthorizationEnabled bool
 
-	// TriggerNotifications - if not nil - is called to trigger notification pipeline processing
-	TriggerNotifications func()
-	// Number of concurrent pipeline executors. Default is 20.
+	// TriggerJobs - if not nil - is called to trigger jobs pipeline processing (notifications, timers, events)
+	TriggerJobs func()
+	// Number of concurrent pipeline executors. Default is 100.
 	PipelineConcurrency int
 	// Maximum number of attemts for pipeline execution. Default is 3.
 	PipelineMaxAttempts int
@@ -76,7 +79,7 @@ func New(bb *Builder) *Backend {
 		panic("Router is missing")
 	}
 
-	pipelineConcurrency := 20
+	pipelineConcurrency := 100
 	if bb.PipelineConcurrency > 0 {
 		pipelineConcurrency = bb.PipelineConcurrency
 	}
@@ -92,22 +95,24 @@ func New(bb *Builder) *Backend {
 		collectionFunctions:  make(map[string]*collectionFunctions),
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
-		handlers:             make(map[string]notificationHandler),
-		triggerNotifications: bb.TriggerNotifications,
+		callbacks:            make(map[string]jobHandler),
+		triggerJobs:          bb.TriggerJobs,
 		pipelineConcurrency:  pipelineConcurrency,
 		pipelineMaxAttempts:  pipelineMaxAttempts,
 	}
 
-	if b.triggerNotifications == nil {
+	if b.triggerJobs == nil {
 		trigger := make(chan struct{}, 10)
+		var lock sync.Mutex
 		go func() {
 			for {
 				<-trigger
-				time.Sleep(time.Second)
-				b.ProcessNotifications()
+				lock.Lock()
+				b.ProcessJobs()
+				lock.Unlock()
 			}
 		}()
-		b.triggerNotifications = func() {
+		b.triggerJobs = func() {
 			if len(trigger) == 0 {
 				trigger <- struct{}{}
 			}
@@ -122,17 +127,18 @@ func New(bb *Builder) *Backend {
 	if b.updateSchema {
 		log.Println("new configuration - will update database schema")
 	} else {
-		log.Println("user previous schema version")
+		log.Println("use previous schema version")
 	}
-
-	b.handleNotifications()
 
 	b.handleCORS()
 	access.HandleAuthorizationRoute(b.router)
-	b.handleRoutes()
+	b.handleResourceRoutes()
+	b.handleStatistics(b.router)
+	b.handleJobs(b.router)
 	if b.updateSchema {
 		registry.Write("schema_version", newVersion)
 	}
+
 	return b
 }
 
@@ -156,10 +162,10 @@ func (r byDepth) Less(i, j int) bool {
 	return strings.Count(r[i].resource, "/") < strings.Count(r[j].resource, "/")
 }
 
-// HandleRoutes adds all necessary handlers for the specified configuration
-func (b *Backend) handleRoutes() {
+// handleResourceRoutes adds all necessary handlers for the specified configuration
+func (b *Backend) handleResourceRoutes() {
 
-	log.Println("backend: HandleRoutes")
+	log.Println("backend: handle resource routes")
 	router := b.router
 
 	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of
@@ -210,7 +216,7 @@ func (b *Backend) handleRoutes() {
 	for _, sc := range b.config.Shortcuts {
 		b.createShortcut(router, sc)
 	}
-	b.createStatistics(router)
+
 }
 
 type relationInjection struct {

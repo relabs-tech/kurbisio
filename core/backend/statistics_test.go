@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestStatistics verifies that the /statistics endpoint returns information about the backend
+// TestStatistics verifies that the /kurbisio/statistics endpoint returns information about the backend
 func TestStatistics(t *testing.T) {
 	// Create resources to be sure that we have some valid statistics
 	numberOfElements := 14
@@ -24,7 +24,7 @@ func TestStatistics(t *testing.T) {
 	}
 
 	var stats statisticsDetails
-	_, h, err := testService.client.RawGetWithHeader("/statistics", map[string]string{}, &stats)
+	_, h, err := testService.client.RawGetWithHeader("/kurbisio/statistics", map[string]string{}, &stats)
 	if err != nil {
 		t.Fatal(err)
 	}

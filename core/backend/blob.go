@@ -159,7 +159,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
 	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, created_at)"
-	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT " + this + "_id SET "
+	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT " + this + "_id DO UPDATE SET "
 	insertUpdateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
 	insertUpdateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
@@ -210,6 +210,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
+			var err error
 			if len(array) > 1 {
 				http.Error(w, "illegal paramter array '"+key+"'", http.StatusBadRequest)
 				return
@@ -248,7 +249,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					err = fmt.Errorf("unknown query parameter")
 				}
 			}
-
 			if err != nil {
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return

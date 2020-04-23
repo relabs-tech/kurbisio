@@ -17,7 +17,7 @@ import (
 // use POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable"
 type TestService struct {
 	Postgres string `env:"POSTGRES,required" description:"the connection string for the Postgres DB"`
-	registry *Registry
+	registry Registry
 }
 
 var testService TestService

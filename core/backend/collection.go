@@ -228,6 +228,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		)
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
+			var err error
 			if len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
@@ -857,7 +858,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			value, ok := bodyJSON[columns[i]]
 			if !ok {
 				tx.Rollback()
-				http.Error(w, "missing property or index"+columns[i], http.StatusBadRequest)
+				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
 				return
 			}
 			values[i] = value

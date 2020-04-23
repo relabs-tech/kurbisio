@@ -13,7 +13,7 @@ import (
 )
 
 // New creates a new registry for the specified database
-func New(db *csql.DB) *Registry {
+func New(db *csql.DB) Registry {
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_registry_" 
 (key varchar NOT NULL, 
 value json NOT NULL, 
@@ -24,7 +24,7 @@ PRIMARY KEY(key)
 	if err != nil {
 		panic(err)
 	}
-	return &Registry{db: db}
+	return Registry{db: db}
 }
 
 // Registry provides a persistent registry of objects in a sql database.
@@ -35,11 +35,11 @@ type Registry struct {
 // Accessor is an accessor with optional prefix
 type Accessor struct {
 	Prefix   string
-	Registry *Registry
+	Registry Registry
 }
 
 // Accessor returns a registry accessor with prefix
-func (r *Registry) Accessor(prefix string) Accessor {
+func (r Registry) Accessor(prefix string) Accessor {
 	return Accessor{
 		Prefix:   prefix,
 		Registry: r,
@@ -50,7 +50,7 @@ func (r *Registry) Accessor(prefix string) Accessor {
 // time when the value was written.
 //
 // If the accessor has a prefix, the key is prepended with "{prefix}:"
-func (r *Accessor) Read(key string, value interface{}) (time.Time, error) {
+func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
 	var (
 		rawValue  json.RawMessage
 		createdAt time.Time
@@ -76,7 +76,7 @@ func (r *Accessor) Read(key string, value interface{}) (time.Time, error) {
 // Write writes a value into the registry.
 //
 // If the accessor has a prefix, the key is prepended with "{prefix}:"
-func (r *Accessor) Write(key string, value interface{}) error {
+func (r Accessor) Write(key string, value interface{}) error {
 
 	body, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

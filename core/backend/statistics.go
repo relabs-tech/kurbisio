@@ -3,11 +3,12 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/access"
 	"log"
 	"net/http"
 	"sort"
+
+	"github.com/gorilla/mux"
+	"github.com/relabs-tech/backends/core/access"
 )
 
 // resourceStatistics represents information about a resource
@@ -23,9 +24,10 @@ type statisticsDetails struct {
 	Resources []resourceStatistics `json:"resources"`
 }
 
-func (b *Backend) createStatistics(router *mux.Router) {
-	log.Println("  handle statistics route: /statistics GET")
-	router.HandleFunc("/statistics", func(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) handleStatistics(router *mux.Router) {
+	log.Println("statistics")
+	log.Println("  handle statistics route: /kuribisio/statistics GET")
+	router.HandleFunc("/kurbisio/statistics", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		b.statisticsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
@@ -39,11 +41,6 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	b.statistics(w, r)
-}
-
-func (b *Backend) statistics(w http.ResponseWriter, r *http.Request) {
-
 	s := statisticsDetails{}
 	var tables sort.StringSlice
 	for _, r := range b.config.Collections {
