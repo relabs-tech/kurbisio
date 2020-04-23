@@ -55,7 +55,7 @@ type Builder struct {
 
 	// TriggerJobs - if not nil - is called to trigger jobs pipeline processing (notifications, timers, events)
 	TriggerJobs func()
-	// Number of concurrent pipeline executors. Default is 100.
+	// Number of concurrent pipeline executors. Default is 5.
 	PipelineConcurrency int
 	// Maximum number of attemts for pipeline execution. Default is 3.
 	PipelineMaxAttempts int
@@ -79,7 +79,7 @@ func New(bb *Builder) *Backend {
 		panic("Router is missing")
 	}
 
-	pipelineConcurrency := 100
+	pipelineConcurrency := 5
 	if bb.PipelineConcurrency > 0 {
 		pipelineConcurrency = bb.PipelineConcurrency
 	}

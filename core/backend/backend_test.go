@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -652,11 +653,16 @@ func TestNotifications(t *testing.T) {
 	var (
 		createCount, updateCount, deleteCount, pointsCount int
 	)
+	var lock sync.Mutex
 	createHandler := func(n Notification) error {
+		lock.Lock()
+		defer lock.Unlock()
 		createCount++
 		return nil
 	}
 	updateHandler := func(n Notification) error {
+		lock.Lock()
+		defer lock.Unlock()
 		updateCount++
 		var object map[string]interface{}
 		err := json.Unmarshal(n.Payload, &object)
@@ -671,6 +677,8 @@ func TestNotifications(t *testing.T) {
 		return nil
 	}
 	deleteHandler := func(n Notification) error {
+		lock.Lock()
+		defer lock.Unlock()
 		deleteCount++
 		return nil
 	}

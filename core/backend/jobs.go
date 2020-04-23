@@ -234,8 +234,8 @@ func (b *Backend) TriggerJobs() {
 	b.triggerJobs()
 }
 
-// ProcessJobs processes all pending jobs and then returns
-func (b *Backend) ProcessJobs() {
+// ProcessJobs processes all pending jobs and then returns true if there are still stops to do
+func (b *Backend) ProcessJobs() bool {
 	log.Println("process jobs")
 
 	jobs := make(chan txJob, b.pipelineConcurrency)
@@ -276,15 +276,15 @@ func (b *Backend) ProcessJobs() {
 		}
 		jobs <- txJob{j, tx}
 		maxJobs--
-		if maxJobs == 0 { // after each 1000 jobs we double the capacity to process them (on lambda)
-			b.TriggerJobs()
-			b.TriggerJobs()
+		if maxJobs == 0 {
+			b.TriggerJobs() // request continuation
 			break
 		}
 	}
 	close(jobs)
 	wg.Wait()
 	log.Println("process jobs done")
+	return maxJobs == 0
 }
 
 type jobHandler struct {
