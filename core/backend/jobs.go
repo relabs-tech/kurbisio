@@ -227,16 +227,60 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 	}
 }
 
-// TriggerJobs triggers pipeline processing by eventually calling ProcessJobs().
-// By default, processing happens in another go-routine, but by injecting another TriggerJobs
-// function it can also happen in its own lambda, triggered by an external queue event.
+// TriggerJobs triggers pipeline processing.
 func (b *Backend) TriggerJobs() {
-	b.triggerJobs()
+	b.hasJobsToProcessLock.Lock()
+	b.hasJobsToProcess = true
+	b.hasJobsToProcessLock.Unlock()
+	if b.processJobsAsyncRuns {
+		if len(b.processJobsAsyncTrigger) == 0 {
+			b.processJobsAsyncTrigger <- struct{}{}
+		}
+
+	}
 }
 
-// ProcessJobs processes all pending jobs and then returns true if there are still stops to do
-func (b *Backend) ProcessJobs() bool {
+// HasJobsToProcess returns true, if there are jobs to process.
+// It then resets the process flag.
+func (b *Backend) HasJobsToProcess() bool {
+	b.hasJobsToProcessLock.Lock()
+	defer b.hasJobsToProcessLock.Unlock()
+	result := b.hasJobsToProcess
+	b.hasJobsToProcess = false
+	return result
+}
+
+// ProcessJobsAsync starts a job processing loop. It returns immediately. This
+// function must only be called once.
+// The function triggers processing of left-over jobs in the database right away.
+func (b *Backend) ProcessJobsAsync() {
+	if b.processJobsAsyncRuns {
+		panic("already processing jobs")
+	}
+	b.processJobsAsyncRuns = true
+	b.processJobsAsyncTrigger = make(chan struct{}, 10)
+
+	go func() {
+		b.ProcessJobsSync(-1)
+		for {
+			<-b.processJobsAsyncTrigger
+			if b.HasJobsToProcess() {
+				b.ProcessJobsSync(-1)
+			}
+		}
+	}()
+
+}
+
+// ProcessJobsSync processes all pending jobs up to the specified mximum and then returns. It returns true if it
+// has maxed out and there are more jobs to process, otherwise it returns false.
+// It you pass -1, it will process all pending jobs. The behaviour for 0 is undefined.
+func (b *Backend) ProcessJobsSync(max int) bool {
 	log.Println("process jobs")
+	jobCount := 0
+
+process:
+	b.HasJobsToProcess() // reset flag
 
 	jobs := make(chan txJob, b.pipelineConcurrency)
 	var wg sync.WaitGroup
@@ -245,7 +289,8 @@ func (b *Backend) ProcessJobs() bool {
 		go b.pipelineWorker(i, &wg, jobs)
 	}
 
-	maxJobs := 1000
+	var maxedOut bool
+
 	for {
 		tx, err := b.db.BeginTx(context.Background(), nil)
 		if err != nil {
@@ -275,16 +320,20 @@ func (b *Backend) ProcessJobs() bool {
 			break
 		}
 		jobs <- txJob{j, tx}
-		maxJobs--
-		if maxJobs == 0 {
-			b.TriggerJobs() // request continuation
+		jobCount++
+		if maxedOut = max >= 0 && jobCount >= max; maxedOut {
 			break
 		}
 	}
 	close(jobs)
 	wg.Wait()
-	log.Println("process jobs done")
-	return maxJobs == 0
+
+	if !maxedOut && b.HasJobsToProcess() {
+		goto process // goto considered useful
+	}
+
+	log.Printf("process jobs done, did %d jobs (maxedOut == %t)", jobCount, maxedOut)
+	return maxedOut
 }
 
 type jobHandler struct {
@@ -351,7 +400,7 @@ func (b *Backend) raiseEventWithResourceInternal(event string, resource string, 
 	).Scan(&serial)
 
 	if err == nil {
-		b.triggerJobs()
+		b.TriggerJobs()
 	}
 
 	return http.StatusInternalServerError, err

@@ -34,11 +34,14 @@ type Backend struct {
 
 	callbacks map[string]jobHandler
 
-	triggerJobs         func()
-	pipelineConcurrency int
-	pipelineMaxAttempts int
-	jobsUpdateQuery     string
-	jobsDeleteQuery     string
+	pipelineConcurrency     int
+	pipelineMaxAttempts     int
+	jobsUpdateQuery         string
+	jobsDeleteQuery         string
+	processJobsAsyncRuns    bool
+	processJobsAsyncTrigger chan struct{}
+	hasJobsToProcess        bool
+	hasJobsToProcessLock    sync.Mutex
 }
 
 // Builder is a builder helper for the Backend
@@ -53,8 +56,6 @@ type Builder struct {
 	// in the request context, as specified in the configuration.
 	AuthorizationEnabled bool
 
-	// TriggerJobs - if not nil - is called to trigger jobs pipeline processing (notifications, timers, events)
-	TriggerJobs func()
 	// Number of concurrent pipeline executors. Default is 5.
 	PipelineConcurrency int
 	// Maximum number of attemts for pipeline execution. Default is 3.
@@ -96,27 +97,8 @@ func New(bb *Builder) *Backend {
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
 		callbacks:            make(map[string]jobHandler),
-		triggerJobs:          bb.TriggerJobs,
 		pipelineConcurrency:  pipelineConcurrency,
 		pipelineMaxAttempts:  pipelineMaxAttempts,
-	}
-
-	if b.triggerJobs == nil {
-		trigger := make(chan struct{}, 10)
-		var lock sync.Mutex
-		go func() {
-			for {
-				<-trigger
-				lock.Lock()
-				b.ProcessJobs()
-				lock.Unlock()
-			}
-		}()
-		b.triggerJobs = func() {
-			if len(trigger) == 0 {
-				trigger <- struct{}{}
-			}
-		}
 	}
 
 	registry := b.Registry.Accessor("_backend_")

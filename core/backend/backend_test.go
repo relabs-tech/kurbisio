@@ -785,7 +785,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessJobs()
+	backend.ProcessJobsSync(-1)
 
 	if createCount != 4 {
 		t.Fatalf("unexpected number of creates: %d", createCount)
