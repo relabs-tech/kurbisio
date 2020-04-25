@@ -165,7 +165,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
-
+	w.WriteHeader(status)
 	log.Printf("raised event %s on resource \"%s\"", event, resource)
 }
 
@@ -396,11 +396,11 @@ func (b *Backend) raiseEventWithResourceInternal(event string, resource string, 
 		b.pipelineMaxAttempts,
 	).Scan(&serial)
 
-	if err == nil {
-		b.TriggerJobs()
+	if err != nil {
+		return http.StatusInternalServerError, err
 	}
-
-	return http.StatusInternalServerError, err
+	b.TriggerJobs()
+	return http.StatusNoContent, nil
 }
 
 // HandleResource installs a callback handler for the given resource and state and the specified operations.
