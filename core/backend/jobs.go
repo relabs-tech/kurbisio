@@ -47,7 +47,6 @@ type job struct {
 	Serial       int
 	Type         string
 	Name         string
-	Scheduled    time.Time
 	Resource     string
 	State        string
 	ResourceID   uuid.UUID
@@ -77,7 +76,6 @@ func (b *Backend) handleJobs(router *mux.Router) {
 (serial SERIAL,
 type VARCHAR NOT NULL,
 name VARCHAR NOT NULL DEFAULT '',
-scheduled TIMESTAMP NOT NULL DEFAULT '0001-01-01 00:00:00',
 resource VARCHAR NOT NULL DEFAULT '', 
 state VARCHAR NOT NULL DEFAULT '', 
 resource_id uuid NOT NULL DEFAULT uuid_nil(), 
@@ -303,7 +301,6 @@ process:
 			&j.Serial,
 			&j.Type,
 			&j.Name,
-			&j.Scheduled,
 			&j.Resource,
 			&j.State,
 			&j.ResourceID,
