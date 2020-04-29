@@ -101,7 +101,7 @@ SELECT serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING *;
+RETURNING serial, type, name, resource, state, resource_id, payload, created_at, attempts_left;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
