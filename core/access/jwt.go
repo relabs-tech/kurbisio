@@ -107,6 +107,8 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			if len(bearer) > 0 {
 				if len(bearer) >= 8 && strings.ToLower(bearer[:7]) == "bearer " {
 					tokenString = bearer[7:]
+				} else {
+					tokenString = bearer
 				}
 			} else if cookie, _ := r.Cookie("Kurbisio-JWT"); cookie != nil {
 				tokenString = cookie.Value
