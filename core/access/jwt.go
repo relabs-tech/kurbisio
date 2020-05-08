@@ -133,6 +133,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 			if claims.Issuer != jmb.Issuer {
 				http.Error(w, "bearer token issuer not accepted", http.StatusUnauthorized)
+				return
 			}
 
 			// identity is a combination of issuer and email
