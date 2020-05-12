@@ -110,7 +110,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 			}
 			response = append(response, t)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		jsonData, _ := json.MarshalIndent(response, "", " ")
 		w.Write(jsonData)
 	}).Methods(http.MethodOptions, http.MethodGet)
@@ -144,7 +144,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		jsonData, _ := json.MarshalIndent(t, "", " ")
 		w.Write(jsonData)
 	}).Methods(http.MethodOptions, http.MethodGet)
@@ -178,7 +178,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		jsonData, _ := json.MarshalIndent(t.Request, "", " ")
 		w.Write(jsonData)
 	}).Methods(http.MethodOptions, http.MethodGet)
@@ -212,7 +212,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		jsonData, _ := json.MarshalIndent(t.Report, "", " ")
 		w.Write(jsonData)
 	}).Methods(http.MethodOptions, http.MethodGet)

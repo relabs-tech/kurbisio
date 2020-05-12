@@ -241,7 +241,7 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 				return
 			}
 
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			json.NewEncoder(w).Encode(
 				struct {
 					DeviceID    uuid.UUID `json:"device_id"`

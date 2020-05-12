@@ -346,7 +346,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
 		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
@@ -443,7 +443,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
 	}
@@ -666,7 +666,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(jsonData)
 
 	}
@@ -769,7 +769,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				// all is good, we are done, we can rollback this transaction
 				tx.Rollback()
 				w.WriteHeader(http.StatusCreated)
-				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Write(rec.Body.Bytes())
 				return
 			} else if rec.Code == http.StatusConflict && !retried {
@@ -928,7 +928,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
 	}

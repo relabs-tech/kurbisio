@@ -320,7 +320,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
 		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
@@ -538,7 +538,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(jsonData)
 	}
 
@@ -646,7 +646,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
 

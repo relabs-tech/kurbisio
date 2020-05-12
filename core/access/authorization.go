@@ -216,7 +216,7 @@ func HandleAuthorizationRoute(router *mux.Router) {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
 			jsonData, _ := json.MarshalIndent(auth, "", " ")
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Write(jsonData)
 		}
 	}).Methods(http.MethodOptions, http.MethodGet)
