@@ -27,6 +27,7 @@ type Backend struct {
 	db                  *csql.DB
 	router              *mux.Router
 	collectionFunctions map[string]*collectionFunctions
+	relations           map[string]string
 	// Registry is the JSON object registry for this backend's schema
 	Registry             registry.Registry
 	authorizationEnabled bool
@@ -94,6 +95,7 @@ func New(bb *Builder) *Backend {
 		db:                   bb.DB,
 		router:               bb.Router,
 		collectionFunctions:  make(map[string]*collectionFunctions),
+		relations:            make(map[string]string),
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
 		callbacks:            make(map[string]jobHandler),
@@ -125,11 +127,31 @@ func New(bb *Builder) *Backend {
 }
 
 type anyResourceConfiguration struct {
-	resource   string
 	collection *collectionConfiguration
 	singleton  *singletonConfiguration
 	blob       *blobConfiguration
 	relation   *relationConfiguration
+}
+
+func (rc anyResourceConfiguration) depth() int {
+	if rc.collection != nil {
+		return strings.Count(rc.collection.Resource, "/")
+	}
+	if rc.singleton != nil {
+		return strings.Count(rc.singleton.Resource, "/")
+	}
+	if rc.blob != nil {
+		return strings.Count(rc.blob.Resource, "/")
+	}
+	if rc.relation != nil {
+		left := strings.Count(rc.relation.Left, "/")
+		right := strings.Count(rc.relation.Right, "/")
+		if left > right {
+			return left
+		}
+		return right
+	}
+	return 0
 }
 
 type byDepth []anyResourceConfiguration
@@ -141,7 +163,7 @@ func (r byDepth) Swap(i, j int) {
 	r[i], r[j] = r[j], r[i]
 }
 func (r byDepth) Less(i, j int) bool {
-	return strings.Count(r[i].resource, "/") < strings.Count(r[j].resource, "/")
+	return r[i].depth() < r[j].depth()
 }
 
 // handleResourceRoutes adds all necessary handlers for the specified configuration
@@ -156,22 +178,22 @@ func (b *Backend) handleResourceRoutes() {
 	allResources := []anyResourceConfiguration{}
 	for i := range b.config.Collections {
 		rc := &b.config.Collections[i]
-		allResources = append(allResources, anyResourceConfiguration{resource: rc.Resource, collection: rc})
+		allResources = append(allResources, anyResourceConfiguration{collection: rc})
 	}
 
 	for i := range b.config.Singletons {
 		rc := &b.config.Singletons[i]
-		allResources = append(allResources, anyResourceConfiguration{resource: rc.Resource, singleton: rc})
+		allResources = append(allResources, anyResourceConfiguration{singleton: rc})
 	}
 
 	for i := range b.config.Blobs {
 		rc := &b.config.Blobs[i]
-		allResources = append(allResources, anyResourceConfiguration{resource: rc.Resource, blob: rc})
+		allResources = append(allResources, anyResourceConfiguration{blob: rc})
 	}
 
 	for i := range b.config.Relations {
 		rc := &b.config.Relations[i]
-		allResources = append(allResources, anyResourceConfiguration{resource: rc.Resource, relation: rc})
+		allResources = append(allResources, anyResourceConfiguration{relation: rc})
 	}
 	sort.Sort(byDepth(allResources))
 
@@ -209,7 +231,7 @@ type relationInjection struct {
 
 type collectionFunctions struct {
 	collection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	item       func(w http.ResponseWriter, r *http.Request)
+	item       func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 }
 
 // returns $1,...,$n
@@ -232,7 +254,7 @@ func compareIDsString(s []string) string {
 		if i > 0 {
 			result += " AND "
 		}
-		result += fmt.Sprintf("($%d = 'all' OR %s = $%d::UUID)", i+1, s[i], i+1)
+		result += fmt.Sprintf("($%d='all' OR %s=$%d::UUID)", i+1, s[i], i+1)
 	}
 	return result
 }
@@ -245,7 +267,7 @@ func compareIDsStringWithOffset(offset int, s []string) string {
 		if i > 0 {
 			result += " AND "
 		}
-		result += fmt.Sprintf("($%d::VARCHAR = 'all' OR %s = $%d)", i+offset+1, s[i], i+offset+1)
+		result += fmt.Sprintf("($%d='all' OR %s=$%d::UUID)", i+offset+1, s[i], i+offset+1)
 	}
 	return result
 }

@@ -1,152 +1,372 @@
 package backend
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/lib/pq"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 )
 
+type stringlist []string
+
+func (list stringlist) contains(s string) bool {
+	for _, l := range list {
+		if l == s {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
 	schema := b.db.Schema
-	resource := rc.Resource
-	resources := strings.Split(resource, "/")
-	this := resources[len(resources)-1]
-	dependencies := resources[:len(resources)-1]
+	leftResources := strings.Split(rc.Left, "/")
+	left := leftResources[len(leftResources)-1]
 
-	origin := rc.Origin
-	origins := strings.Split(origin, "/")
+	rightResources := strings.Split(rc.Right, "/")
+	right := rightResources[len(rightResources)-1]
 
-	columns := map[string]string{}
-	resourceColumns := []string{}
-	originColumns := []string{}
-	createColumns := []string{}
+	// do the relation
+	leftResources = append(leftResources, right)
+	rightResources = append(rightResources, left)
 
+	columns := []string{}
+	validateColumns := []string{}
+	createColumns := []string{"serial SERIAL"}
+
+	resource := rc.Left + ":" + rc.Right
 	log.Println("create relation:", resource)
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 
-	for _, r := range resources {
-		resourceColumns = append(resourceColumns, r+"_id")
-		columns[r] = r
+	leftColumns := []string{}
+	for _, r := range leftResources {
+		id := r + "_id"
+		leftColumns = append(leftColumns, id)
+		columns = append(columns, id)
 	}
-	for _, o := range origins {
-		originColumns = append(originColumns, o+"_id")
-		columns[o] = o
+	sort.Strings(columns)
+
+	rightColumns := []string{}
+	for _, r := range rightResources {
+		id := r + "_id"
+		rightColumns = append(rightColumns, id)
+		validateColumns = append(validateColumns, id)
+	}
+	sort.Strings(validateColumns)
+
+	// now columns and validateColumns should contain exactly the same identifiers
+	if !reflect.DeepEqual(columns, validateColumns) {
+		panic(fmt.Sprintf(`"%s" and "%s" do not share a compatible base, symmetic relation not possible`, left, right))
 	}
 
-	for c := range columns {
-		createColumn := c + "_id uuid NOT NULL"
+	for _, c := range columns {
+		createColumn := fmt.Sprintf("%s uuid NOT NULL", c)
 		createColumns = append(createColumns, createColumn)
 	}
 
-	if len(dependencies) > 0 {
-		foreignColumns := strings.Join(resourceColumns[:len(resourceColumns)-1], ",")
+	// left reference
+	leftResource := rc.Left
+	if relationResource, ok := b.relations[leftResource]; ok {
+		// left resource is a relation, use relation table name
+		leftResource = relationResource
+	}
+	{
+		foreignColumns := strings.Join(leftColumns[:len(leftColumns)-1], ",")
 		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
-			"REFERENCES " + schema + ".\"" + strings.Join(dependencies, "/") + "\" " +
+			"REFERENCES " + schema + ".\"" + leftResource + "\" " +
 			"(" + foreignColumns + ") ON DELETE CASCADE"
 		createColumns = append(createColumns, createColumn)
 	}
 
-	foreignColumns := strings.Join(originColumns, ",")
-	createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
-		"REFERENCES " + schema + ".\"" + origin + "\" " +
-		"(" + foreignColumns + ") ON DELETE CASCADE"
-	createColumns = append(createColumns, createColumn)
-
-	if len(columns) > 1 {
-		createColumn := "UNIQUE (" + strings.Join(resourceColumns, ",") + ")"
+	// right reference
+	rightResource := rc.Right
+	if relationResource, ok := b.relations[rightResource]; ok {
+		// right resource is a relation, use relation table name
+		rightResource = relationResource
+	}
+	{
+		foreignColumns := strings.Join(rightColumns[:len(rightColumns)-1], ",")
+		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
+			"REFERENCES " + schema + ".\"" + rightResource + "\" " +
+			"(" + foreignColumns + ") ON DELETE CASCADE"
 		createColumns = append(createColumns, createColumn)
 	}
 
+	// relation is unique
+	createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
+	createColumns = append(createColumns, createColumn)
+
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
 
-	_, err := b.db.Query(createQuery)
-	if err != nil {
-		panic(err)
+	fmt.Println(createQuery)
+	if b.updateSchema {
+		_, err := b.db.Query(createQuery)
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	collection := b.collectionFunctions[this]
-
-	sqlInjectRelation := fmt.Sprintf("AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", this, this, schema, resource)
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(resourceColumns, ","), parameterString(len(resourceColumns)))
-	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(resourceColumns))
-
-	collectionRoute := ""
-	itemRoute := ""
-	for _, r := range resources {
-		collectionRoute = itemRoute + "/" + core.Plural(r)
-		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
+	fmt.Println("get left collection for ", rc.Left)
+	leftCollection, ok := b.collectionFunctions[rc.Left]
+	if !ok {
+		panic("missing left resource")
+	}
+	fmt.Println("get right collection for ", rc.Right)
+	rightCollection, ok := b.collectionFunctions[rc.Right]
+	if !ok {
+		panic("missing right resource")
 	}
 
-	log.Println("  handle routes:", collectionRoute, "GET,POST,PUT")
-	log.Println("  handle routes:", itemRoute, "GET,DELETE")
+	// register this relation, so that other relations can relate to it
+	virtualLeftResource := rc.Left + "/" + right
+	b.relations[virtualLeftResource] = resource
+	b.collectionFunctions[virtualLeftResource] = rightCollection
+	virtualRightResource := rc.Right + "/" + left
+	b.relations[virtualRightResource] = resource
+	b.collectionFunctions[virtualRightResource] = leftCollection
 
-	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	// The limit ensures reasonable fast database queries with the nested relational query. If we ever come
+	// into a situation where relations are much larger than that, we would need to work out something
+	// different: extend the relation table with all columns necessary to do pagination (created_at,
+	// searchable properties, external indices) and keep those in sync with the original table.
+	sqlPagination := " ORDER BY serial LIMIT 1000"
+
+	leftQuery := fmt.Sprintf("SELECT %s_id FROM %s.\"%s\" WHERE ", right, schema, resource) +
+		compareIDsString(leftColumns[:len(leftColumns)-1]) + sqlPagination + ";"
+	rightQuery := fmt.Sprintf("SELECT %s_id FROM %s.\"%s\" WHERE ", left, schema, resource) +
+		compareIDsString(rightColumns[:len(rightColumns)-1]) + sqlPagination + ";"
+
+	leftSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s %s) ", right, right, schema, resource, sqlPagination)
+	rightSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s %s) ", left, left, schema, resource, sqlPagination)
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(columns, ","), parameterString(len(columns)))
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(columns))
+
+	leftCollectionRoute := ""
+	leftItemRoute := ""
+	for _, r := range leftResources {
+		leftCollectionRoute = leftItemRoute + "/" + core.Plural(r)
+		leftItemRoute = leftItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
+	}
+
+	rightCollectionRoute := ""
+	rightItemRoute := ""
+	for _, r := range rightResources {
+		rightCollectionRoute = rightItemRoute + "/" + core.Plural(r)
+		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
+	}
+
+	log.Println("  handle routes:", leftCollectionRoute, "GET")
+	log.Println("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
+	log.Println("  handle routes:", rightCollectionRoute, "GET")
+	log.Println("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
+
+	// READ ALL LEFT
+	router.HandleFunc(leftCollectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+			if !auth.IsAuthorized(leftResources, core.OperationList, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		queryParameters := make([]interface{}, len(resourceColumns)-1)
-		for i := 0; i < len(resourceColumns)-1; i++ { // skip ID
-			queryParameters[i] = params[resourceColumns[i]]
+
+		var idonly bool
+		var err error
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			if key == "idonly" {
+				idonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
 		}
+		queryParameters := make([]interface{}, len(leftColumns)-1)
+		for i := 0; i < len(leftColumns)-1; i++ { // skip ID
+			queryParameters[i] = params[leftColumns[i]]
+		}
+
+		if idonly {
+			response := []uuid.UUID{}
+			rows, err := b.db.Query(leftQuery, queryParameters...)
+			if err != sql.ErrNoRows {
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					id := uuid.UUID{}
+					err := rows.Scan(&id)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					response = append(response, id)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			jsonData, _ := json.MarshalIndent(response, "", " ")
+			w.Write(jsonData)
+			return
+		}
+
 		injectRelation := &relationInjection{
-			subquery:        sqlInjectRelation,
-			columns:         resourceColumns[:len(resourceColumns)-1],
+			subquery:        leftSQLInjectRelation,
+			columns:         leftColumns[:len(leftColumns)-1], // skip ID
 			queryParameters: queryParameters,
 		}
 
-		collection.collection(w, r, injectRelation)
+		rightCollection.collection(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
-	// READ
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		collection.item(w, r)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// CREATE
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+	// READ ALL RIGHT
+	router.HandleFunc(rightCollectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+			if !auth.IsAuthorized(rightResources, core.OperationList, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		queryParameters := make([]interface{}, len(resourceColumns))
-		for i := 0; i < len(resourceColumns); i++ {
-			queryParameters[i] = params[resourceColumns[i]]
+
+		var idonly bool
+		var err error
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			if key == "idonly" {
+				idonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+
+		queryParameters := make([]interface{}, len(rightColumns)-1)
+		for i := 0; i < len(rightColumns)-1; i++ { // skip ID
+			queryParameters[i] = params[rightColumns[i]]
+		}
+
+		if idonly {
+			response := []uuid.UUID{}
+			rows, err := b.db.Query(rightQuery, queryParameters...)
+			if err != sql.ErrNoRows {
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					id := uuid.UUID{}
+					err := rows.Scan(&id)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					response = append(response, id)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			jsonData, _ := json.MarshalIndent(response, "", " ")
+			w.Write(jsonData)
+			return
+		}
+
+		injectRelation := &relationInjection{
+			subquery:        rightSQLInjectRelation,
+			columns:         rightColumns[:len(rightColumns)-1], // skip ID
+			queryParameters: queryParameters,
+		}
+
+		leftCollection.collection(w, r, injectRelation)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// READ LEFT
+	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(leftResources, core.OperationRead, params, rc.LeftPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		queryParameters := make([]interface{}, len(leftColumns))
+		for i := 0; i < len(leftColumns); i++ {
+			queryParameters[i] = params[leftColumns[i]]
+		}
+		injectRelation := &relationInjection{
+			subquery:        leftSQLInjectRelation,
+			columns:         leftColumns,
+			queryParameters: queryParameters,
+		}
+
+		rightCollection.item(w, r, injectRelation)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// READ RIGHT
+	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(rightResources, core.OperationRead, params, rc.RightPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		queryParameters := make([]interface{}, len(rightColumns))
+		for i := 0; i < len(rightColumns); i++ {
+			queryParameters[i] = params[rightColumns[i]]
+		}
+		injectRelation := &relationInjection{
+			subquery:        rightSQLInjectRelation,
+			columns:         rightColumns,
+			queryParameters: queryParameters,
+		}
+
+		leftCollection.item(w, r, injectRelation)
+	}).Methods(http.MethodOptions, http.MethodGet)
+
+	create := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		queryParameters := make([]interface{}, len(columns))
+		for i := 0; i < len(columns); i++ {
+			queryParameters[i] = params[columns[i]]
 		}
 		res, err := b.db.Exec(insertQuery, queryParameters...)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+				http.Error(w, "relation exists", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		count, err := res.RowsAffected()
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -157,23 +377,43 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
-	}).Methods(http.MethodOptions, http.MethodPut)
+	}
 
-	// DELETE
-	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
+	// CREATE LEFT
+	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+			if !auth.IsAuthorized(leftResources, core.OperationCreate, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		queryParameters := make([]interface{}, len(resourceColumns))
-		for i := 0; i < len(resourceColumns); i++ {
-			queryParameters[i] = params[resourceColumns[i]]
+		create(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut)
+
+	// CREATE RIGHT
+	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(rightResources, core.OperationCreate, params, rc.LeftPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		create(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut)
+
+	delete := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		queryParameters := make([]interface{}, len(columns))
+		for i := 0; i < len(columns); i++ {
+			queryParameters[i] = params[columns[i]]
 		}
 		res, err := b.db.Exec(deleteQuery, queryParameters...)
 		if err != nil {
@@ -191,6 +431,36 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
+	}
+
+	// DELETE LEFT
+	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(leftResources, core.OperationDelete, params, rc.LeftPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		delete(w, r)
+	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	// DELETE RIGHT
+	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(rightResources, core.OperationDelete, params, rc.LeftPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		delete(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 }

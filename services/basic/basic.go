@@ -31,8 +31,8 @@ var configurationJSON string = `
 	],
 	"relations": [
 	  {
-		"origin": "device",
-		"resource": "user/device"
+		"left": "user",
+		"right": "device"
 	  }
 	]
 }

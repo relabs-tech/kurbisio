@@ -44,16 +44,16 @@ var configurationJSON string = `{
 	],
 	"relations": [
 	  {
-		"origin": "device",
-		"resource": "fleet/device"
+		"left": "device",
+		"right": "fleet"
 	  },
 	  {
-		"origin": "fleet/location",
-		"resource": "fleet/user/location"
+		"left": "fleet/location",
+		"right": "fleet/user"
 	  },
 	  {
-		"origin": "fleet/device",
-		"resource": "fleet/user/device"
+		"left": "fleet/device",
+		"right": "fleet/user"
 	  }
 	]
   }

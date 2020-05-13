@@ -12,9 +12,6 @@ Two examples of device's implementations are provided.
 1. Start database:\
    `docker run --rm --name some-postgres -p 5432:5432 -e POSTGRES_PASSWORD=docker postgres`
 
-1. Start streaming server:\
-   `docker run --rm --name nats-streaming-server -p 4223:4223 -p 8223:8223 nats-streaming`
-
 1. Start the fleet service:
    From the `services/fleet` folder run the following command:\
    `POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable" go run fleet.go`

@@ -150,7 +150,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
 	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
-	log.Println("  handle collection routes:", itemRoute, "GET,DELETE")
+	log.Println("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
@@ -318,6 +318,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
+
 		response := []interface{}{}
 		defer rows.Close()
 		var totalCount int
@@ -371,7 +372,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		collection(w, r, nil)
 	}
 
-	item := func(w http.ResponseWriter, r *http.Request) {
+	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 
 		if singleton {
@@ -396,9 +397,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 
+		subQuery := ""
+		if relation != nil {
+			// inject subquery for relation
+			subQuery = fmt.Sprintf(relation.subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.columns))
+			queryParameters = append(queryParameters, relation.queryParameters...)
+		}
+
 		var state string
 		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
-		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
+		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
 				w.WriteHeader(http.StatusNoContent)
@@ -458,7 +467,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		item(w, r)
+		item(w, r, nil)
 	}
 
 	doDeleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -933,8 +942,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
+	fmt.Println("store collection for ", resource)
 	// store the collection functions  for later usage in relations
-	b.collectionFunctions[this] = &collectionFunctions{
+	b.collectionFunctions[resource] = &collectionFunctions{
 		collection: collection,
 		item:       item,
 	}

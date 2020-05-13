@@ -27,8 +27,8 @@ Example:
 	],
 	"relations": [
 	  {
-		"resource": "user/device",
-		"origin": "device"
+		"left": "device",
+		"right": "user"
 	  }
 	]
   }
@@ -39,29 +39,20 @@ to define a list of static properties, mainly to support simpler SQL queries. In
 static properties, but keep everything relevant in the dynamic JSON object.
 
 A user has a child resource "user/profile", which is declared as a singleton, i.e. every user can only have one single profile.
-Finally there is a relation from device to user which creates another child resource "user/device".
+Finally there is a relation from device to user which creates two more virtuals child resources "user/device" and "device/user".
 
 This configuration creates the following REST routes:
-	GET /users
-	POST /users
-	GET /users/{user_id}
-	PUT /users/{user_id}
-	PATCH /users/{user_id}
-	DELETE /users/{user_id}
-	GET /users/{user_id}/profile
-	PUT /users/{user_id}/profile
-	PATCH /users/{user_id}/profile
-	DELETE /users/{user_id}/profile
-	GET /devices
-	POST /devices
-	GET /devices/{device_id}
-	PUT /devices/{device_id}
-	PATCH /devices/{device_id}
-	DELETE /devices/{device_id}
-	GET /users/{user_id}/devices
-	PUT /users/{user_id}/devices/{device_id} - with empty request body
-	GET /users/{user_id}/devices/{device_id}
-	DELETE /users/{user_id}/devices/{device_id}
+  /users GET,POST,PUT,PATCH
+  /users/{user_id} GET,PUT,PATCH,DELETE
+  /devices GET,POST,PUT,PATCH
+  /devices/{device_id} GET,PUT,PATCH,DELETE
+  /users/{user_id}/devices GET
+  /users/{user_id}/devices/{device_id} GET,PUT,DELETE
+  /devices/{device_id}/users GET
+  /devices/{device_id}/users/{user_id} GET,PUT,DELETE
+  /users/{user_id}/profile GET,PUT,PATCH,DELETE
+  /users/{user_id}/profiles GET,POST,PUT,PATCH
+  /users/{user_id}/profiles/{profile_id} GET,PUT,PATCH,DELETE
 
 
 The models look like this:
@@ -154,19 +145,9 @@ have a role "userrole" which contains a selector for a user resource. Then we ca
 	  }
 	...
 
-This would create these additional REST routes for the authenticated user:
-	GET /user
-	PUT /user
-	DELETE /user
-	GET /user/profile
-	PUT /user/profile
-	DELETE /user/profile
-	GET /user/devices
-	PUT /user/devices/{device_id} - with empty request body
-	GET /user/devices/{device_id}
-	DELETE /user/devices/{device_id}
-
-Effectively, the path segement /users/{user_id} is replaced with the shortcut /user for all generated routes.
+This creates additional REST routes where every path segement /users/{user_id} is replaced with the shortcut /user for all
+generated routes. For example, instead of querying a user's devices with users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
+you would simply query /user/devices.
 
 Revisions
 
@@ -259,8 +240,20 @@ collection GET request.
 Notifications
 
 The backend supports notifications through the Notifier interface specified at construction time.
-TBD describe notifications in configuration JSON
 
+Relations
+
+The example demonstrated a relation between "user" and "device", which created two additional resources "user/device" and
+"device/user". Relations also work between different child resources, for example between "fleet/user" and "fleet/device",
+as long as both resources have a compatible base (in this case "fleet"). Furthermore relations are transient. Say you
+have actual resources "device" and "fleet", and a relation between them, which creates a virtual resource "fleet/device".
+In this case you can also have a relation between "fleet/user" and "fleet/device", leading to the two addditional
+resources "fleet/user/device" and "fleet/device/user".
+
+Relations support spearate permits for the left and the right resource, called "left_permits" and "right_permits".
+
+For each relation, the number of related resources for one other resource is currently limited by 1000. In the above
+example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.
 
 Blobs
 

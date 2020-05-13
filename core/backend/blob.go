@@ -196,7 +196,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		return values, object
 	}
 
-	getCollection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	collection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -332,7 +332,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
-	getCollectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	collectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -342,10 +342,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		getCollection(w, r, nil)
+		collection(w, r, nil)
 	}
 
-	getItem := func(w http.ResponseWriter, r *http.Request) {
+	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -427,7 +427,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-		getItem(w, r)
+		item(w, r, nil)
 	}
 
 	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -699,13 +699,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 
-	collection := collectionFunctions{
-		collection: getCollection,
-		item:       getItem,
-	}
-
 	// store the collection helper for later usage in relations
-	b.collectionFunctions[this] = &collection
+	b.collectionFunctions[this] = &collectionFunctions{
+		collection: collection,
+		item:       item,
+	}
 
 	// CREATE
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
@@ -723,7 +721,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// READ ALL
 	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		getCollectionWithAuth(w, r, nil)
+		collectionWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE

@@ -42,9 +42,10 @@ type blobConfiguration struct {
 // relationConfiguration is a n:m relation from
 // another collection, blob collection or relation
 type relationConfiguration struct {
-	Resource string          `json:"resource"`
-	Origin   string          `json:"origin"`
-	Permits  []access.Permit `json:"permits"`
+	Left         string          `json:"left"`
+	Right        string          `json:"right"`
+	LeftPermits  []access.Permit `json:"left_permits"`
+	RightPermits []access.Permit `json:"right_permits"`
 }
 
 // shortcutConfiguration is shorcut to a resource
