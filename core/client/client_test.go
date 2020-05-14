@@ -20,28 +20,29 @@ func TestCient(t *testing.T) {
 	parentID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9b")
 	childID := uuid.MustParse("c46da255-eb72-4cc6-8835-1b34a9917826")
 
-	request := client.Collection("parent/child").WithPrimary(childID)
-	if p := request.CollectionPath(); p != "/parents/all/children" {
+	collection := client.Collection("parent/child")
+	if p := collection.CollectionPath(); p != "/parents/all/children" {
 		t.Fatal("unexpected collection path:", p)
 	}
-	if p := request.ItemPath(); p != "/parents/all/children/"+childID.String() {
+
+	item := collection.Item(childID)
+	if p := item.Path(); p != "/parents/all/children/"+childID.String() {
 		t.Fatal("unexpected item path:", p)
 	}
 
-	request = client.Collection("parent/child").WithParent(parentID)
-	if p := request.CollectionPath(); p != "/parents/"+parentID.String()+"/children" {
+	collection = client.Collection("parent/child").WithParent(parentID)
+	if p := collection.CollectionPath(); p != "/parents/"+parentID.String()+"/children" {
 		t.Fatal("unexpected collection path:", p)
 	}
-	if p := request.ItemPath(); p != "/parents/"+parentID.String()+"/children/all" {
+
+	item = collection.Singleton()
+	if p := item.Path(); p != "/parents/"+parentID.String()+"/child" {
 		t.Fatal("unexpected item path:", p)
 	}
 
-	request = client.Collection("parent/child").WithPrimary(childID).WithFilter("email", "maybe@yes.no").WithFilter("state", "new")
-	if p := request.CollectionPath(); p != "/parents/all/children?email=maybe@yes.no&state=new" {
+	collection = client.Collection("parent/child").WithFilter("email", "maybe@yes.no").WithFilter("state", "new")
+	if p := collection.CollectionPath(); p != "/parents/all/children?email=maybe@yes.no&state=new" {
 		t.Fatal("unexpected collection path:", p)
-	}
-	if p := request.ItemPath(); p != "/parents/all/children/"+childID.String() {
-		t.Fatal("unexpected item path:", p)
 	}
 
 }

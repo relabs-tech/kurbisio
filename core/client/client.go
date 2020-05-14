@@ -102,14 +102,6 @@ func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 	}
 }
 
-// WithPrimary returns a new collection client with a primary selector added
-func (r Collection) WithPrimary(primaryID uuid.UUID) Collection {
-	if len(r.resources) < 1 {
-		panic("no primary resource to select")
-	}
-	return r.WithSelector(r.resources[len(r.resources)-1], primaryID)
-}
-
 // WithParent returns a new collection client with a parent selector added
 func (r Collection) WithParent(parentID uuid.UUID) Collection {
 	if len(r.resources) < 2 {
@@ -138,7 +130,8 @@ func (r Collection) WithState(state string) Collection {
 	return r.WithFilter("state", state)
 }
 
-func (r Collection) paths() (collectionPath, itemPath, singletonPath string) {
+func (r Collection) paths() (collectionPath, singletonPath string) {
+	var itemPath string
 	for _, resource := range r.resources {
 		singletonPath = itemPath + "/" + resource
 		collectionPath = itemPath + "/" + core.Plural(resource)
@@ -157,37 +150,26 @@ func (r Collection) paths() (collectionPath, itemPath, singletonPath string) {
 
 // CollectionPath returns the created path for the collection plus optional query strings
 func (r Collection) CollectionPath() string {
-	path, _, _ := r.paths()
-	return path
-}
-
-// ItemPath returns the created path for an item inside the collection
-func (r Collection) ItemPath() string {
-	_, path, _ := r.paths()
+	path, _ := r.paths()
 	return path
 }
 
 // SingletonPath returns the created path for a singleton
 func (r Collection) SingletonPath() string {
-	_, _, path := r.paths()
+	_, path := r.paths()
 	return path
 }
 
-// Item gets an item from a collection
-func (r Collection) Item(result interface{}) error {
-	_, err := r.client.RawGet(r.ItemPath(), result)
+// Create creates a new item
+func (r Collection) Create(body interface{}, result interface{}) error {
+	_, err := r.client.RawPost(r.CollectionPath(), body, result)
 	return err
 }
 
-// Delete deletes an item from a collection
-func (r Collection) Delete() error {
-	_, err := r.client.RawDelete(r.ItemPath())
-	return err
-}
-
-// DeleteID deletes an item by ID from a collection
-func (r Collection) DeleteID(id uuid.UUID) error {
-	_, err := r.client.RawDelete(r.ItemPath() + "/" + id.String())
+// Update updates (or creates) an item. The item must be fully
+// qualified, i.e. it must contain all identifiers.
+func (r Collection) Update(body interface{}, result interface{}) error {
+	_, err := r.client.RawPut(r.CollectionPath(), body, result)
 	return err
 }
 
@@ -200,43 +182,60 @@ func (r Collection) List(result interface{}) error {
 	return err
 }
 
-// Create creates a new item. It uses PUT if it has a primary identifier,
-// otherwise it uses POST.
-func (r Collection) Create(body interface{}, result interface{}) error {
-	var err error
-	if _, ok := r.selectors[r.resources[len(r.resources)-1]]; ok {
-		_, err = r.client.RawPut(r.ItemPath(), body, result)
-	} else {
-		_, err = r.client.RawPost(r.CollectionPath(), body, result)
+// Item represents a single item in a collection
+type Item struct {
+	col         Collection
+	id          uuid.UUID
+	isSingleton bool
+}
+
+// Item gets an item from a collection
+func (r Collection) Item(id uuid.UUID) Item {
+	return Item{col: r, id: id}
+}
+
+// Singleton gets a singleton from this collection
+func (r Collection) Singleton() Item {
+	return Item{col: r, isSingleton: true}
+}
+
+// Path returns the created path for this item
+func (r Item) Path() string {
+	if r.isSingleton {
+		return r.col.SingletonPath()
 	}
+	return r.col.CollectionPath() + "/" + r.id.String()
+}
+
+// Subcollection returns a subcollection for this item
+func (r Item) Subcollection(resource string) Collection {
+	col := r.col.WithSelector(r.col.resources[len(r.col.resources)-1], r.id)
+	// we want a true copy to avoid side effects
+	col.resources = append(append([]string{}, r.col.resources...), resource)
+	return col
+}
+
+// Read reads an item from a collection
+func (r Item) Read(result interface{}) error {
+	_, err := r.col.client.RawGet(r.Path(), result)
+	return err
+}
+
+// Delete deletes an item from a collection
+func (r Item) Delete() error {
+	_, err := r.col.client.RawDelete(r.Path())
 	return err
 }
 
 // Update updates an item
-func (r Collection) Update(body interface{}, result interface{}) error {
-	var path string
-	// if we have a primar selector, we use the item path, because
-	// we cannot be sure that the body contains the id
-	if _, ok := r.selectors[r.resources[len(r.resources)-1]]; ok {
-		path = r.ItemPath()
-	} else {
-		path = r.CollectionPath()
-	}
-	_, err := r.client.RawPut(path, body, result)
+func (r Item) Update(body interface{}, result interface{}) error {
+	_, err := r.col.client.RawPut(r.Path(), body, result)
 	return err
 }
 
 // Patch updates selected fields of an item
-func (r Collection) Patch(body interface{}, result interface{}) error {
-	var path string
-	// if we have a selector for the final resource, we use the item path, because
-	// we cannot be sure that the body contains the id
-	if _, ok := r.selectors[r.resources[len(r.resources)-1]]; ok {
-		path = r.ItemPath()
-	} else {
-		path = r.CollectionPath()
-	}
-	_, err := r.client.RawPatch(path, body, result)
+func (r Item) Patch(body interface{}, result interface{}) error {
+	_, err := r.col.client.RawPatch(r.Path(), body, result)
 	return err
 }
 
