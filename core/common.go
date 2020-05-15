@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Operation represents a modifying backend storage operation, one of Create, Read, Update, Delete, List
+// Operation represents a modifying backend storage operation, one of Create, Read, Update, Delete, List, Clear
 //
 type Operation string
 
@@ -17,6 +17,7 @@ const (
 	OperationUpdate Operation = "update"
 	OperationDelete Operation = "delete"
 	OperationList   Operation = "list"
+	OperationClear  Operation = "clear"
 )
 
 // UnmarshalJSON is a custom JSON unmarshaller

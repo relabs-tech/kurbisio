@@ -117,14 +117,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 	}
 
-	collectionRoute := ""
+	listRoute := ""
 	itemRoute := ""
 	for _, r := range resources {
-		collectionRoute = itemRoute + "/" + core.Plural(r)
+		listRoute = itemRoute + "/" + core.Plural(r)
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle blob routes:", collectionRoute, "GET,POST")
+	log.Println("  handle blob routes:", listRoute, "GET,POST")
 	log.Println("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
@@ -196,7 +196,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		return values, object
 	}
 
-	collection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -332,7 +332,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
-	collectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -342,7 +342,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		collection(w, r, nil)
+		list(w, r, nil)
 	}
 
 	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
@@ -701,12 +701,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	// store the collection helper for later usage in relations
 	b.collectionFunctions[this] = &collectionFunctions{
-		collection: collection,
-		item:       item,
+		list: list,
+		item: item,
 	}
 
 	// CREATE
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		createWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPost)
@@ -719,9 +719,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		collectionWithAuth(w, r, nil)
+		listWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE

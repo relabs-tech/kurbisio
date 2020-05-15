@@ -153,27 +153,27 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(columns, ","), parameterString(len(columns)))
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(columns))
 
-	leftCollectionRoute := ""
+	leftListRoute := ""
 	leftItemRoute := ""
 	for _, r := range leftResources {
-		leftCollectionRoute = leftItemRoute + "/" + core.Plural(r)
+		leftListRoute = leftItemRoute + "/" + core.Plural(r)
 		leftItemRoute = leftItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	rightCollectionRoute := ""
+	rightListRoute := ""
 	rightItemRoute := ""
 	for _, r := range rightResources {
-		rightCollectionRoute = rightItemRoute + "/" + core.Plural(r)
+		rightListRoute = rightItemRoute + "/" + core.Plural(r)
 		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", leftCollectionRoute, "GET")
+	log.Println("  handle routes:", leftListRoute, "GET")
 	log.Println("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
-	log.Println("  handle routes:", rightCollectionRoute, "GET")
+	log.Println("  handle routes:", rightListRoute, "GET")
 	log.Println("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
 
 	// READ ALL LEFT
-	router.HandleFunc(leftCollectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(leftListRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
@@ -233,11 +233,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		rightCollection.collection(w, r, injectRelation)
+		rightCollection.list(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL RIGHT
-	router.HandleFunc(rightCollectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(rightListRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
@@ -298,7 +298,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		leftCollection.collection(w, r, injectRelation)
+		leftCollection.list(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ LEFT

@@ -138,18 +138,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	singletonRoute := ""
-	collectionRoute := ""
+	listRoute := ""
 	itemRoute := ""
 	for _, r := range resources {
 		singletonRoute = itemRoute + "/" + r
-		collectionRoute = itemRoute + "/" + core.Plural(r)
+		listRoute = itemRoute + "/" + core.Plural(r)
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
 	if singleton {
 		log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
-	log.Println("  handle collection routes:", collectionRoute, "GET,POST,PUT,PATCH")
+	log.Println("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH")
 	log.Println("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
@@ -163,6 +163,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND state=$%d ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
 
 	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
 
@@ -214,7 +215,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
-	collection := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -359,7 +360,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	collectionWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -369,7 +370,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		collection(w, r, nil)
+		list(w, r, nil)
 	}
 
 	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
@@ -522,6 +523,37 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		w.WriteHeader(http.StatusNoContent)
 
+	}
+
+	doClearWithAuth := func(w http.ResponseWriter, r *http.Request) {
+
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		urlQuery := r.URL.Query()
+		if len(urlQuery) > 0 {
+			http.Error(w, "clear does not take any parameters", http.StatusBadRequest)
+			return
+		}
+
+		queryParameters := make([]interface{}, propertiesIndex-1)
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
+
+		_, err = b.db.Query(clearQuery, queryParameters...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 
 	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
@@ -942,21 +974,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
-	fmt.Println("store collection for ", resource)
 	// store the collection functions  for later usage in relations
 	b.collectionFunctions[resource] = &collectionFunctions{
-		collection: collection,
-		item:       item,
+		list: list,
+		item: item,
 	}
 
 	// CREATE
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		createWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPost)
 
 	// UPDATE/CREATE with id
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
@@ -974,9 +1005,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
-	router.HandleFunc(collectionRoute, func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		collectionWithAuth(w, r, nil)
+		listWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
@@ -984,6 +1015,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log.Println("called route for", r.URL, r.Method)
 		doDeleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	// CLEAR
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		doClearWithAuth(w, r)
+	}).Methods(http.MethodDelete, http.MethodDelete)
 
 	if !singleton {
 		return

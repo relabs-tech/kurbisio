@@ -173,6 +173,16 @@ func (r Collection) Update(body interface{}, result interface{}) error {
 	return err
 }
 
+// Clear deletes the entire collection
+//
+// This operation does not accept any filters nor does it generate notifications.
+// If you need filters or delete notifications, you should iterate of the items
+// and delete them one by one.
+func (r Collection) Clear() error {
+	_, err := r.client.RawDelete(r.CollectionPath())
+	return err
+}
+
 // List gets the entire collection up until the specified limit.
 //
 // If you potentially need multiple pages, use FirstPage() instead.

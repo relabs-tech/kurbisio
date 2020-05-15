@@ -230,8 +230,8 @@ type relationInjection struct {
 }
 
 type collectionFunctions struct {
-	collection func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	item       func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	list func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	item func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 }
 
 // returns $1,...,$n
