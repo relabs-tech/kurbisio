@@ -124,7 +124,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle blob routes:", listRoute, "GET,POST")
+	log.Println("  handle blob routes:", listRoute, "GET,POST,DELETE")
 	log.Println("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
@@ -145,6 +145,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, created_at)"
@@ -652,6 +653,37 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
+	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
+
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		urlQuery := r.URL.Query()
+		if len(urlQuery) > 0 {
+			http.Error(w, "clear does not take any parameters", http.StatusBadRequest)
+			return
+		}
+
+		queryParameters := make([]interface{}, propertiesIndex-1)
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
+
+		_, err = b.db.Query(clearQuery, queryParameters...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+
 	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -728,6 +760,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	// CLEAR
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
+		log.Println("called route for", r.URL, r.Method)
+		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// UPDATE / CREATE with id

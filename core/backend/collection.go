@@ -149,7 +149,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	if singleton {
 		log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
-	log.Println("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH")
+	log.Println("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
 	log.Println("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
@@ -163,12 +163,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND state=$%d ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
-	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
-
 	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	sqlReturnState := " RETURNING " + this + "_id, state;"
 
@@ -471,7 +470,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		item(w, r, nil)
 	}
 
-	doDeleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -525,7 +524,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	doClearWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -1013,14 +1012,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// DELETE
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		doDeleteWithAuth(w, r)
+		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// CLEAR
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		doClearWithAuth(w, r)
-	}).Methods(http.MethodDelete, http.MethodDelete)
+		clearWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	if !singleton {
 		return
@@ -1042,7 +1041,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		log.Println("called route for", r.URL, r.Method)
-		doDeleteWithAuth(w, r)
+		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 }
