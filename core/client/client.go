@@ -160,17 +160,15 @@ func (r Collection) SingletonPath() string {
 	return path
 }
 
-// Create creates a new item
-func (r Collection) Create(body interface{}, result interface{}) error {
-	_, err := r.client.RawPost(r.CollectionPath(), body, result)
-	return err
+// Create creates a new item.
+func (r Collection) Create(body interface{}, result interface{}) (int, error) {
+	return r.client.RawPost(r.CollectionPath(), body, result)
 }
 
 // Update updates (or creates) an item. The item must be fully
 // qualified, i.e. it must contain all identifiers.
-func (r Collection) Update(body interface{}, result interface{}) error {
-	_, err := r.client.RawPut(r.CollectionPath(), body, result)
-	return err
+func (r Collection) Update(body interface{}, result interface{}) (int, error) {
+	return r.client.RawPut(r.CollectionPath(), body, result)
 }
 
 // Clear deletes the entire collection
@@ -178,18 +176,16 @@ func (r Collection) Update(body interface{}, result interface{}) error {
 // This operation does not accept any filters nor does it generate notifications.
 // If you need filters or delete notifications, you should iterate of the items
 // and delete them one by one.
-func (r Collection) Clear() error {
-	_, err := r.client.RawDelete(r.CollectionPath())
-	return err
+func (r Collection) Clear() (int, error) {
+	return r.client.RawDelete(r.CollectionPath())
 }
 
 // List gets the entire collection up until the specified limit.
 //
 // If you potentially need multiple pages, use FirstPage() instead.
 //
-func (r Collection) List(result interface{}) error {
-	_, err := r.client.RawGet(r.CollectionPath(), result)
-	return err
+func (r Collection) List(result interface{}) (int, error) {
+	return r.client.RawGet(r.CollectionPath(), result)
 }
 
 // Item represents a single item in a collection
@@ -226,27 +222,23 @@ func (r Item) Subcollection(resource string) Collection {
 }
 
 // Read reads an item from a collection
-func (r Item) Read(result interface{}) error {
-	_, err := r.col.client.RawGet(r.Path(), result)
-	return err
+func (r Item) Read(result interface{}) (int, error) {
+	return r.col.client.RawGet(r.Path(), result)
 }
 
 // Delete deletes an item from a collection
-func (r Item) Delete() error {
-	_, err := r.col.client.RawDelete(r.Path())
-	return err
+func (r Item) Delete() (int, error) {
+	return r.col.client.RawDelete(r.Path())
 }
 
 // Update updates an item
-func (r Item) Update(body interface{}, result interface{}) error {
-	_, err := r.col.client.RawPut(r.Path(), body, result)
-	return err
+func (r Item) Update(body interface{}, result interface{}) (int, error) {
+	return r.col.client.RawPut(r.Path(), body, result)
 }
 
 // Patch updates selected fields of an item
-func (r Item) Patch(body interface{}, result interface{}) error {
-	_, err := r.col.client.RawPatch(r.Path(), body, result)
-	return err
+func (r Item) Patch(body interface{}, result interface{}) (int, error) {
+	return r.col.client.RawPatch(r.Path(), body, result)
 }
 
 // Page is a requester for one page in a collection
@@ -271,11 +263,11 @@ func (p Page) HasData() bool {
 }
 
 // Get gets one page of the collection
-func (p *Page) Get(result interface{}) error {
+func (p *Page) Get(result interface{}) (int, error) {
 	path := p.r.WithFilter("page", strconv.Itoa(p.page)).CollectionPath()
-	_, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
+	status, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
 	if err != nil {
-		return err
+		return status, err
 	}
 	pageCount, err := strconv.Atoi(header.Get("Pagination-Page-Count"))
 	if err == nil {
@@ -291,7 +283,7 @@ func (p *Page) Get(result interface{}) error {
 			p.r = p.r.WithFilter("until", until)
 		}
 	}
-	return nil
+	return status, nil
 }
 
 // Next returns the next page
