@@ -24,6 +24,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
 	log.Println("create blob:", resource)
+	if rc.Description != "" {
+		log.Println("  description:", rc.Description)
+	}
 
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]

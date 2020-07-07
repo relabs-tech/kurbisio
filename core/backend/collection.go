@@ -29,6 +29,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	} else {
 		log.Println("create collection:", resource)
 	}
+	if rc.Description != "" {
+		log.Println("  description:", rc.Description)
+	}
 
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]

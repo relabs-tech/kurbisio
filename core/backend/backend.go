@@ -204,8 +204,9 @@ func (b *Backend) handleResourceRoutes() {
 		if rc.singleton != nil {
 			// a singleton is a a specialized collection
 			tmp := collectionConfiguration{
-				Resource: rc.singleton.Resource,
-				Permits:  rc.singleton.Permits,
+				Resource:    rc.singleton.Resource,
+				Permits:     rc.singleton.Permits,
+				Description: rc.singleton.Description,
 			}
 			b.createCollectionResource(router, tmp, true)
 		}

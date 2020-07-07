@@ -250,7 +250,7 @@ have actual resources "device" and "fleet", and a relation between them, which c
 In this case you can also have a relation between "fleet/user" and "fleet/device", leading to the two addditional
 resources "fleet/user/device" and "fleet/device/user".
 
-Relations support spearate permits for the left and the right resource, called "left_permits" and "right_permits".
+Relations support separate permits for the left and the right resource, called "left_permits" and "right_permits".
 
 For each relation, the number of related resources for one other resource is currently limited by 1000. In the above
 example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.

@@ -48,6 +48,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	resource := rc.Left + ":" + rc.Right
 	log.Println("create relation:", resource)
+	if rc.Description != "" {
+		log.Println("  description:", rc.Description)
+	}
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 
 	leftColumns := []string{}
@@ -110,7 +113,6 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
 
-	fmt.Println(createQuery)
 	if b.updateSchema {
 		_, err := b.db.Query(createQuery)
 		if err != nil {
@@ -118,12 +120,10 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		}
 	}
 
-	fmt.Println("get left collection for ", rc.Left)
 	leftCollection, ok := b.collectionFunctions[rc.Left]
 	if !ok {
 		panic("missing left resource")
 	}
-	fmt.Println("get right collection for ", rc.Right)
 	rightCollection, ok := b.collectionFunctions[rc.Right]
 	if !ok {
 		panic("missing right resource")

@@ -20,12 +20,14 @@ type collectionConfiguration struct {
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
 	Permits              []access.Permit `json:"permits"`
+	Description          string          `json:"description"`
 }
 
 // singletonConfiguration describes a singleton resource
 type singletonConfiguration struct {
-	Resource string          `json:"resource"`
-	Permits  []access.Permit `json:"permits"`
+	Resource    string          `json:"resource"`
+	Permits     []access.Permit `json:"permits"`
+	Description string          `json:"description"`
 }
 
 // blobConfiguration describes a blob collection resource
@@ -37,6 +39,7 @@ type blobConfiguration struct {
 	MaxAgeCache          int             `json:"max_age_cache"`
 	Mutable              bool            `json:"mutable"`
 	Permits              []access.Permit `json:"permits"`
+	Description          string          `json:"description"`
 }
 
 // relationConfiguration is a n:m relation from
@@ -46,12 +49,14 @@ type relationConfiguration struct {
 	Right        string          `json:"right"`
 	LeftPermits  []access.Permit `json:"left_permits"`
 	RightPermits []access.Permit `json:"right_permits"`
+	Description  string          `json:"description"`
 }
 
 // shortcutConfiguration is shorcut to a resource
 // for an authenticated request
 type shortcutConfiguration struct {
-	Shortcut string   `json:"shortcut"`
-	Target   string   `json:"target"`
-	Roles    []string `json:"roles"`
+	Shortcut    string   `json:"shortcut"`
+	Target      string   `json:"target"`
+	Roles       []string `json:"roles"`
+	Description string   `json:"description"`
 }
