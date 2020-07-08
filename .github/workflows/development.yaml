@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 name: Build & Test
@@ -20,7 +20,7 @@ jobs:
           POSTGRES_PASSWORD: docker
           POSTGRES_DB: postgres
         ports:
-        - 5432:5432
+          - 5432:5432
         # needed because the postgres container does not provide a healthcheck
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
@@ -59,6 +59,6 @@ jobs:
       - name: go build
         run: |
           go generate ./...
+          for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
           GOOS=linux GOARCH=amd64 go build -o fitness ./services/fitness 
           GOOS=linux GOARCH=amd64 go build -o fleet ./services/fleet
-                  
