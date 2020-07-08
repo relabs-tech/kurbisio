@@ -37,6 +37,7 @@ jobs:
 
       - name: go test
         run: |
+          go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           go generate ./...
           go test ./...
         env:
@@ -58,6 +59,7 @@ jobs:
           go-version: ^1.14.2
       - name: go build
         run: |
+          go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           go generate ./...
           for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
           GOOS=linux GOARCH=amd64 go build -o fitness ./services/fitness 
