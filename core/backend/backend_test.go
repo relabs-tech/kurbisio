@@ -57,6 +57,10 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"notification/normal"
+	  },
+	  {
+		"resource": "with_schema",
+		"properties_schema_id": "http://some_host.com/workout.json"
 	  }
 	],
 	"singletons": [
@@ -95,6 +99,20 @@ var configurationJSON string = `{
 	]
   }
 `
+var schemaRefString = `{ "type" : "string" ,
+                         "$id" : "http://some_host.com/string.json"}`
+
+var schemaWorkoutString = `{ "$id": "http://some_host.com/workout.json",
+                             "type": "object",
+                             "required": [
+								"workouts"
+								],
+								"properties": {
+									"workouts": {
+										"$ref": "http://some_host.com/string.json"
+									}
+								}
+							}`
 
 // TestService holds the configuration for this service
 //
@@ -118,9 +136,11 @@ func TestMain(m *testing.M) {
 
 	router := mux.NewRouter()
 	testService.backend = New(&Builder{
-		Config: configurationJSON,
-		DB:     db,
-		Router: router,
+		Config:          configurationJSON,
+		DB:              db,
+		Router:          router,
+		JSONSchemas:     []string{schemaWorkoutString},
+		JSONSchemasRefs: []string{schemaRefString},
 	})
 	testService.client = client.NewWithRouter(router)
 

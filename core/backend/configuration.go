@@ -21,13 +21,15 @@ type collectionConfiguration struct {
 	SearchableProperties []string        `json:"searchable_properties"`
 	Permits              []access.Permit `json:"permits"`
 	Description          string          `json:"description"`
+	PropertiesSchemaID   string          `json:"properties_schema_id"`
 }
 
 // singletonConfiguration describes a singleton resource
 type singletonConfiguration struct {
-	Resource    string          `json:"resource"`
-	Permits     []access.Permit `json:"permits"`
-	Description string          `json:"description"`
+	Resource           string          `json:"resource"`
+	Permits            []access.Permit `json:"permits"`
+	Description        string          `json:"description"`
+	PropertiesSchemaID string          `json:"properties_schema_id"`
 }
 
 // blobConfiguration describes a blob collection resource

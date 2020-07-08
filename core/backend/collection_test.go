@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"github.com/google/uuid"
 	"net/http"
 	"testing"
 	"time"
@@ -195,4 +196,62 @@ func TestCollectionExternalID(t *testing.T) {
 	}
 	status, err := testService.client.RawPost("/as", a, &a)
 	assert.Equal(t, http.StatusConflict, status, err)
+}
+
+func TestCollectionWithSchemaValidation(t *testing.T) {
+	type withSchema struct {
+		WithSchemaID uuid.UUID         `json:"with_schema_id"`
+		Properties   map[string]string `json:"properties"`
+	}
+
+	w := withSchema{}
+
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"workouts": "foo"}}, &w)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.Properties = map[string]string{"workouts": "bar"}
+	wRes := withSchema{}
+	_, err = testService.client.RawPut("/with_schemas", &w, &wRes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asJSON(w.Properties) != asJSON(wRes.Properties) {
+		t.Fatal("unexpected result:", asJSON(wRes))
+	}
+}
+
+func TestCollectionWithSchemaValidationPostInvalidSchema(t *testing.T) {
+	type withSchema struct {
+		WithSchemaID uuid.UUID         `json:"with_schema_id"`
+		Properties   map[string]string `json:"properties"`
+	}
+
+	w := withSchema{}
+
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"invalid": "foo"}}, &w)
+	if err == nil {
+		t.Fatalf("Expecting validation failure")
+	}
+}
+
+func TestCollectionWithSchemaValidationPutInvalidSchema(t *testing.T) {
+	type withSchema struct {
+		WithSchemaID uuid.UUID         `json:"with_schema_id"`
+		Properties   map[string]string `json:"properties"`
+	}
+
+	w := withSchema{}
+
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"workouts": "foo"}}, &w)
+	if err != nil {
+		t.Fatal()
+	}
+
+	w.Properties = map[string]string{"invalid": "bar"}
+	_, err = testService.client.RawPut("/with_schemas", &w, &withSchema{})
+	if err == nil {
+		t.Fatalf("Expecting validation failure")
+	}
 }

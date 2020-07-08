@@ -14,11 +14,13 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/registry"
+	"github.com/relabs-tech/backends/core/schema"
 )
 
 // Backend is the generic rest backend
@@ -43,6 +45,8 @@ type Backend struct {
 	processJobsAsyncTrigger chan struct{}
 	hasJobsToProcess        bool
 	hasJobsToProcessLock    sync.Mutex
+
+	jsonValidator *schema.Validator
 }
 
 // Builder is a builder helper for the Backend
@@ -61,6 +65,12 @@ type Builder struct {
 	PipelineConcurrency int
 	// Maximum number of attemts for pipeline execution. Default is 3.
 	PipelineMaxAttempts int
+
+	// JSONSchemas is a list of top level JSON Schemas as strings.
+	JSONSchemas []string
+
+	// JSONSchemasRefs is a list of references JSON Schemas as strings.
+	JSONSchemasRefs []string
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -101,6 +111,11 @@ func New(bb *Builder) *Backend {
 		callbacks:            make(map[string]jobHandler),
 		pipelineConcurrency:  pipelineConcurrency,
 		pipelineMaxAttempts:  pipelineMaxAttempts,
+	}
+
+	b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
+	if err != nil {
+		log.Fatalf("Cannot created json Validator %v", err)
 	}
 
 	registry := b.Registry.Accessor("_backend_")
@@ -202,11 +217,12 @@ func (b *Backend) handleResourceRoutes() {
 			b.createCollectionResource(router, *rc.collection, false)
 		}
 		if rc.singleton != nil {
-			// a singleton is a a specialized collection
+			// a singleton is a specialized collection
 			tmp := collectionConfiguration{
-				Resource:    rc.singleton.Resource,
-				Permits:     rc.singleton.Permits,
-				Description: rc.singleton.Description,
+				Resource:           rc.singleton.Resource,
+				Permits:            rc.singleton.Permits,
+				PropertiesSchemaID: rc.singleton.PropertiesSchemaID,
+				Description:        rc.singleton.Description,
 			}
 			b.createCollectionResource(router, tmp, true)
 		}
