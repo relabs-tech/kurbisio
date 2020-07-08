@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -9,6 +10,7 @@ import (
 )
 
 var fileType = flag.String("type", "json", "the type of files")
+var packageName = flag.String("package", "main", "the package name")
 
 func main() {
 	flag.Parse()
@@ -19,7 +21,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	out.Write([]byte("package main \n"))
+	out.Write([]byte(fmt.Sprintf("package %s \n", *packageName)))
 	out.Write([]byte("\nconst (\n"))
 	var jsonFiles []string
 	for _, f := range fs {
