@@ -16,5 +16,6 @@ require (
 	github.com/joeshaw/envdecode v0.0.0-20200121155833-099f1fc765bd
 	github.com/lib/pq v1.3.0
 	github.com/stretchr/testify v1.5.1
+	github.com/xeipuuv/gojsonschema v1.2.0
 	google.golang.org/api v0.25.0
 )
