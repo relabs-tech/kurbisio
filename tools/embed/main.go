@@ -11,6 +11,7 @@ import (
 var fileType = flag.String("type", "json", "the type of files")
 
 func main() {
+	flag.Parse()
 	suffix := "." + *fileType
 	goSuffix := strings.ToUpper(*fileType)
 	fs, _ := ioutil.ReadDir(".")
