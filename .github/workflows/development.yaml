@@ -62,5 +62,6 @@ jobs:
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           go generate ./...
           for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
+          for f in services/fitness/data/conversation_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/conversation_properties.json  ; done
           GOOS=linux GOARCH=amd64 go build -o fitness ./services/fitness 
           GOOS=linux GOARCH=amd64 go build -o fleet ./services/fleet
