@@ -654,10 +654,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			if !ok {
-				http.Error(w, "illegal created_at", http.StatusBadRequest)
-				return
-			}
 			if value != nil {
 				timestamp, _ := value.(string)
 				t, err := time.Parse(time.RFC3339, timestamp)
@@ -937,6 +933,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
+			log.Println("blabla ", bodyJSON["created_at"])
 			timestamp, ok := value.(string)
 			if !ok {
 				tx.Rollback()
