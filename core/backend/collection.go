@@ -620,8 +620,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if rc.PropertiesSchemaID != "" {
 				if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
 					log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
-				}
-				if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
+				} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
 					http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 						string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 					return
@@ -913,8 +912,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
 					log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 						rc.Resource, rc.PropertiesSchemaID)
-				}
-				if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
+				} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
 					http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 						string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 					return
