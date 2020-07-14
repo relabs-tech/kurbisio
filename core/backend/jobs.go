@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -181,6 +182,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 			defer func() {
 				if r := recover(); r != nil {
 					err = fmt.Errorf("recovered from panic: %s", r)
+					debug.PrintStack()
 				}
 			}()
 			switch job.Type {

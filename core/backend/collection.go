@@ -143,6 +143,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	if b.updateSchema {
 		_, err = b.db.Query(createQuery)
 		if err != nil {
+			log.Printf("Error while updating schema when running: %s", createQuery)
 			panic(err)
 		}
 	}
