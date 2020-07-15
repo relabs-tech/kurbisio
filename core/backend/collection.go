@@ -621,6 +621,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
 					log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
 				} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
+					log.Printf("properties '%v' field does not follow schemaID %s, %v",
+						string(propertiesJSON), rc.PropertiesSchemaID, err)
 					http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 						string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 					return
@@ -834,7 +836,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				goto Retry
 			}
 			err = tx.Rollback()
-			http.Error(w, "no such "+this, http.StatusNotFound)
+			http.Error(w, rec.Body.String(), rec.Code)
 			return
 		}
 		if err != nil {
@@ -909,6 +911,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 						rc.Resource, rc.PropertiesSchemaID)
 				} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
+					log.Printf("properties '%v' field does not follow schemaID %s, %v",
+						string(propertiesJSON), rc.PropertiesSchemaID, err)
 					http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 						string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 					return
@@ -933,7 +937,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			log.Println("blabla ", bodyJSON["created_at"])
 			timestamp, ok := value.(string)
 			if !ok {
 				tx.Rollback()
