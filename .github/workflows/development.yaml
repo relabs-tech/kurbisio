@@ -60,6 +60,7 @@ jobs:
       - name: go build
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
+          npm install -g quicktype
           go generate ./...
           for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
           for f in services/fitness/data/conversation_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/conversation_properties.json  ; done
