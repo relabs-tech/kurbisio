@@ -149,22 +149,18 @@ func TestMain(m *testing.M) {
 }
 
 type A struct {
-	AID            uuid.UUID         `json:"a_id"`
-	Properties     map[string]string `json:"properties"`
-	ExternalID     string            `json:"external_id"`
-	StaticProp     string            `json:"static_prop"`
-	SearchableProp string            `json:"searchable_prop"`
-	CreatedAt      time.Time         `json:"created_at"`
+	AID            uuid.UUID `json:"a_id"`
+	ExternalID     string    `json:"external_id"`
+	StaticProp     string    `json:"static_prop"`
+	SearchableProp string    `json:"searchable_prop"`
+	CreatedAt      time.Time `json:"created_at"`
+	Foo            string    `json:"foo"`
 }
 
 func TestCollectionA(t *testing.T) {
 
-	someJSON := map[string]string{
-		"foo": "bar",
-	}
-
 	aNew := A{
-		Properties:     someJSON,
+		Foo:            "bar",
 		ExternalID:     "external",
 		StaticProp:     "static",
 		SearchableProp: "searchable",
@@ -183,7 +179,7 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("no id")
 	}
 
-	if asJSON(a.Properties) != asJSON(aNew.Properties) ||
+	if a.Foo != aNew.Foo ||
 		a.ExternalID != aNew.ExternalID ||
 		a.StaticProp != aNew.StaticProp ||
 		a.SearchableProp != aNew.SearchableProp ||
@@ -196,7 +192,7 @@ func TestCollectionA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asJSON(a.Properties) != asJSON(aGet.Properties) ||
+	if aNew.Foo != aGet.Foo ||
 		a.ExternalID != aGet.ExternalID ||
 		a.StaticProp != aGet.StaticProp ||
 		a.CreatedAt != aGet.CreatedAt {
@@ -210,7 +206,7 @@ func TestCollectionA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asJSON(aPut.Properties) != asJSON(aRes.Properties) ||
+	if aPut.Foo != aRes.Foo ||
 		aPut.ExternalID != aRes.ExternalID ||
 		aPut.StaticProp != aRes.StaticProp ||
 		aPut.CreatedAt != aRes.CreatedAt {
@@ -357,8 +353,8 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	type S struct {
-		SID        uuid.UUID         `json:"s_id"`
-		Properties map[string]string `json:"properties"`
+		SID  uuid.UUID `json:"s_id"`
+		Name string    `json:"name"`
 	}
 
 	empty := Empty{}
@@ -372,9 +368,7 @@ func TestSingletonOS(t *testing.T) {
 
 	// create single s with initial name
 	s := S{
-		Properties: map[string]string{
-			"name": "initial",
-		},
+		Name: "initial",
 	}
 	sResult := S{}
 	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &s, &sResult)
@@ -382,15 +376,13 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if name, ok := sResult.Properties["name"]; !ok || name != "initial" {
+	if sResult.Name != "initial" {
 		t.Fatal("properties not as expected:", asJSON(sResult))
 	}
 
 	// update single s to have updated name, the object's id (sid) remains the same
 	sUpdate := S{
-		Properties: map[string]string{
-			"name": "updated",
-		},
+		Name: "updated",
 	}
 	sUpdateResult := S{}
 
@@ -398,7 +390,7 @@ func TestSingletonOS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name, ok := sUpdateResult.Properties["name"]; !ok || name != "updated" {
+	if sUpdateResult.Name != "updated" {
 		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
 	}
 	if sUpdateResult.SID != sResult.SID {

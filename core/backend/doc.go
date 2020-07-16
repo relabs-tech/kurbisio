@@ -58,39 +58,37 @@ The models look like this:
 	User
 	{
 		"user_id": UUID,
-		"properties":  JSON
 		"identity": STRING
 		"created_at": TIMESTAMP
 		"revision": INTEGER
+		...
 	}
 
 	Profile
 	{
 		"profile_id": UUID
 		"user_id": UUID,
-		"properties":  JSON
 		"created_at": TIMESTAMP
 		"revision": INTEGER
+		...
 	}
 
 	Device
 	{
 		"device_id": UUID,
-		"properties":  JSON
 		"thing": STRING
 		"created_at": TIMESTAMP
 		"revision": INTEGER
+		...
 	}
 
 
 We can now create a user with a simple POST:
-  curl http://localhost:3000/users -d'{"identity":"test@test.com", "properties":{"name":"Jonathan Test"}}'
+  curl http://localhost:3000/users -d'{"identity":"test@test.com", "name":"Jonathan Test"}'
   {
 	"created_at": "2020-03-23T16:01:08.138302Z",
  	"identity": "test@test.com",
- 	"properties": {
-	  "name": "Jonathan Test"
- 	},
+	"name": "Jonathan Test",
  	"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
   }
 
@@ -99,8 +97,7 @@ We can create a device:
   {
  	"created_at": "2020-03-23T16:07:23.57638Z",
 	"device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-	"thing": "12345",
- 	"properties": {}
+	"thing": "12345"
   }
 
 And we can assign this device to the test user:
@@ -113,20 +110,17 @@ Now we can query the devices of this specific user:
  	{
 	  "created_at": "2020-03-23T16:07:23.57638Z",
 	  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-	  "thing": "12345",
-	  "properties": {}
+	  "thing": "12345"
 	 }
   ]
 
 This adds a profile to the user, or updates the user's profile:
-  curl-X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/profile -d'{"properties":{"nickname":"jonathan"}}'
+  curl-X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/profile -d'{"nickname":"jonathan"}'
   {
  	"created_at": "2020-03-23T16:25:15.738091Z",
  	"profile_id": "9a09030c-516f-4dcd-a2fc-dedad219457d",
- 	"properties": {
-	  "nickname": "jonathan"
- 	},
-	 "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
+	"nickname": "jonathan",
+	"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
   }
 
 Shortcut Routes
@@ -160,14 +154,12 @@ You can replace any id in a path segment with the keyword "all". For example, if
 to retrieve all profiles from all users, they would query
    GET /users/all/profiles
 
-Dynamic Properties
+Schema
 
-Every resource has a property "properties", which contains a free-form JSON object. This object is optional during creation and
-then defaults to an empty object.
-
-It is possible to define a JSON schema ID for the "properties" JSON object of a Singleton or a Collection.
-If the property "properties_schema_id" is defined, any attempt to PUT, POST or PATCH to the "properties" of
-this resource will be validated against this schema. If validation fails, error 400 will be returned.
+Every resource by default is essentially a free-form JSON object. This gives a high degree of flexibility, but is prone to errors.
+Therefore you can define a JSON schema ID for any Singleton or Collection resource. If the "properties_schema_id" is
+defined, any attempt to PUT, POST or PATCH  this resource will be validated against this schema.
+If validation fails, error 400 will be returned.
 
 
 Static Properties
@@ -175,7 +167,7 @@ Static Properties
 In the example above, we have extended the user and the device collections with an external index. Likewise it is possible to extend
 resource with list of static string properties, using an array "static_properties". The main purpose of this is to enable easier SQL
 queries against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
-of resource should go into the dynamic JSON object for maximum flexibility.
+of a resource should not be declared static.
 
 Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a query
 parameter in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
@@ -276,8 +268,8 @@ This configuration creates the following routes:
 	DELETE /images/{image_id}
 
 All static properties, searchable properties and external indices of a blob are passed as canonical headers.
-The property "content_type" hence becomes a header "Content-Type". The dynamic JSON object "properties"
-is transferred as the header "Kurbisio-Meta-Data".
+The property "content_type" hence becomes a header "Content-Type". All other properties are transferred as the
+header "Kurbisio-Meta-Data".
 
 Blobs are immutable by default, which means they can be optimally cached. If you need blobs that can be
 updated, for example a profile image, you get declare them mutable like this:
