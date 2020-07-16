@@ -7,7 +7,6 @@ require (
 	cloud.google.com/go/storage v1.8.0 // indirect
 	firebase.google.com/go v3.13.0+incompatible
 	github.com/DrmagicE/gmqtt v0.1.2
-	github.com/atombender/go-jsonschema v0.8.0 // indirect
 	github.com/aws/aws-lambda-go v1.15.0
 	github.com/aws/aws-sdk-go v1.30.7
 	github.com/awslabs/aws-lambda-go-api-proxy v0.6.0

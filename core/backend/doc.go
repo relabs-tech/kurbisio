@@ -34,14 +34,7 @@ Example:
 	]
   }
 
-The example creates one resource "user" with an external unique index "identity" and a static property "name".
-Typically properties are managed dynamically in an untyped JSON object "properties", but it is possible
-to define a list of static properties, mainly to support simpler SQL queries. In case of doubt, do not define
-static properties, but keep everything relevant in the dynamic JSON object.
-
-It is possible to define a JSON schema ID for the "properties" JSON object of a Singleton or
-Collection. If this property is defined, any attempt to PUT, POST or PATCH to the "properties" of
-this resource will be validated against this schema. If validation fails, error 400 will be returned.
+The example creates one resource "user" with an external unique index "identity".
 
 A user has a child resource "user/profile", which is declared as a singleton, i.e. every user can only have one single profile.
 Finally there is a relation from device to user which creates two more virtuals child resources "user/device" and "device/user".
@@ -170,8 +163,12 @@ to retrieve all profiles from all users, they would query
 Dynamic Properties
 
 Every resource has a property "properties", which contains a free-form JSON object. This object is optional during creation and
-then defaults to an empty object. Currently it is not possible to put any constraints onto those objects, but future versions
-of the backend will support JSON schema validation for those objects.
+then defaults to an empty object.
+
+It is possible to define a JSON schema ID for the "properties" JSON object of a Singleton or a Collection.
+If the property "properties_schema_id" is defined, any attempt to PUT, POST or PATCH to the "properties" of
+this resource will be validated against this schema. If validation fails, error 400 will be returned.
+
 
 Static Properties
 
