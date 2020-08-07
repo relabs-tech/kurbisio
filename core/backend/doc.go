@@ -146,7 +146,8 @@ Revisions
 Every item has an integer property "revision", which is incremented every time the item is updated. Revisions can be
 used to make updates safe in systems with multiple concurrent writers. If a PUT or PATCH request contains a
 non-zero revision number which does not match the item's current revision, then the request is discarded and
-an error message (409 - Conflict) is returned.
+an error message (409 - Conflict) is returned. A PUT or PATCH request with a revision of zero, or no revision at all, will
+not be checked for possible conflicts.
 
 Wildcard Queries
 
@@ -154,13 +155,12 @@ You can replace any id in a path segment with the keyword "all". For example, if
 to retrieve all profiles from all users, they would query
    GET /users/all/profiles
 
-Schema
+Schema and Properties
 
 Every resource by default is essentially a free-form JSON object. This gives a high degree of flexibility, but is prone to errors.
 Therefore you can define a JSON schema ID for any Singleton or Collection resource. If the "properties_schema_id" is
 defined, any attempt to PUT, POST or PATCH  this resource will be validated against this schema.
 If validation fails, error 400 will be returned.
-
 
 Static Properties
 
@@ -248,6 +248,8 @@ Relations support separate permits for the left and the right resource, called "
 
 For each relation, the number of related resources for one other resource is currently limited by 1000. In the above
 example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.
+
+Relations support an extra query parameter "?idonly=true", which returns only the list of ids as opposed to full objects.
 
 Blobs
 

@@ -351,6 +351,8 @@ func (b *Backend) HandleEvent(event string, handler func(Event) error) {
 
 // RaiseEvent raises the requested event. Payload can be nil, an object or a []byte.
 // Callbacks registered with HandleEvent() will be called.
+//
+// Multiple events of same kind will be compressed.
 func (b *Backend) RaiseEvent(event string, payload interface{}) error {
 	_, err := b.raiseEventWithResourceInternal(event, "", uuid.UUID{}, payload)
 	return err
@@ -358,6 +360,9 @@ func (b *Backend) RaiseEvent(event string, payload interface{}) error {
 
 // RaiseEventWithResource raises the requested event. Payload can be nil, an object or a []byte.
 // Callbacks registered with HandleEvent() will be called.
+//
+// Multiple events of the same kind to the very same resource (resource + resourceID) will be compressed,
+// i.e. the newest payload will overwrite the previous payload.
 func (b *Backend) RaiseEventWithResource(event string, resource string, resourceID uuid.UUID, payload interface{}) error {
 	_, err := b.raiseEventWithResourceInternal(event, resource, resourceID, payload)
 	return err

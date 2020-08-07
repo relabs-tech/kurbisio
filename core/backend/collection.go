@@ -233,7 +233,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		for key, value := range properties {
-			object[key] = value
+			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
+				object[key] = value
+			}
 		}
 		// commented out for compatibility. This will be enabled eventually.
 		//delete(object, "properties")
@@ -951,7 +953,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 						continue property_loop
 					}
 				}
-				if key == "created_at" || key == "revision" {
+				if key == "created_at" || key == "revision" || key == "state" {
 					continue
 				}
 				extract[key] = value
