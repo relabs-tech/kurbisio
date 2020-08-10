@@ -8,7 +8,7 @@ name: Build & Test
 
 jobs:
   container-job:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, native]
     container: golang
     name: Go test
 
@@ -50,13 +50,10 @@ jobs:
           POSTGRES: "host=postgres port=5432 user=runner password=docker dbname=postgres sslmode=disable"
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: [docker, backend]
     name: Go build
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2-beta
-        with:
-          go-version: ^1.14.2
       - name: go build
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
