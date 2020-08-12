@@ -695,7 +695,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
 					return
 				}
-				createdAt = t.UTC()
+				if !t.IsZero() {
+					createdAt = t.UTC()
+				}
 			}
 		}
 		values[i] = &createdAt
@@ -1002,7 +1004,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
 				return
 			}
-			createdAt = t.UTC()
+			if !t.IsZero() {
+				createdAt = t.UTC()
+			}
 		}
 		values[i] = &createdAt
 		i++

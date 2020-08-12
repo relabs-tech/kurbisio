@@ -492,6 +492,14 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 		t.Fatal("eerror expected")
 	}
 
+	// This should also work with Struct
+	a := CreatedTime{}
+	if _, err := testService.client.Collection("created_time").Create(a, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.CreatedAt.IsZero() {
+		t.Fatal("CreatedAt was not expected to be Zero")
+	}
 }
 
 func TestState(t *testing.T) {
