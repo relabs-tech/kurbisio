@@ -14,7 +14,7 @@ Example:
 	  {
 		"resource": "user",
 		"external_index": "identity"
-		"properties_schema_id": "https://backend.com/schemas/user.json"
+		"schema_id": "https://backend.com/schemas/user.json"
 	  },
 	  {
 		"resource": "device",
@@ -158,7 +158,7 @@ to retrieve all profiles from all users, they would query
 Schema and Properties
 
 Every resource by default is essentially a free-form JSON object. This gives a high degree of flexibility, but is prone to errors.
-Therefore you can define a JSON schema ID for any Singleton or Collection resource. If the "properties_schema_id" is
+Therefore you can define a JSON schema ID for any Singleton or Collection resource. If the "schema_id" is
 defined, any attempt to PUT, POST or PATCH  this resource will be validated against this schema.
 If validation fails, error 400 will be returned.
 

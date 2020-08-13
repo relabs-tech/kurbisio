@@ -36,8 +36,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	if rc.PropertiesSchemaID != "" {
 		if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-			rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+			rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource",
 				rc.Resource, rc.PropertiesSchemaID)
+		}
+	}
+	if rc.SchemaID != "" {
+		if !b.jsonValidator.HasSchema(rc.SchemaID) {
+			rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+				rc.Resource, rc.SchemaID)
 		}
 	}
 
@@ -226,7 +232,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
-	mergeProperties := func(object map[string]interface{}) {
+	mergeProperties := func(object map[string]interface{}, hasFullSchema bool) {
 		rawJSON := object["properties"].(*json.RawMessage)
 		var properties map[string]interface{}
 		err := json.Unmarshal([]byte(*rawJSON), &properties)
@@ -238,8 +244,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				object[key] = value
 			}
 		}
-		// commented out for compatibility. This will be enabled eventually.
-		//delete(object, "properties")
+		// for compatibily. Eventually we will always deleteProperties
+		if hasFullSchema {
+			delete(object, "properties")
+		}
 	}
 
 	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
@@ -358,7 +366,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			mergeProperties(object)
+			mergeProperties(object, rc.SchemaID != "")
 			if len(state) > 0 {
 				object["state"] = &state
 			}
@@ -455,7 +463,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), status)
 			return
 		}
-		mergeProperties(response)
+		mergeProperties(response, rc.SchemaID != "")
 
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
@@ -602,6 +610,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		primaryID, ok := bodyJSON[columns[0]]
 		if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
 			primaryID = uuid.New()
+			// update the bodyJSON so we can validate
+			bodyJSON[columns[0]] = primaryID
 		}
 		values[0] = primaryID
 		var i int
@@ -628,6 +638,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					return
 				}
 			} else {
+				// we use the url parameters, update the bodyJSON so we can validate
+				bodyJSON[k] = param
 				values[i] = param
 			}
 		}
@@ -655,15 +667,29 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		propertiesJSON, _ := json.Marshal(properties)
 		if rc.PropertiesSchemaID != "" {
 			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+				rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
+				rlog.Errorf("properties '%v' field does not follow properties schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err)
-				http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
+				http.Error(w, fmt.Sprintf("properties '%v' field does not follow properties schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 				return
 			}
 		}
+
+		if rc.SchemaID != "" {
+			validateJSON, _ := json.Marshal(bodyJSON)
+			if !b.jsonValidator.HasSchema(rc.SchemaID) {
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
+				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
+					string(validateJSON), rc.SchemaID, err)
+				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
+					string(validateJSON), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
 		values[i] = propertiesJSON
 		i++
 
@@ -689,16 +715,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			if value != nil {
-				timestamp, _ := value.(string)
-				t, err := time.Parse(time.RFC3339, timestamp)
-				if err != nil {
-					http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
-					return
-				}
-				if !t.IsZero() {
-					createdAt = t.UTC()
-				}
+			timestamp, _ := value.(string)
+			t, err := time.Parse(time.RFC3339, timestamp)
+			if err != nil {
+				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if !t.IsZero() {
+				createdAt = t.UTC()
 			}
 		}
 		values[i] = &createdAt
@@ -746,7 +770,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		mergeProperties(response)
+		mergeProperties(response, rc.SchemaID != "")
 
 		if len(state) > 0 {
 			response["state"] = state
@@ -885,7 +909,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, this+" revision does not match", http.StatusConflict)
 			return
 		}
-		mergeProperties(object)
+		mergeProperties(object, rc.SchemaID != "")
 
 		primaryID = current[0].(*uuid.UUID).String()
 
@@ -927,7 +951,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			idAsString := values[i].(*uuid.UUID).String()
 
 			// validate that the paramaters  match the object
-			values[i] = current[i]
 			if params[k] != "all" && params[k] != idAsString {
 				tx.Rollback()
 				http.Error(w, "no such "+this, http.StatusNotFound)
@@ -937,12 +960,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			// validate that the body json matches the object
 			value, ok := bodyJSON[k]
 			// zero uuid counts as no uuid
-			ok = ok && value.(string) != "00000000-0000-0000-0000-000000000000"
-			if ok && value.(string) != idAsString {
+			if ok && value != "00000000-0000-0000-0000-000000000000" && value != idAsString {
 				tx.Rollback()
 				http.Error(w, "illegal "+k, http.StatusConflict)
 				return
 			}
+			// update the bodyJSON so we can validate
+			bodyJSON[k] = values[i]
 		}
 
 		// build the update set
@@ -964,19 +988,33 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			properties = extract
 		}
+
 		propertiesJSON, _ := json.Marshal(properties)
 		if rc.PropertiesSchemaID != "" {
 			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
-					rc.Resource, rc.PropertiesSchemaID)
+				rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
+				rlog.Errorf("properties '%v' field does not follow properties schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err)
-				http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
+				http.Error(w, fmt.Sprintf("properties '%v' field does not follow properties schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
 				return
 			}
 		}
+
+		if rc.SchemaID != "" {
+			validateJSON, _ := json.Marshal(bodyJSON)
+			if !b.jsonValidator.HasSchema(rc.SchemaID) {
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
+				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
+					string(validateJSON), rc.SchemaID, err)
+				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
+					string(validateJSON), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
 		values[i] = propertiesJSON
 		i++
 
@@ -993,15 +1031,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// next value is created_at
 		createdAt := time.Now().UTC()
 		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, ok := value.(string)
-			if !ok {
-				tx.Rollback()
-				http.Error(w, "illegal created_at", http.StatusBadRequest)
-				return
-			}
+			timestamp, _ := value.(string)
 			t, err := time.Parse(time.RFC3339, timestamp)
 			if err != nil {
-				tx.Rollback()
 				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1044,7 +1076,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		mergeProperties(response)
+		mergeProperties(response, rc.SchemaID != "")
 
 		if len(state) > 0 {
 			response["state"] = state

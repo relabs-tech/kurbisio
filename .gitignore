@@ -23,9 +23,7 @@
 #configuration data
 .config/
 
-
 #generate go files
 generated_*.go
 
-#generate dart files
-generated_*.dart
+
