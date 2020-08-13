@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
@@ -535,7 +536,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(tx, resource, "", core.OperationCreate, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -644,7 +645,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(tx, resource, "", core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -725,7 +726,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			notification[columns[i]] = params[columns[i]]
 		}
 		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		err = b.commitWithNotification(tx, resource, "", core.OperationDelete, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationDelete, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -742,38 +743,37 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	// CREATE
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		createWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPost)
 
 	// READ
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
-
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		getItemWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// CLEAR
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// UPDATE / CREATE with id
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		if rc.Mutable {
 			updateWithAuth(w, r)
 		} else {

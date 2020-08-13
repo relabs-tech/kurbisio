@@ -3,7 +3,6 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -18,24 +17,26 @@ import (
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration, singleton bool) {
 	schema := b.db.Schema
 	resource := rc.Resource
 
+	rlog := logger.FromContext(nil)
 	if singleton {
-		log.Println("create singleton collection:", resource)
+		rlog.Infoln("create singleton collection:", resource)
 	} else {
-		log.Println("create collection:", resource)
+		rlog.Infoln("create collection:", resource)
 	}
 	if rc.Description != "" {
-		log.Println("  description:", rc.Description)
+		rlog.Infoln("  description:", rc.Description)
 	}
 
 	if rc.PropertiesSchemaID != "" {
 		if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-			log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+			rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 				rc.Resource, rc.PropertiesSchemaID)
 		}
 	}
@@ -143,7 +144,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	if b.updateSchema {
 		_, err = b.db.Query(createQuery)
 		if err != nil {
-			log.Printf("Error while updating schema when running: %s", createQuery)
+			rlog.Errorf("Error while updating schema when running: %s", createQuery)
 			panic(err)
 		}
 	}
@@ -158,10 +159,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	if singleton {
-		log.Println("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
+		rlog.Infoln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
-	log.Println("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
-	log.Println("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+	rlog.Infoln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
+	rlog.Infoln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
@@ -543,7 +544,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			notification[columns[i]] = params[columns[i]]
 		}
 		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		err = b.commitWithNotification(tx, resource, state, core.OperationDelete, primaryID, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -654,9 +655,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		propertiesJSON, _ := json.Marshal(properties)
 		if rc.PropertiesSchemaID != "" {
 			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				log.Printf("properties '%v' field does not follow schemaID %s, %v",
+				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err)
 				http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
@@ -752,7 +753,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(tx, resource, state, core.OperationCreate, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -966,10 +967,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		propertiesJSON, _ := json.Marshal(properties)
 		if rc.PropertiesSchemaID != "" {
 			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				log.Printf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 					rc.Resource, rc.PropertiesSchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				log.Printf("properties '%v' field does not follow schemaID %s, %v",
+				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err)
 				http.Error(w, fmt.Sprintf("properties '%v' field does not follow schemaID %s, %v",
 					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
@@ -1050,7 +1051,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(tx, resource, state, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1069,43 +1070,57 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// CREATE
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		createWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPost)
 
 	// UPDATE/CREATE with id
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// UPDATE/CREATE with fully qualified path
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// READ
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		itemWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// CLEAR
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
@@ -1115,20 +1130,26 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// READ
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		itemWithAuth(w, r)
 
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// UPDATE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		ctx, rlog := logger.ContextWithLogger(r.Context())
+		r = r.WithContext(ctx)
+		rlog.Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 // BackdoorMiddlewareBuilder is a helper builder for JwtMiddelware
@@ -46,8 +47,14 @@ func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := AuthorizationFromContext(r.Context())
-			identity := IdentityFromContext(r.Context())
+			ctx := r.Context()
+			rlog := logger.FromContext(ctx)
+			auth := AuthorizationFromContext(ctx)
+			identity := IdentityFromContext(ctx)
+
+			if rlog != nil {
+				rlog.Debug("in new backdoormiddleware")
+			}
 			if auth != nil || len(identity) > 0 { // already authorized or at least authenticated?
 				h.ServeHTTP(w, r)
 				return
@@ -93,9 +100,9 @@ func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 				}
 			}
 
-			ctx := r.Context()
 			if len(identity) > 0 {
 				ctx = ContextWithIdentity(ctx, identity)
+				ctx, _ = logger.ContextWithLoggerIdentity(ctx, identity)
 			}
 			if auth != nil {
 				ctx = ContextWithAuthorization(ctx, auth)

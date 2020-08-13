@@ -62,13 +62,14 @@ func (c Client) WithContext(ctx context.Context) Client {
 }
 
 func (c Client) context() context.Context {
-	if c.ctx != nil {
-		return c.ctx
+	ctx := c.ctx
+	if c.ctx == nil {
+		ctx = context.Background()
 	}
 	if c.auth != nil {
-		return access.ContextWithAuthorization(context.Background(), c.auth)
+		ctx = access.ContextWithAuthorization(ctx, c.auth)
 	}
-	return context.Background()
+	return ctx
 }
 
 // Collection represents a collection of particular resource

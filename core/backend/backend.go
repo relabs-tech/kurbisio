@@ -4,7 +4,6 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/backends/core/logger"
 	"github.com/relabs-tech/backends/core/registry"
 	"github.com/relabs-tech/backends/core/schema"
 )
@@ -113,9 +113,11 @@ func New(bb *Builder) *Backend {
 		pipelineMaxAttempts:  pipelineMaxAttempts,
 	}
 
+	logger.InitLogger()
+
 	b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
 	if err != nil {
-		log.Fatalf("Cannot created json Validator %v", err)
+		logger.Default().Fatalf("Cannot created json Validator %v", err)
 	}
 
 	registry := b.Registry.Accessor("_backend_")
@@ -124,11 +126,12 @@ func New(bb *Builder) *Backend {
 	newVersion := fmt.Sprintf("%x", sha1.Sum([]byte(bb.Config)))
 	b.updateSchema = newVersion != currentVersion
 	if b.updateSchema {
-		log.Println("new configuration - will update database schema")
+		logger.Default().Infoln("new configuration - will update database schema")
 	} else {
-		log.Println("use previous schema version")
+		logger.Default().Infoln("use previous schema version")
 	}
 
+	logger.AddRequestID(b.router)
 	b.handleCORS()
 	access.HandleAuthorizationRoute(b.router)
 	b.handleResourceRoutes()
@@ -184,7 +187,7 @@ func (r byDepth) Less(i, j int) bool {
 // handleResourceRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleResourceRoutes() {
 
-	log.Println("backend: handle resource routes")
+	logger.FromContext(nil).Infoln("backend: handle resource routes")
 	router := b.router
 
 	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of
@@ -351,18 +354,21 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 		matchPrefix += "/" + core.Plural(s) + "/" + s + "_id"
 	}
 
-	log.Println("create shortcut from", shortcut, "to", targetDoc)
-	log.Println("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
+	rlog := logger.FromContext(nil)
+	rlog.Infoln("create shortcut from", shortcut, "to", targetDoc)
+	rlog.Infoln("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
 
 	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called shortcut route for", r.URL, r.Method)
+		rlog := logger.FromContext(r.Context())
+		rlog.Infoln("called shortcut route for", r.URL, r.Method)
+
 		tail := strings.TrimPrefix(r.URL.Path, prefix)
 
 		var match mux.RouteMatch
 		r.URL.Path = matchPrefix + tail
-		log.Println("try to match route", r.URL.Path)
+		rlog.Infoln("try to match route", r.URL.Path)
 		if !router.Match(r, &match) {
-			log.Println("Found no match")
+			rlog.Errorln("Found no match")
 			http.NotFound(w, r)
 			return
 		}
@@ -387,7 +393,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 			newPrefix += "/" + core.Plural(s) + "/" + id
 		}
 		r.URL.Path = newPrefix + tail
-		log.Println("redirect shortcut route to:", r.URL)
+		rlog.Info("redirect shortcut route to ", r.URL)
 		router.ServeHTTP(w, r)
 	}
 	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)

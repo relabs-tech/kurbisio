@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/backends/core/logger"
 	"github.com/relabs-tech/backends/core/registry"
 )
 
@@ -78,15 +79,20 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		}
 	}
 
+	rlog := logger.Default()
+
 	jwksLookup := func(token *jwt.Token) (interface{}, error) {
 		kid := token.Header["kid"].(string)
-		log.Println("kid:", kid)
+		if rlog == nil {
+			rlog = logger.Default()
+		}
+		rlog.Infoln("kid:", kid)
 		key, ok := wellKnownKeys[kid]
 		if ok {
-			log.Println("jwksLookup: got key for kid", kid)
+			rlog.Infoln("jwksLookup: got key for kid", kid)
 			return key, nil
 		}
-		log.Printf("have %d well known keys, but not this one", len(wellKnownKeys))
+		rlog.Warningf("have %d well known keys, but not this one", len(wellKnownKeys))
 		return nil, errors.New("cannot verify token")
 	}
 
@@ -97,10 +103,13 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			auth := AuthorizationFromContext(r.Context())
 			identity := IdentityFromContext(r.Context())
+
 			if auth != nil || len(identity) > 0 { // already authorized or at least authenticated?
 				h.ServeHTTP(w, r)
 				return
 			}
+
+			rlog = logger.FromContext(r.Context())
 
 			tokenString := ""
 			bearer := r.Header.Get("Authorization")
@@ -143,6 +152,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 			// now that we have authenticated the requester, we store their identity in the context
 			ctx := ContextWithIdentity(r.Context(), identity)
+			ctx, rlog = logger.ContextWithLoggerIdentity(ctx, identity)
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by identity, so the frontend can enforce a new database lookup with a new token.

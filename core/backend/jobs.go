@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 // Notification is a database notification. Receive them
@@ -30,6 +31,7 @@ type Notification struct {
 	Payload      []byte
 	CreatedAt    time.Time
 	AttemptsLeft int
+	Context      context.Context
 }
 
 // Event is a higher level event. Receive them with HandleEvent(), raise them with RaiseEvent()
@@ -41,6 +43,7 @@ type Event struct {
 	Payload      []byte
 	CreatedAt    time.Time
 	AttemptsLeft int
+	Context      context.Context
 }
 
 // job can be a database notification or a highl-level event
@@ -54,16 +57,19 @@ type job struct {
 	Payload      []byte
 	CreatedAt    time.Time
 	AttemptsLeft int
+	ContextData  []byte
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
 func (j *job) notification() Notification {
-	return Notification{j.Serial, j.Resource, core.Operation(j.Name), j.State, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft}
+	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
+	return Notification{j.Serial, j.Resource, core.Operation(j.Name), j.State, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
 }
 
 // event returns the job as high-level event. Only makes sense if the job type is "event"
 func (j *job) event() Event {
-	return Event{j.Serial, j.Name, j.Resource, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft}
+	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
+	return Event{j.Serial, j.Name, j.Resource, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
 }
 
 type txJob struct {
@@ -83,6 +89,7 @@ resource_id uuid NOT NULL DEFAULT uuid_nil(),
 payload JSON NOT NULL DEFAULT'{}'::jsonb,
 created_at TIMESTAMP NOT NULL DEFAULT now(), 
 attempts_left INTEGER NOT NULL,
+context JSON NOT NULL DEFAULT'{}'::jsonb,
 PRIMARY KEY(serial),
 CONSTRAINT job_compression UNIQUE(type,name,resource,state,resource_id)
 );`)
@@ -90,6 +97,12 @@ CONSTRAINT job_compression UNIQUE(type,name,resource,state,resource_id)
 		if err != nil {
 			panic(err)
 		}
+	}
+
+	_, err := b.db.Exec(`ALTER table ` + b.db.Schema + `."_job_"
+ADD COLUMN IF NOT EXISTS context JSON NOT NULL DEFAULT'{}'::jsonb;`)
+	if err != nil {
+		panic(err)
 	}
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
@@ -102,16 +115,16 @@ SELECT serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING serial, type, name, resource, state, resource_id, payload, created_at, attempts_left;
+RETURNING serial, type, name, resource, state, resource_id, payload, created_at, attempts_left, context;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
 
-	log.Println("job processing pipelines")
-	log.Println("  handle route: /kurbisio/events PUT")
+	logger.Default().Infoln("job processing pipelines")
+	logger.Default().Infoln("  handle route: /kurbisio/events PUT")
 
 	router.HandleFunc("/kurbisio/events/{event}", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.Default().Infoln("called route for", r.URL, r.Method)
 		b.eventsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 }
@@ -119,6 +132,8 @@ WHERE serial = $1 RETURNING serial;`
 func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	event := params["event"]
+	rlog := logger.FromContext(r.Context())
+	rlog.Infoln("in events with auth")
 	if b.authorizationEnabled {
 		auth := access.AuthorizationFromContext(r.Context())
 		if !auth.HasRole("admin") {
@@ -161,13 +176,13 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	if len(body) > 0 { // we do not want to pass an empty []byte
 		payload = body
 	}
-	status, err := b.raiseEventWithResourceInternal(event, resource, resourceID, payload)
+	status, err := b.raiseEventWithResourceInternal(r.Context(), event, resource, resourceID, payload)
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
 	}
 	w.WriteHeader(status)
-	log.Printf("raised event %s on resource \"%s\"", event, resource)
+	rlog.Infof("raised event %s on resource \"%s\"", event, resource)
 }
 
 func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
@@ -176,6 +191,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 	for job := range jobs {
 		tx := job.tx
 		var key string
+		rlog := logger.Default()
 
 		// call the registered handler in a panic/recover envelope
 		err := func() (err error) {
@@ -188,6 +204,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 			switch job.Type {
 			case "notification":
 				notification := job.notification()
+				rlog = logger.FromContext(notification.Context)
 				key = notificationJobKey(notification.Resource, notification.State, notification.Operation)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(notification)
@@ -196,6 +213,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 				}
 			case "event":
 				event := job.event()
+				rlog = logger.FromContext(event.Context)
 				key = eventJobKey(event.Name)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.event(event)
@@ -209,7 +227,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 		}()
 
 		if err != nil {
-			log.Println("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
+			rlog.Errorln("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
 			tx.Commit()
 		} else {
 			// job handled sucessfully, delete form queue
@@ -219,9 +237,9 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 				err = tx.Commit()
 			}
 			if err != nil {
-				log.Println("error committing "+key+"#"+strconv.Itoa(serial)+":", err.Error())
+				rlog.Errorln("error committing "+key+"#"+strconv.Itoa(serial)+":", err.Error())
 			} else {
-				log.Println(" successfully handled " + key + "#" + strconv.Itoa(serial))
+				rlog.Infoln(" successfully handled " + key + "#" + strconv.Itoa(serial))
 			}
 		}
 	}
@@ -276,7 +294,8 @@ func (b *Backend) ProcessJobsAsync() {
 // has maxed out and there are more jobs to process, otherwise it returns false.
 // It you pass -1, it will process all pending jobs. The behaviour for 0 is undefined.
 func (b *Backend) ProcessJobsSync(max int) bool {
-	log.Println("process jobs")
+	rlog := logger.FromContext(nil)
+	rlog.Infoln("process jobs")
 	jobCount := 0
 
 process:
@@ -294,7 +313,7 @@ process:
 	for {
 		tx, err := b.db.BeginTx(context.Background(), nil)
 		if err != nil {
-			log.Println("failed to begin transaction:", err.Error())
+			rlog.Errorln("failed to begin transaction:", err.Error())
 			break
 		}
 
@@ -309,11 +328,12 @@ process:
 			&j.Payload,
 			&j.CreatedAt,
 			&j.AttemptsLeft,
+			&j.ContextData,
 		)
 
 		if err != nil {
 			if err != sql.ErrNoRows {
-				log.Println("failed to retrieve job:", err.Error())
+				rlog.Errorln("failed to retrieve job:", err.Error())
 			}
 			tx.Rollback()
 			break
@@ -331,7 +351,7 @@ process:
 		goto process // goto considered useful
 	}
 
-	log.Printf("process jobs done, did %d jobs (maxedOut == %t)", jobCount, maxedOut)
+	rlog.Infof("process jobs done, did %d jobs (maxedOut == %t)", jobCount, maxedOut)
 	return maxedOut
 }
 
@@ -353,8 +373,8 @@ func (b *Backend) HandleEvent(event string, handler func(Event) error) {
 // Callbacks registered with HandleEvent() will be called.
 //
 // Multiple events of same kind will be compressed.
-func (b *Backend) RaiseEvent(event string, payload interface{}) error {
-	_, err := b.raiseEventWithResourceInternal(event, "", uuid.UUID{}, payload)
+func (b *Backend) RaiseEvent(ctx context.Context, event string, payload interface{}) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, event, "", uuid.UUID{}, payload)
 	return err
 }
 
@@ -363,21 +383,22 @@ func (b *Backend) RaiseEvent(event string, payload interface{}) error {
 //
 // Multiple events of the same kind to the very same resource (resource + resourceID) will be compressed,
 // i.e. the newest payload will overwrite the previous payload.
-func (b *Backend) RaiseEventWithResource(event string, resource string, resourceID uuid.UUID, payload interface{}) error {
-	_, err := b.raiseEventWithResourceInternal(event, resource, resourceID, payload)
+func (b *Backend) RaiseEventWithResource(ctx context.Context, event string, resource string, resourceID uuid.UUID, payload interface{}) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, event, resource, resourceID, payload)
 	return err
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(event string, resource string, resourceID uuid.UUID, payload interface{}) (int, error) {
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event string, resource string, resourceID uuid.UUID, payload interface{}) (int, error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; !ok {
 		return http.StatusConflict, fmt.Errorf("no callback handler installed for %s", key)
 	}
 	var (
-		ok   bool
-		err  error
-		data []byte
+		ok          bool
+		err         error
+		data        []byte
+		contextData []byte
 	)
 	if payload != nil {
 		data, ok = payload.([]byte)
@@ -390,17 +411,23 @@ func (b *Backend) raiseEventWithResourceInternal(event string, resource string, 
 	} else {
 		data = []byte("{}")
 	}
+
+	if ctx != nil {
+		contextData = logger.SerializeLoggerContext(ctx)
+	}
+
 	var serial int
 	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(type,name,resource,resource_id,payload,created_at,attempts_left)"+
-		"VALUES('event',$1,$2,$3,$4,$5,$6) ON CONFLICT ON CONSTRAINT job_compression "+
-		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6 RETURNING serial;",
+		"(type,name,resource,resource_id,payload,created_at,attempts_left,context)"+
+		"VALUES('event',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
+		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6,context=$7 RETURNING serial;",
 		event,
 		resource,
 		resourceID,
 		data,
 		time.Now().UTC(),
 		b.pipelineMaxAttempts,
+		contextData,
 	).Scan(&serial)
 
 	if err != nil {
@@ -420,9 +447,9 @@ func (b *Backend) HandleResource(resource string, state string, handler func(Not
 	for _, operation := range operations {
 		key := notificationJobKey(resource, state, operation)
 		if _, ok := b.callbacks[key]; ok {
-			log.Fatalf("callback handler for %s already installed", key)
+			logger.FromContext(nil).Fatalf("callback handler for %s already installed", key)
 		}
-		log.Printf("install callback handler for %s", key)
+		logger.FromContext(nil).Infof("install callback handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
 	}
 }
@@ -443,7 +470,7 @@ func timeoutJobKey(event string) string {
 	return "timeout: " + event
 }
 
-func (b *Backend) commitWithNotification(tx *sql.Tx, resource string, state string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
+func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, state string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
 	request := notificationJobKey(resource, state, operation)
 
 	// only create a notification if somebody requested it
@@ -455,11 +482,13 @@ func (b *Backend) commitWithNotification(tx *sql.Tx, resource string, state stri
 		payload = []byte("{}")
 	}
 
+	contextData := logger.SerializeLoggerContext(ctx)
+
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(type, resource,name,state,resource_id,payload,created_at,attempts_left)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
-		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7 RETURNING serial;",
+		"(type, resource,name,state,resource_id,payload,created_at,attempts_left,context)"+
+		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT ON CONSTRAINT job_compression "+
+		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7,context=$8 RETURNING serial;",
 		resource,
 		operation,
 		state,
@@ -467,6 +496,7 @@ func (b *Backend) commitWithNotification(tx *sql.Tx, resource string, state stri
 		payload,
 		time.Now().UTC(),
 		b.pipelineMaxAttempts,
+		contextData,
 	).Scan(&serial)
 
 	if err != nil {
