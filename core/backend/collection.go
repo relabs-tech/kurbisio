@@ -1070,57 +1070,43 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// CREATE
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		createWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPost)
 
 	// UPDATE/CREATE with id
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// UPDATE/CREATE with fully qualified path
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// READ
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		itemWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ ALL
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
 	// CLEAR
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
@@ -1130,26 +1116,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// READ
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		itemWithAuth(w, r)
 
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// UPDATE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		updateWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
-		ctx, rlog := logger.ContextWithLogger(r.Context())
-		r = r.WithContext(ctx)
-		rlog.Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 

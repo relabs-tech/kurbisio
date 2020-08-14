@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"reflect"
 	"sort"
 	"strconv"
@@ -17,6 +16,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 type stringlist []string
@@ -47,9 +47,10 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	createColumns := []string{"serial SERIAL"}
 
 	resource := rc.Left + ":" + rc.Right
-	log.Println("create relation:", resource)
+	rlog := logger.Default()
+	rlog.Infoln("create relation:", resource)
 	if rc.Description != "" {
-		log.Println("  description:", rc.Description)
+		rlog.Infoln("  description:", rc.Description)
 	}
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 
@@ -167,14 +168,14 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle routes:", leftListRoute, "GET")
-	log.Println("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
-	log.Println("  handle routes:", rightListRoute, "GET")
-	log.Println("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
+	rlog.Infoln("  handle routes:", leftListRoute, "GET")
+	rlog.Infoln("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
+	rlog.Infoln("  handle routes:", rightListRoute, "GET")
+	rlog.Infoln("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
 
 	// READ ALL LEFT
 	router.HandleFunc(leftListRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -238,7 +239,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// READ ALL RIGHT
 	router.HandleFunc(rightListRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -303,7 +304,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// READ LEFT
 	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -328,7 +329,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// READ RIGHT
 	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -381,7 +382,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// CREATE LEFT
 	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -396,7 +397,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// CREATE RIGHT
 	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -435,7 +436,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// DELETE LEFT
 	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
@@ -450,7 +451,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// DELETE RIGHT
 	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
 		params := mux.Vars(r)
 		if b.authorizationEnabled {

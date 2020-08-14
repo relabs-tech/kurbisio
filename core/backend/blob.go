@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -24,9 +23,10 @@ import (
 func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
-	log.Println("create blob:", resource)
+	rlog := logger.Default()
+	rlog.Infoln("create blob:", resource)
 	if rc.Description != "" {
-		log.Println("  description:", rc.Description)
+		rlog.Infoln("  description:", rc.Description)
 	}
 
 	resources := strings.Split(rc.Resource, "/")
@@ -128,8 +128,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	log.Println("  handle blob routes:", listRoute, "GET,POST,DELETE")
-	log.Println("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
+	rlog.Infoln("  handle blob routes:", listRoute, "GET,POST,DELETE")
+	rlog.Infoln("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)

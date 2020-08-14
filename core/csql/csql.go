@@ -2,9 +2,9 @@ package csql
 
 import (
 	"database/sql"
-	"log"
 
 	_ "github.com/lib/pq" // load database driver for postgres
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 // DB encapsulates a standard sql.DB with a schema
@@ -22,7 +22,7 @@ var ErrNoRows = sql.ErrNoRows
 // The schema gets created if it does not exist yet.
 // The returned database also has the uuid-ossp extension loaded.
 func OpenWithSchema(dataSourceName, schema string) *DB {
-	log.Println("connecting to postgres database: ", dataSourceName)
+	logger.Default().Infoln("connecting to postgres database: ", dataSourceName)
 	db, err := sql.Open("postgres", dataSourceName)
 	if err != nil {
 		panic(err)
@@ -34,7 +34,7 @@ func OpenWithSchema(dataSourceName, schema string) *DB {
 	if len(schema) == 0 {
 		schema = "public"
 	} else {
-		log.Println("selected database schema:", schema)
+		logger.Default().Infoln("selected database schema:", schema)
 		_, err = db.Exec(`CREATE extension IF NOT EXISTS "uuid-ossp";
 CREATE schema IF NOT EXISTS ` + schema + `;
 `)
@@ -54,6 +54,6 @@ func (db *DB) ClearSchema() {
 	_, err := db.Exec(`DROP SCHEMA ` + db.Schema + ` CASCADE;
 	CREATE schema IF NOT EXISTS ` + db.Schema + `;`)
 	if err != nil {
-		log.Println("clear schema error:", db.Schema, err.Error())
+		logger.Default().Infoln("clear schema error:", db.Schema, err.Error())
 	}
 }

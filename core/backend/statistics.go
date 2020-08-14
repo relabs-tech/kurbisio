@@ -3,12 +3,12 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 // resourceStatistics represents information about a resource
@@ -25,10 +25,10 @@ type statisticsDetails struct {
 }
 
 func (b *Backend) handleStatistics(router *mux.Router) {
-	log.Println("statistics")
-	log.Println("  handle statistics route: /kuribisio/statistics GET")
+	logger.Default().Infoln("statistics")
+	logger.Default().Infoln("  handle statistics route: /kuribisio/statistics GET")
 	router.HandleFunc("/kurbisio/statistics", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		b.statisticsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 }
