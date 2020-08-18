@@ -225,6 +225,7 @@ func (b *Backend) handleResourceRoutes() {
 				Resource:           rc.singleton.Resource,
 				Permits:            rc.singleton.Permits,
 				PropertiesSchemaID: rc.singleton.PropertiesSchemaID,
+				SchemaID:           rc.singleton.SchemaID,
 				Description:        rc.singleton.Description,
 			}
 			b.createCollectionResource(router, tmp, true)

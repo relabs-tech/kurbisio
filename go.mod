@@ -20,6 +20,7 @@ require (
 	github.com/onsi/ginkgo v0.0.0-20180119174237-747514b53ddd // indirect
 	github.com/onsi/gomega v1.3.0 // indirect
 	github.com/sirupsen/logrus v1.6.0
+	github.com/snabb/isoweek v1.0.0
 	github.com/stretchr/testify v1.6.1
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonschema v1.2.0
