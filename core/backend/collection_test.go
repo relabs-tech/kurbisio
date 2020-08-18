@@ -1,10 +1,11 @@
 package backend
 
 import (
-	"github.com/google/uuid"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -200,37 +201,37 @@ func TestCollectionExternalID(t *testing.T) {
 
 func TestCollectionWithSchemaValidation(t *testing.T) {
 	type withSchema struct {
-		WithSchemaID uuid.UUID         `json:"with_schema_id"`
-		Properties   map[string]string `json:"properties"`
+		WithSchemaID uuid.UUID `json:"with_schema_id"`
+		Workouts     string    `json:"workouts"`
 	}
 
 	w := withSchema{}
 
-	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"workouts": "foo"}}, &w)
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Workouts: "foo"}, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	w.Properties = map[string]string{"workouts": "bar"}
+	w.Workouts = "bar"
 	wRes := withSchema{}
 	_, err = testService.client.RawPut("/with_schemas", &w, &wRes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asJSON(w.Properties) != asJSON(wRes.Properties) {
+	if w.Workouts != wRes.Workouts {
 		t.Fatal("unexpected result:", asJSON(wRes))
 	}
 }
 
 func TestCollectionWithSchemaValidationPostInvalidSchema(t *testing.T) {
 	type withSchema struct {
-		WithSchemaID uuid.UUID         `json:"with_schema_id"`
-		Properties   map[string]string `json:"properties"`
+		WithSchemaID uuid.UUID `json:"with_schema_id"`
+		Invalid      string    `json:"invalid"`
 	}
 
 	w := withSchema{}
 
-	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"invalid": "foo"}}, &w)
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Invalid: "foo"}, &w)
 	if err == nil {
 		t.Fatalf("Expecting validation failure")
 	}
@@ -238,18 +239,20 @@ func TestCollectionWithSchemaValidationPostInvalidSchema(t *testing.T) {
 
 func TestCollectionWithSchemaValidationPutInvalidSchema(t *testing.T) {
 	type withSchema struct {
-		WithSchemaID uuid.UUID         `json:"with_schema_id"`
-		Properties   map[string]string `json:"properties"`
+		WithSchemaID uuid.UUID `json:"with_schema_id"`
+		Workouts     string    `json:"workouts,omitempty"`
+		Invalid      string    `json:"invalid,omitempty"`
 	}
 
 	w := withSchema{}
 
-	_, err := testService.client.RawPost("/with_schemas", &withSchema{Properties: map[string]string{"workouts": "foo"}}, &w)
+	_, err := testService.client.RawPost("/with_schemas", &withSchema{Workouts: "foo"}, &w)
 	if err != nil {
 		t.Fatal()
 	}
 
-	w.Properties = map[string]string{"invalid": "bar"}
+	w.Workouts = ""
+	w.Invalid = "bar"
 	_, err = testService.client.RawPut("/with_schemas", &w, &withSchema{})
 	if err == nil {
 		t.Fatalf("Expecting validation failure")

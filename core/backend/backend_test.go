@@ -60,7 +60,7 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "with_schema",
-		"properties_schema_id": "http://some_host.com/workout.json"
+		"schema_id": "http://some_host.com/workout.json"
 	  }
 	],
 	"singletons": [
