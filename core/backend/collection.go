@@ -34,12 +34,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		rlog.Infoln("  description:", rc.Description)
 	}
 
-	if rc.PropertiesSchemaID != "" {
-		if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-			rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource",
-				rc.Resource, rc.PropertiesSchemaID)
-		}
-	}
 	if rc.SchemaID != "" {
 		if !b.jsonValidator.HasSchema(rc.SchemaID) {
 			rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
@@ -232,8 +226,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
-	mergeProperties := func(object map[string]interface{}, hasFullSchema bool) {
+	mergeProperties := func(object map[string]interface{}) {
 		rawJSON := object["properties"].(*json.RawMessage)
+		delete(object, "properties")
 		var properties map[string]interface{}
 		err := json.Unmarshal([]byte(*rawJSON), &properties)
 		if err != nil {
@@ -243,10 +238,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
 				object[key] = value
 			}
-		}
-		// for compatibily. Eventually we will always deleteProperties
-		if hasFullSchema {
-			delete(object, "properties")
 		}
 	}
 
@@ -366,7 +357,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			mergeProperties(object, rc.SchemaID != "")
+			mergeProperties(object)
 			if len(state) > 0 {
 				object["state"] = &state
 			}
@@ -463,7 +454,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), status)
 			return
 		}
-		mergeProperties(response, rc.SchemaID != "")
+		mergeProperties(response)
 
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
@@ -644,43 +635,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// the dynamic properties
-		properties, ok := bodyJSON[columns[i]]
-		if !ok {
-			extract := map[string]interface{}{}
-		property_loop:
-			for key, value := range bodyJSON {
-				for _, c := range columns {
-					if key == c {
-						continue property_loop
-					}
-				}
-				if key == "created_at" || key == "revision" {
-					continue
-				}
-				extract[key] = value
-			}
-
-			properties = extract
-		}
-
-		propertiesJSON, _ := json.Marshal(properties)
-		if rc.PropertiesSchemaID != "" {
-			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				rlog.Errorf("properties '%v' field does not follow properties schemaID %s, %v",
-					string(propertiesJSON), rc.PropertiesSchemaID, err)
-				http.Error(w, fmt.Sprintf("properties '%v' field does not follow properties schemaID %s, %v",
-					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
-				return
-			}
-		}
-
 		if rc.SchemaID != "" {
 			validateJSON, _ := json.Marshal(bodyJSON)
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
 				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
 					string(validateJSON), rc.SchemaID, err)
@@ -690,6 +648,22 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		// extract the dynamic properties
+		extract := map[string]interface{}{}
+	property_loop:
+		for key, value := range bodyJSON {
+			for i := 0; i < propertiesIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			if key == "created_at" || key == "revision" {
+				continue
+			}
+			extract[key] = value
+		}
+
+		propertiesJSON, _ := json.Marshal(extract)
 		values[i] = propertiesJSON
 		i++
 
@@ -770,7 +744,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		mergeProperties(response, rc.SchemaID != "")
+		mergeProperties(response)
 
 		if len(state) > 0 {
 			response["state"] = state
@@ -909,7 +883,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, this+" revision does not match", http.StatusConflict)
 			return
 		}
-		mergeProperties(object, rc.SchemaID != "")
+		mergeProperties(object)
 
 		primaryID = current[0].(*uuid.UUID).String()
 
@@ -923,12 +897,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			// now bodyJSON from the request becomes a patch
 			patchObject(objectJSON, bodyJSON)
-
-			// if the patch contained properties, we are using those, otherwise we use the merged ones
-			// This is functionality for compatibility and will be removed eventually.
-			if _, ok := bodyJSON["properties"]; !ok {
-				delete(objectJSON, "properties")
-			}
 
 			// rewrite this put request to contain the entire (patched) object
 			bodyJSON = objectJSON
@@ -969,43 +937,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			bodyJSON[k] = values[i]
 		}
 
-		// build the update set
-		properties, ok := bodyJSON["properties"] // check property "properties" for compatibility. This will be removed eventually.
-		if !ok {
-			extract := map[string]interface{}{}
-		property_loop:
-			for key, value := range bodyJSON {
-				for _, c := range columns {
-					if key == c {
-						continue property_loop
-					}
-				}
-				if key == "created_at" || key == "revision" || key == "state" {
-					continue
-				}
-				extract[key] = value
-			}
-
-			properties = extract
-		}
-
-		propertiesJSON, _ := json.Marshal(properties)
-		if rc.PropertiesSchemaID != "" {
-			if !b.jsonValidator.HasSchema(rc.PropertiesSchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, properties schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(propertiesJSON), rc.PropertiesSchemaID); err != nil {
-				rlog.Errorf("properties '%v' field does not follow properties schemaID %s, %v",
-					string(propertiesJSON), rc.PropertiesSchemaID, err)
-				http.Error(w, fmt.Sprintf("properties '%v' field does not follow properties schemaID %s, %v",
-					string(propertiesJSON), rc.PropertiesSchemaID, err), http.StatusBadRequest)
-				return
-			}
-		}
-
 		if rc.SchemaID != "" {
 			validateJSON, _ := json.Marshal(bodyJSON)
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
-				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.PropertiesSchemaID)
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
 				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
 					string(validateJSON), rc.SchemaID, err)
@@ -1015,6 +950,22 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		// extract the dynamic properties
+		extract := map[string]interface{}{}
+	property_loop:
+		for key, value := range bodyJSON {
+			for i := 0; i < propertiesIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			if key == "created_at" || key == "revision" {
+				continue
+			}
+			extract[key] = value
+		}
+
+		propertiesJSON, _ := json.Marshal(extract)
 		values[i] = propertiesJSON
 		i++
 
@@ -1076,7 +1027,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		mergeProperties(response, rc.SchemaID != "")
+		mergeProperties(response)
 
 		if len(state) > 0 {
 			response["state"] = state

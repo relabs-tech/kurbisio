@@ -689,10 +689,8 @@ func TestNotifications(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if properties, ok := object["properties"].(map[string]interface{}); ok {
-			if points, ok := properties["points"].(float64); ok {
-				pointsCount += int(points)
-			}
+		if points, ok := object["points"].(float64); ok {
+			pointsCount += int(points)
 		}
 		return nil
 	}
@@ -730,7 +728,7 @@ func TestNotifications(t *testing.T) {
 	nid, _ := nres["notification_id"].(string)
 
 	// update root object with 1 point
-	nres["properties"] = map[string]int64{"points": 1}
+	nres["points"] = int64(1)
 	_, err = client.RawPut("/notifications", &nres, &nres)
 	if err != nil {
 		t.Fatal(err)
@@ -745,7 +743,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// update child collection object with 5 points
-	nnres["properties"] = map[string]int64{"points": 5}
+	nnres["points"] = int64(5)
 	_, err = client.RawPut("/notifications/"+nid+"/normals", &nnres, &nnres)
 	if err != nil {
 		t.Fatal(err)
@@ -766,7 +764,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// update child collection object with collection path and 2 points
-	nsres["properties"] = map[string]int64{"points": 2}
+	nsres["points"] = int64(2)
 	_, err = client.RawPut("/notifications/"+nid+"/singles", &nsres, &nsres)
 	if err != nil {
 		t.Fatal(err)
@@ -786,7 +784,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// update child collection object with singleton path and 3 points
-	nsres["properties"] = map[string]int64{"points": 3}
+	nsres["points"] = int64(3)
 	_, err = client.RawPut("/notifications/"+nid+"/single", &nsres, &nsres)
 	if err != nil {
 		t.Fatal(err)
