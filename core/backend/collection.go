@@ -43,59 +43,57 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	resources := strings.Split(rc.Resource, "/")
 	this := resources[len(resources)-1]
+	primary := this
 	owner := ""
 	if singleton {
 		if len(resource) < 2 {
 			panic(fmt.Errorf("singleton resource %s lacks owner", this))
 		}
 		owner = resources[len(resources)-2]
+		primary = owner
 	}
 	dependencies := resources[:len(resources)-1]
 
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
-	createColumns := []string{
-		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
-		"created_at timestamp NOT NULL DEFAULT now()",
-		"state VARCHAR NOT NULL DEFAULT ''",
-		"revision INTEGER NOT NULL DEFAULT 1",
+	var createColumns []string
+	var columns []string
+	if !singleton {
+		columns = append(columns, this+"_id")
+		createColumns = append(createColumns, this+"_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY")
 	}
 
-	columns := []string{this + "_id"}
+	createColumns = append(createColumns, "created_at timestamp NOT NULL DEFAULT now()")
+	createColumns = append(createColumns, "state VARCHAR NOT NULL DEFAULT ''")
+	createColumns = append(createColumns, "revision INTEGER NOT NULL DEFAULT 1")
 
-	for i := range dependencies {
+	var foreignColumns []string
+	for i := len(dependencies) - 1; i >= 0; i-- {
 		that := dependencies[i]
 		createColumn := fmt.Sprintf("%s_id uuid NOT NULL", that)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, that+"_id")
+		foreignColumns = append(foreignColumns, that+"_id")
 	}
 
 	if len(dependencies) > 0 {
-		foreignColumns := strings.Join(columns[1:], ",")
-		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
+		foreign := strings.Join(foreignColumns, ",")
+		createColumn := "FOREIGN KEY (" + foreign + ") " +
 			"REFERENCES " + schema + ".\"" + strings.Join(dependencies, "/") + "\" " +
-			"(" + foreignColumns + ") ON DELETE CASCADE"
+			"(" + foreign + ") ON DELETE CASCADE"
 		createColumns = append(createColumns, createColumn)
 	}
 
 	// enforce a unique constraint on all our identifying indices. This enables child
 	// resources to have a composite foreign key on us
-	singletonConstraint := ""
 	if len(columns) > 1 {
 		createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
-		createColumns = append(createColumns, createColumn)
-	}
-
-	if singleton {
-		// force the resource itself to be singleton resource
-		singletonConstraint = fmt.Sprintf("only_one_%s_per_%s", this, owner)
-		createColumn := "CONSTRAINT " + singletonConstraint + " UNIQUE (" + strings.Join(columns, ",") + ")"
 		createColumns = append(createColumns, createColumn)
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
 	// query to create all indices after the table creation
 	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(created_at);",
-		"sort_index_"+this+"_created_at",
+		"sort_index_"+primary+"_created_at",
 		schema, resource)
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
@@ -179,16 +177,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
 
-	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\"", schema, resource)
+	if propertiesIndex > 1 {
+		clearQuery += " WHERE " + compareIDsString(columns[1:propertiesIndex])
+	}
+	clearQuery += ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
-	sqlReturnState := " RETURNING " + this + "_id, state;"
+	sqlReturnState := " RETURNING " + primary + "_id, state;"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, state)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ")"
-	if singleton {
-		insertQuery += "ON CONFLICT ON CONSTRAINT \"" + singletonConstraint + "\" DO NOTHING"
-	}
-	insertQuery += " RETURNING " + this + "_id;"
+	insertQuery += " RETURNING " + primary + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
@@ -196,7 +195,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
-	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + this + "_id;"
+	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
 
 	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
@@ -403,19 +402,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 
+		resourceID := params[this+"_id"]
+		if resourceID == "all" {
+			http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+			return
+		}
 		if singleton {
-			if len(params[columns[0]]) == 0 || params[columns[0]] == "all" {
-				// no primary id, we need an owner
-				ownerID := params[owner+"_id"]
-				if len(ownerID) == 0 || ownerID == "all" {
-					http.Error(w, "all is not a valid "+owner+" for requesting a single "+this+". Did you want to say "+core.Plural(this)+"?", http.StatusBadRequest)
+			if params[owner+"_id"] == "all" {
+				if resourceID == "" {
+					http.Error(w, "all is not a valid "+owner+"_id for requesting a single "+this+". Did you meant to say "+core.Plural(this)+"?", http.StatusBadRequest)
 					return
 				}
-				params[columns[0]] = "all"
-			}
-		} else {
-			if params[columns[0]] == "all" {
-				http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+				params[owner+"_id"] = resourceID
+			} else if resourceID != "" && resourceID != params[owner+"_id"] {
+				http.Error(w, "identifier mismatch for "+this, http.StatusBadRequest)
 				return
 			}
 		}
@@ -509,11 +509,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		// for singleton, primary id can be "all"
-		if singleton && len(params[columns[0]]) == 0 {
-			params[columns[0]] = "all"
-		}
-
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
@@ -596,17 +591,22 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns)+2)
-
-		// the primary resource identifier, use as specified or create a new one
-		primaryID, ok := bodyJSON[columns[0]]
-		if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
-			primaryID = uuid.New()
-			// update the bodyJSON so we can validate
-			bodyJSON[columns[0]] = primaryID
-		}
-		values[0] = primaryID
 		var i int
-		for i = 1; i < propertiesIndex; i++ { // the core identifiers
+
+		if !singleton {
+			// the primary resource identifier, use as specified or create a new one. Singletons
+			// do not have this, they are fully specified by their owner ID
+			primaryID, ok := bodyJSON[columns[0]]
+			if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
+				primaryID = uuid.New()
+				// update the bodyJSON so we can validate
+				bodyJSON[columns[0]] = primaryID
+			}
+			values[0] = primaryID
+			i++
+		}
+
+		for ; i < propertiesIndex; i++ { // the core identifiers
 			k := columns[i]
 			value, ok := bodyJSON[k]
 
@@ -738,7 +738,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// re-read data and return as json
 		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
-		err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1;", id).Scan(values...)
+		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -786,33 +786,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// primary id can come from parameter (fully qualified put) or from body json (collection put).
-		// For singleton, primary id can be "all", but then we need an owner
 		primaryID := params[columns[0]]
-		var ownerID string
 		if len(primaryID) == 0 {
-			if singleton {
-				primaryID = "all"
-				ownerID = params[owner+"_id"]
-				if len(ownerID) == 0 || ownerID == "all" {
-					var ok bool
-					ownerID, ok = bodyJSON[owner+"_id"].(string)
-					if !ok {
-						http.Error(w, "missing "+owner+"_id", http.StatusBadRequest)
-						return
-					}
-					params[owner+"_id"] = ownerID
-				}
-			} else {
-				var ok bool
-				primaryID, ok = bodyJSON[columns[0]].(string)
-				if !ok {
-					http.Error(w, "missing "+columns[0], http.StatusBadRequest)
-					return
-				}
+			var ok bool
+			primaryID, ok = bodyJSON[columns[0]].(string)
+			if !ok {
+				http.Error(w, "missing "+columns[0], http.StatusBadRequest)
+				return
 			}
 			params[columns[0]] = primaryID
 		}
-
 		// now we have all parameters and can authorize
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -836,13 +819,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var currentRevision int
 		retried := false
 	Retry:
-
 		current, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
-		if singleton && primaryID == "all" {
-			err = tx.QueryRow(readQuery+"WHERE "+owner+"_id = $1 FOR UPDATE;", &ownerID).Scan(current...)
-		} else {
-			err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
-		}
+		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		if err == csql.ErrNoRows {
 			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
 			// we are forced to return 404 Not Found
@@ -979,8 +957,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values[i] = value
 		}
 
-		// next value is created_at
-		createdAt := time.Now().UTC()
+		// next value is created_at. We only change it when explicitely requested
+		createdAt := current[i]
 		if value, ok := bodyJSON["created_at"]; ok {
 			timestamp, _ := value.(string)
 			t, err := time.Parse(time.RFC3339, timestamp)
@@ -992,7 +970,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				createdAt = t.UTC()
 			}
 		}
-		values[i] = &createdAt
+		values[i] = createdAt
 		i++
 
 		// then state
@@ -1021,7 +999,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// re-read new values
 		values, response := createScanValuesAndObject(&time.Time{}, &revision, &state)
-		err = tx.QueryRow(readQuery+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
+		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", &primaryID).Scan(values...)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)

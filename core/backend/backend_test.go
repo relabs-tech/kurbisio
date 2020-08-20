@@ -353,7 +353,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	type S struct {
-		SID  uuid.UUID `json:"s_id"`
+		OID  uuid.UUID `json:"o_id"`
 		Name string    `json:"name"`
 	}
 
@@ -393,14 +393,14 @@ func TestSingletonOS(t *testing.T) {
 	if sUpdateResult.Name != "updated" {
 		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
 	}
-	if sUpdateResult.SID != sResult.SID {
+	if sUpdateResult.OID != sResult.OID {
 		t.Fatal("got a new object, should have gotten the same object")
 	}
 
 	newUID := uuid.New()
 
 	// // put another update to s and try to give it a new id. This will fail.
-	sUpdate.SID = newUID
+	sUpdate.OID = newUID
 	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err == nil {
 		t.Fatal("was allowed to change the primary id")
@@ -425,19 +425,14 @@ func TestSingletonOS(t *testing.T) {
 		}
 	}
 
-	// re-create single s with new uuid, now the sid should be the new one we set
+	// re-create single s with no uuid, we will nonetheless receive the owner id
 	sResult2 := S{}
-
-	s.SID = newUID
 	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &s, &sResult2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sResult2.SID == sResult.SID {
-		t.Fatal("recreation did not work, still same ID")
-	}
-	if sResult2.SID != newUID {
-		t.Fatal("recreation did not work, could not choose ID")
+	if sResult2.OID != o.OID {
+		t.Fatal("recreation did not work, wrong owner id")
 	}
 
 	// delete the owner o, this should also delete the single s
@@ -727,14 +722,14 @@ func TestNotifications(t *testing.T) {
 	}
 	nid, _ := nres["notification_id"].(string)
 
-	// update root object with 1 point
+	// update root object with 1 point. First create
 	nres["points"] = int64(1)
 	_, err = client.RawPut("/notifications", &nres, &nres)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// create child collection object
+	// create child collection object. Second create.
 	nnreq := G{"state": "mystate", "notification_id": nid}
 	var nnres G
 	_, err = client.RawPost("/notifications/"+nid+"/normals", &nnreq, &nnres)
@@ -755,7 +750,7 @@ func TestNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// create child singleton object with collection path
+	// create child singleton object with collection path. Third create.
 	nsreq := G{"state": "mystate", "notification_id": nid}
 	var nsres G
 	_, err = client.RawPost("/notifications/"+nid+"/singles", &nsreq, &nsres)
@@ -770,18 +765,24 @@ func TestNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// do notification processing
+	backend.ProcessJobsSync(-1)
+
 	// delete child singleton object with wildcard path
-	_, err = client.RawDelete("/notifications/all/singles/" + nsres["single_id"].(string))
+	_, err = client.RawDelete("/notifications/all/singles/" + nid)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// re-create child singleton object with singleton path
+	// re-create child singleton object with singleton path. Fourth create.
 	nsreq = G{"state": "mystate"}
 	_, err = client.RawPut("/notifications/"+nid+"/single", &nsreq, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// do notification processing
+	backend.ProcessJobsSync(-1)
 
 	// update child collection object with singleton path and 3 points
 	nsres["points"] = int64(3)
@@ -789,6 +790,9 @@ func TestNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// do notification processing
+	backend.ProcessJobsSync(-1)
 
 	// delete child singleton object with singleton path
 	_, err = client.RawDelete("/notifications/" + nid + "/single")

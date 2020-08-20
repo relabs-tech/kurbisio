@@ -37,6 +37,9 @@ Example:
 The example creates one resource "user" with an external unique index "identity".
 
 A user has a child resource "user/profile", which is declared as a singleton, i.e. every user can only have one single profile.
+Hance a profile does not have an id of its own, but uses the user_id as its primary identifier, and there
+is a convenient singular resource accessor for a user's profile.
+
 Finally there is a relation from device to user which creates two more virtuals child resources "user/device" and "device/user".
 
 This configuration creates the following REST routes:
@@ -50,7 +53,7 @@ This configuration creates the following REST routes:
   /devices/{device_id}/users/{user_id} GET,PUT,DELETE
   /users/{user_id}/profile GET,PUT,PATCH,DELETE
   /users/{user_id}/profiles GET,POST,PUT,PATCH
-  /users/{user_id}/profiles/{profile_id} GET,PUT,PATCH,DELETE
+  /users/{user_id}/profiles/{user_id} GET,PUT,PATCH,DELETE
 
 
 The models look like this:

@@ -45,6 +45,9 @@ func Plural(singular string) string {
 	if strings.HasSuffix(singular, "child") {
 		return strings.TrimSuffix(singular, "child") + "children"
 	}
+	if strings.HasSuffix(singular, "lysis") {
+		return strings.TrimSuffix(singular, "lysis") + "lyses"
+	}
 	return singular + "s"
 
 }
