@@ -412,9 +412,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event stri
 		data = []byte("{}")
 	}
 
-	if ctx != nil {
-		contextData = logger.SerializeLoggerContext(ctx)
-	}
+	contextData = logger.SerializeLoggerContext(ctx)
 
 	var serial int
 	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
