@@ -231,7 +231,7 @@ resources, i.e. resources with child resources and relations, and only make them
 set it ready. The mechanism can also be used to implement multi-stage post-processing pipelines on newly created resources
 before they are made visible to the user.
 
-You can explicitely reqest resources with a specic state by passing state={state} as query parameter on the
+You can explicitely reqest resources with a specific state by passing state={state} as query parameter on the
 collection GET request.
 
 Notifications
