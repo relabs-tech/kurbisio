@@ -63,7 +63,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createColumns = append(createColumns, "created_at timestamp NOT NULL DEFAULT now()")
-	createColumns = append(createColumns, "state VARCHAR NOT NULL DEFAULT ''")
 	createColumns = append(createColumns, "revision INTEGER NOT NULL DEFAULT 1")
 
 	var foreignColumns []string
@@ -162,20 +161,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	rlog.Infoln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
 	rlog.Infoln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision, state FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", created_at, revision, state, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", created_at, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) AND state=$%d ",
-		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3, propertiesIndex+4)
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+5, propertiesIndex+6)
+	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
+		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
+	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+7)
+	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\"", schema, resource)
 	if propertiesIndex > 1 {
@@ -183,10 +182,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 	clearQuery += ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
-	sqlReturnState := " RETURNING " + primary + "_id, state;"
+	sqlReturnPrimaryID := " RETURNING " + primary + "_id;"
 
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at, state)"
-	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ")"
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at)"
+	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ")"
 	insertQuery += " RETURNING " + primary + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
@@ -194,7 +193,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1) + ", state = $" + strconv.Itoa(len(columns)+2)
+	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1)
 	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
 
 	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
@@ -248,7 +247,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			page            int = 1
 			until           time.Time
 			from            time.Time
-			state           string
 			externalColumn  string
 			externalIndex   string
 		)
@@ -277,9 +275,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
 
-			case "state":
-				state = value
-
 			default:
 				found := false
 				for i := searchablePropertiesIndex; i < len(columns); i++ {
@@ -306,17 +301,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if externalIndex == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+7)
+			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
 			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex-1+7+1)
+			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+7] = externalIndex
+			queryParameters[propertiesIndex-1+6] = externalIndex
 		}
 
 		// add before and after and pagination
@@ -324,9 +319,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		queryParameters[propertiesIndex-1+1] = until.UTC()
 		queryParameters[propertiesIndex-1+2] = from.IsZero()
 		queryParameters[propertiesIndex-1+3] = from.UTC()
-		queryParameters[propertiesIndex-1+4] = state
-		queryParameters[propertiesIndex-1+5] = limit
-		queryParameters[propertiesIndex-1+6] = (page - 1) * limit
+		queryParameters[propertiesIndex-1+4] = limit
+		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
 
 		if relation != nil {
 			// inject subquery for relation
@@ -350,16 +344,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var totalCount int
 		for rows.Next() {
 			var createdAt time.Time
-			values, object := createScanValuesAndObject(&createdAt, new(int), &state, &totalCount)
+			values, object := createScanValuesAndObject(&createdAt, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			mergeProperties(object)
-			if len(state) > 0 {
-				object["state"] = &state
-			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
 				from = createdAt
@@ -433,8 +424,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
-		var state string
-		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
+		values, response := createScanValuesAndObject(&time.Time{}, new(int))
 		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
@@ -468,10 +458,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 			}
-		}
-
-		if len(state) > 0 {
-			response["state"] = &state
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
@@ -519,9 +505,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		var state string
 		var primaryID uuid.UUID
-		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnState, queryParameters...).Scan(&primaryID, &state)
+		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnPrimaryID, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
@@ -538,7 +523,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			notification[columns[i]] = params[columns[i]]
 		}
 		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationDelete, primaryID, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -590,7 +575,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns)+2)
+		values := make([]interface{}, len(columns)+1)
 		var i int
 
 		if !singleton {
@@ -702,18 +687,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = &createdAt
 		i++
 
-		// last value is state
-		var state string
-		if value, ok := bodyJSON["state"]; ok {
-			state, ok = value.(string)
-			if !ok {
-				http.Error(w, "state must be a string", http.StatusBadRequest)
-				return
-			}
-		}
-		values[i] = &state
-		i++
-
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -737,7 +710,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject(&time.Time{}, new(int), &state)
+		values, response := createScanValuesAndObject(&time.Time{}, new(int))
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
@@ -746,12 +719,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		if len(state) > 0 {
-			response["state"] = state
-		}
-
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationCreate, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -819,7 +788,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var currentRevision int
 		retried := false
 	Retry:
-		current, object := createScanValuesAndObject(&time.Time{}, &currentRevision, new(string))
+		current, object := createScanValuesAndObject(&time.Time{}, &currentRevision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		if err == csql.ErrNoRows {
 			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
@@ -881,7 +850,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// build insert query and validate that we have all parameters
-		values := make([]interface{}, len(columns)+2)
+		values := make([]interface{}, len(columns)+1)
 
 		var i int
 
@@ -973,19 +942,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = createdAt
 		i++
 
-		// then state
-		var state string
-		if value, ok := bodyJSON["state"]; ok {
-			state, ok = value.(string)
-			if !ok {
-				tx.Rollback()
-				http.Error(w, "state must be a string", http.StatusBadRequest)
-				return
-			}
-		}
-		values[i] = &state
-		i++
-
 		err = tx.QueryRow(updateQuery, values...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
@@ -998,7 +954,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// re-read new values
-		values, response := createScanValuesAndObject(&time.Time{}, &revision, &state)
+		values, response := createScanValuesAndObject(&time.Time{}, &revision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", &primaryID).Scan(values...)
 		if err != nil {
 			tx.Rollback()
@@ -1007,12 +963,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		if len(state) > 0 {
-			response["state"] = state
-		}
-
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, state, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

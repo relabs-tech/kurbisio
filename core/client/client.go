@@ -125,12 +125,6 @@ func (r Collection) WithFilter(key string, value string) Collection {
 	}
 }
 
-// WithState returns a new collection client with a URL parameter for state added.
-// Filters apply only to lists.
-func (r Collection) WithState(state string) Collection {
-	return r.WithFilter("state", state)
-}
-
 func (r Collection) paths() (collectionPath, singletonPath string) {
 	var itemPath string
 	for _, resource := range r.resources {

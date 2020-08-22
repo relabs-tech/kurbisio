@@ -26,7 +26,6 @@ type Notification struct {
 	Serial       int
 	Resource     string
 	Operation    core.Operation
-	State        string
 	ResourceID   uuid.UUID
 	Payload      []byte
 	CreatedAt    time.Time
@@ -52,7 +51,6 @@ type job struct {
 	Type         string
 	Name         string
 	Resource     string
-	State        string
 	ResourceID   uuid.UUID
 	Payload      []byte
 	CreatedAt    time.Time
@@ -63,7 +61,7 @@ type job struct {
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
 func (j *job) notification() Notification {
 	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
-	return Notification{j.Serial, j.Resource, core.Operation(j.Name), j.State, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
+	return Notification{j.Serial, j.Resource, core.Operation(j.Name), j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
 }
 
 // event returns the job as high-level event. Only makes sense if the job type is "event"
@@ -84,14 +82,13 @@ func (b *Backend) handleJobs(router *mux.Router) {
 type VARCHAR NOT NULL,
 name VARCHAR NOT NULL DEFAULT '',
 resource VARCHAR NOT NULL DEFAULT '', 
-state VARCHAR NOT NULL DEFAULT '', 
 resource_id uuid NOT NULL DEFAULT uuid_nil(), 
 payload JSON NOT NULL DEFAULT'{}'::jsonb,
 created_at TIMESTAMP NOT NULL DEFAULT now(), 
 attempts_left INTEGER NOT NULL,
 context JSON NOT NULL DEFAULT'{}'::jsonb,
 PRIMARY KEY(serial),
-CONSTRAINT job_compression UNIQUE(type,name,resource,state,resource_id)
+CONSTRAINT job_compression UNIQUE(type,name,resource,resource_id)
 );`)
 
 		if err != nil {
@@ -115,7 +112,7 @@ SELECT serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING serial, type, name, resource, state, resource_id, payload, created_at, attempts_left, context;
+RETURNING serial, type, name, resource, resource_id, payload, created_at, attempts_left, context;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
@@ -205,7 +202,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 			case "notification":
 				notification := job.notification()
 				rlog = logger.FromContext(notification.Context)
-				key = notificationJobKey(notification.Resource, notification.State, notification.Operation)
+				key = notificationJobKey(notification.Resource, notification.Operation)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(notification)
 				} else {
@@ -323,7 +320,6 @@ process:
 			&j.Type,
 			&j.Name,
 			&j.Resource,
-			&j.State,
 			&j.ResourceID,
 			&j.Payload,
 			&j.CreatedAt,
@@ -435,15 +431,15 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event stri
 	return http.StatusNoContent, nil
 }
 
-// HandleResource installs a callback handler for the given resource and state and the specified operations.
+// HandleResource installs a callback handler for the given resource and the specified operations.
 // If no operations are specified, the handler will be installed for all modifying operations, i.e. create,
 // update and delete
-func (b *Backend) HandleResource(resource string, state string, handler func(Notification) error, operations ...core.Operation) {
+func (b *Backend) HandleResource(resource string, handler func(Notification) error, operations ...core.Operation) {
 	if len(operations) == 0 {
 		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete}
 	}
 	for _, operation := range operations {
-		key := notificationJobKey(resource, state, operation)
+		key := notificationJobKey(resource, operation)
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(nil).Fatalf("callback handler for %s already installed", key)
 		}
@@ -452,11 +448,8 @@ func (b *Backend) HandleResource(resource string, state string, handler func(Not
 	}
 }
 
-func notificationJobKey(resource string, state string, operation core.Operation) string {
+func notificationJobKey(resource string, operation core.Operation) string {
 	key := "notification: " + resource + "(" + string(operation) + ")"
-	if len(state) > 0 {
-		key += "[" + state + "]"
-	}
 	return key
 }
 
@@ -468,8 +461,8 @@ func timeoutJobKey(event string) string {
 	return "timeout: " + event
 }
 
-func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, state string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
-	request := notificationJobKey(resource, state, operation)
+func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
+	request := notificationJobKey(resource, operation)
 
 	// only create a notification if somebody requested it
 	if _, ok := b.callbacks[request]; !ok {
@@ -484,12 +477,11 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(type, resource,name,state,resource_id,payload,created_at,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT ON CONSTRAINT job_compression "+
-		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7,context=$8 RETURNING serial;",
+		"(type, resource,name,resource_id,payload,created_at,attempts_left,context)"+
+		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
+		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6,context=$7 RETURNING serial;",
 		resource,
 		operation,
-		state,
 		resourceID,
 		payload,
 		time.Now().UTC(),

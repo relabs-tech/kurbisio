@@ -497,86 +497,6 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 	}
 }
 
-func TestState(t *testing.T) {
-	type State struct {
-		StateID uuid.UUID `json:"state_id"`
-		State   string    `json:"state"`
-	}
-
-	state := State{
-		State: "partial",
-	}
-	var h State
-	_, err := testService.client.RawPost("/states", &state, &h)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var collection []State
-	_, err = testService.client.RawGet("/states", &collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(collection) != 0 {
-		t.Fatal("collection not empty as expected")
-	}
-
-	//  the item should be visible in the collection with the state query parameter
-	_, err = testService.client.RawGet("/states?state=partial", &collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(collection) == 0 {
-		t.Fatal("collection is empty, unexpected")
-	}
-
-	// create a visible item
-	visible := State{
-		State: "",
-	}
-	var v State
-	_, err = testService.client.RawPost("/states", &visible, &v)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// we should now have one visible and one state item
-	_, err = testService.client.RawGet("/states", &collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(collection) != 1 {
-		t.Fatal("visible collection does not have one item as expected")
-	}
-	_, err = testService.client.RawGet("/states?state=partial", &collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(collection) != 1 {
-		t.Fatal("state collection does not have one item as expected")
-	}
-
-	// lets make the state item visible
-	h.State = ""
-	var h3 State
-	_, err = testService.client.RawPut("/states", &h, &h3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h3.State != "" {
-		t.Fatal("still state not empty, but should be empty")
-	}
-
-	// now the item should be visible in the collection, hence we have two items there
-	_, err = testService.client.RawGet("/states", &collection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(collection) != 2 {
-		t.Fatal("collection does not have two items, unexpected")
-	}
-}
-
 type Blob struct {
 	BlobID      uuid.UUID `json:"blob_id"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -698,23 +618,23 @@ func TestNotifications(t *testing.T) {
 
 	backend := testService.backend
 
-	backend.HandleResource("notification", "mystate", createHandler, core.OperationCreate)
-	backend.HandleResource("notification/normal", "mystate", createHandler, core.OperationCreate)
-	backend.HandleResource("notification/single", "mystate", createHandler, core.OperationCreate)
+	backend.HandleResource("notification", createHandler, core.OperationCreate)
+	backend.HandleResource("notification/normal", createHandler, core.OperationCreate)
+	backend.HandleResource("notification/single", createHandler, core.OperationCreate)
 
-	backend.HandleResource("notification", "mystate", updateHandler, core.OperationUpdate)
-	backend.HandleResource("notification/normal", "mystate", updateHandler, core.OperationUpdate)
-	backend.HandleResource("notification/single", "mystate", updateHandler, core.OperationUpdate)
+	backend.HandleResource("notification", updateHandler, core.OperationUpdate)
+	backend.HandleResource("notification/normal", updateHandler, core.OperationUpdate)
+	backend.HandleResource("notification/single", updateHandler, core.OperationUpdate)
 
-	backend.HandleResource("notification", "mystate", deleteHandler, core.OperationDelete)
-	backend.HandleResource("notification/normal", "mystate", deleteHandler, core.OperationDelete)
-	backend.HandleResource("notification/single", "mystate", deleteHandler, core.OperationDelete)
+	backend.HandleResource("notification", deleteHandler, core.OperationDelete)
+	backend.HandleResource("notification/normal", deleteHandler, core.OperationDelete)
+	backend.HandleResource("notification/single", deleteHandler, core.OperationDelete)
 
 	client := testService.client
 
 	// create root object
 	type G map[string]interface{}
-	nreq := G{"state": "mystate"}
+	nreq := G{}
 	var nres G
 	_, err := client.RawPost("/notifications", &nreq, &nres)
 	if err != nil {
@@ -730,7 +650,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// create child collection object. Second create.
-	nnreq := G{"state": "mystate", "notification_id": nid}
+	nnreq := G{"notification_id": nid}
 	var nnres G
 	_, err = client.RawPost("/notifications/"+nid+"/normals", &nnreq, &nnres)
 	if err != nil {
@@ -751,7 +671,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// create child singleton object with collection path. Third create.
-	nsreq := G{"state": "mystate", "notification_id": nid}
+	nsreq := G{"notification_id": nid}
 	var nsres G
 	_, err = client.RawPost("/notifications/"+nid+"/singles", &nsreq, &nsres)
 	if err != nil {
@@ -775,7 +695,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// re-create child singleton object with singleton path. Fourth create.
-	nsreq = G{"state": "mystate"}
+	nsreq = G{}
 	_, err = client.RawPut("/notifications/"+nid+"/single", &nsreq, &nsres)
 	if err != nil {
 		t.Fatal(err)

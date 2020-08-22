@@ -536,7 +536,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationCreate, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -645,7 +645,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.MarshalIndent(response, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -726,7 +726,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			notification[columns[i]] = params[columns[i]]
 		}
 		jsonData, _ := json.MarshalIndent(notification, "", " ")
-		err = b.commitWithNotification(r.Context(), tx, resource, "", core.OperationDelete, id, jsonData)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
