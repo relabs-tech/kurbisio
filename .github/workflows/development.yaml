@@ -2,15 +2,18 @@ on:
   push:
     branches:
       - master
+      - refs/tags/*
+    tags:
+      - "[0-9].[0-9]+.[0-9]+-[0-9]+"
   pull_request:
 
-name: Build & Test
+name: Build & Test & Deploy
 
 jobs:
-  container-job:
+  test:
     runs-on: [self-hosted, Linux, native]
     container: golang
-    name: Go test
+    name: test
 
     services:
       postgres:
@@ -53,16 +56,36 @@ jobs:
 
   build:
     runs-on: [docker, backend]
-    name: Go build
+    name: build & deploy
+    needs: test
     steps:
       - uses: actions/checkout@v2
-      - name: go build
+      - name: build
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
-          # TODO: ENABLE THIS
-          # npm install quicktype
+          npm install quicktype
           go generate ./...
           for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
           for f in services/fitness/data/conversation_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/conversation_properties.json  ; done
-          GOOS=linux GOARCH=amd64 go build -o fitness ./services/fitness 
-          GOOS=linux GOARCH=amd64 go build -o fleet ./services/fleet
+          cd services/fitness
+          GOOS=linux GOARCH=amd64 go build
+    
+      - name: deploy to AWS
+        if: startsWith(github.ref, 'refs/tags')
+        run: |
+          cd services/fitness
+          sam build
+
+          sam package \
+            --s3-bucket fitness-backend-bucket
+
+          sam deploy \
+            --stack-name fitness \
+            --s3-bucket fitness-backend-bucket \
+            --capabilities CAPABILITY_IAM \
+            --region eu-central-1 \
+            --parameter-overrides gitSHA=${GITHUB_SHA::8} versionTag=${GITHUB_REF##*/}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-central-1
