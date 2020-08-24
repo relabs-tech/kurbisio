@@ -97,6 +97,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
 
+	staticPropertiesIndex := len(columns) // where static properties start
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
@@ -196,6 +197,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1)
 	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
 
+	updatePropertyQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
+	updatePropertyQuery += " %s = $" + strconv.Itoa(propertiesIndex+1)
+	updatePropertyQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
+
 	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
 		object := map[string]interface{}{}
@@ -248,7 +253,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			until           time.Time
 			from            time.Time
 			externalColumn  string
-			externalIndex   string
+			externalValue   string
 		)
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
@@ -275,22 +280,29 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
 
-			default:
+			case "filter":
+				i := strings.IndexRune(value, '=')
+				if i < 0 {
+					err = fmt.Errorf("cannot parse filter, must be of type property=value")
+					break
+				}
+				filterKey := value[:i]
+				filterValue := value[i+1:]
+
 				found := false
-				for i := searchablePropertiesIndex; i < len(columns); i++ {
-					if key == columns[i] {
-						if found {
-							err = fmt.Errorf("only one searchable property or external index allowed")
-							break
-						}
-						externalIndex = value
+				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+					if filterKey == columns[i] {
+						externalValue = filterValue
 						externalColumn = columns[i]
 						found = true
 					}
 				}
 				if !found {
-					err = fmt.Errorf("unknown query parameter")
+					err = fmt.Errorf("unknown filter property '%s'", filterKey)
 				}
+
+			default:
+				err = fmt.Errorf("unknown")
 			}
 
 			if err != nil {
@@ -299,7 +311,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		params := mux.Vars(r)
-		if externalIndex == "" { // get entire collection
+		if externalValue == "" { // get entire collection
 			sqlQuery = readQueryWithTotal + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
@@ -311,7 +323,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+6] = externalIndex
+			queryParameters[propertiesIndex-1+6] = externalValue
 		}
 
 		// add before and after and pagination
@@ -358,7 +370,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			response = append(response, object)
 		}
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
@@ -460,7 +472,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
@@ -483,6 +495,77 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		item(w, r, nil)
+	}
+
+	updatePropertyWithAuth := func(w http.ResponseWriter, r *http.Request, property string) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		resourceID := params[this+"_id"]
+		if resourceID == "all" {
+			http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+			return
+		}
+		if singleton {
+			if params[owner+"_id"] == "all" {
+				if resourceID == "" {
+					http.Error(w, "all is not a valid "+owner+"_id for updating properties of a single "+this+". Did you meant to say "+core.Plural(this)+"?", http.StatusBadRequest)
+					return
+				}
+				params[owner+"_id"] = resourceID
+			} else if resourceID != "" && resourceID != params[owner+"_id"] {
+				http.Error(w, "identifier mismatch for "+this, http.StatusBadRequest)
+				return
+			}
+		}
+
+		value := params[property]
+		query := fmt.Sprintf(updatePropertyQuery, property)
+
+		queryParameters := make([]interface{}, propertiesIndex+1)
+		i := 0
+		for ; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+		queryParameters[i] = value
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var primaryID uuid.UUID
+		err = b.db.QueryRow(query, queryParameters...).Scan(&primaryID)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		notification := make(map[string]interface{})
+		for i := 0; i < propertiesIndex; i++ {
+			notification[columns[i]] = params[columns[i]]
+			notification[property] = value
+		}
+		jsonData, _ := json.Marshal(notification)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, primaryID, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 
 	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -522,7 +605,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		for i := 0; i < propertiesIndex; i++ {
 			notification[columns[i]] = params[columns[i]]
 		}
-		jsonData, _ := json.MarshalIndent(notification, "", " ")
+		jsonData, _ := json.Marshal(notification)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -719,7 +802,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -746,9 +829,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+
 		params := mux.Vars(r)
 		var bodyJSON map[string]interface{}
-		err := json.NewDecoder(r.Body).Decode(&bodyJSON)
+		err = json.NewDecoder(r.Body).Decode(&bodyJSON)
 		if err != nil {
 			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return
@@ -756,7 +840,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// primary id can come from parameter (fully qualified put) or from body json (collection put).
 		primaryID := params[columns[0]]
-		if len(primaryID) == 0 {
+		if len(primaryID) == 0 || primaryID == "all" {
 			var ok bool
 			primaryID, ok = bodyJSON[columns[0]].(string)
 			if !ok {
@@ -770,6 +854,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if singleton {
+			if params[this+"_id"] != "" && params[this+"_id"] != primaryID {
+				http.Error(w, "identifier mismatch for "+this, http.StatusBadRequest)
 				return
 			}
 		}
@@ -963,7 +1054,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1004,6 +1095,23 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		itemWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
+
+	// PUT FOR STATIC PROPERTIES
+	for i := staticPropertiesIndex; i < len(columns); i++ {
+		property := columns[i]
+		propertyRoute := fmt.Sprintf("%s/%s/{%s}", itemRoute, property, property)
+		router.HandleFunc(propertyRoute, func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			updatePropertyWithAuth(w, r, property)
+		}).Methods(http.MethodOptions, http.MethodPut)
+		if singleton {
+			propertyRoute := fmt.Sprintf("%s/%s/{%s}", singletonRoute, property, property)
+			router.HandleFunc(propertyRoute, func(w http.ResponseWriter, r *http.Request) {
+				logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+				updatePropertyWithAuth(w, r, property)
+			}).Methods(http.MethodOptions, http.MethodPut)
+		}
+	}
 
 	// READ ALL
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {

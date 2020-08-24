@@ -78,7 +78,7 @@ func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
 // If the accessor has a prefix, the key is prepended with "{prefix}:"
 func (r Accessor) Write(key string, value interface{}) error {
 
-	body, err := json.MarshalIndent(value, "", "  ")
+	body, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}

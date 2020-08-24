@@ -399,7 +399,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event stri
 	if payload != nil {
 		data, ok = payload.([]byte)
 		if !ok {
-			data, err = json.MarshalIndent(payload, "", "  ")
+			data, err = json.Marshal(payload)
 			if err != nil {
 				return http.StatusBadRequest, err
 			}

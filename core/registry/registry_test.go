@@ -84,6 +84,6 @@ func TestRegistry(t *testing.T) {
 }
 
 func asJSON(object interface{}) string {
-	j, _ := json.MarshalIndent(object, "", "  ")
+	j, _ := json.Marshal(object)
 	return string(j)
 }

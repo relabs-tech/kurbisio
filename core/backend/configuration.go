@@ -26,10 +26,12 @@ type collectionConfiguration struct {
 
 // singletonConfiguration describes a singleton resource
 type singletonConfiguration struct {
-	Resource    string          `json:"resource"`
-	Permits     []access.Permit `json:"permits"`
-	Description string          `json:"description"`
-	SchemaID    string          `json:"schema_id"`
+	Resource             string          `json:"resource"`
+	Permits              []access.Permit `json:"permits"`
+	Description          string          `json:"description"`
+	SchemaID             string          `json:"schema_id"`
+	StaticProperties     []string        `json:"static_properties"`
+	SearchableProperties []string        `json:"searchable_properties"`
 }
 
 // blobConfiguration describes a blob collection resource

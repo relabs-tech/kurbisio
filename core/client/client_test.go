@@ -40,8 +40,14 @@ func TestCient(t *testing.T) {
 		t.Fatal("unexpected item path:", p)
 	}
 
-	collection = client.Collection("parent/child").WithFilter("email", "maybe@yes.no").WithFilter("state", "new")
-	if p := collection.CollectionPath(); p != "/parents/all/children?email=maybe@yes.no&state=new" {
+	collection = client.Collection("parent/child").WithFilter("email", "maybe@yes.no").WithParameter("something", "else")
+	if p := collection.CollectionPath(); p != "/parents/all/children?filter=email=maybe@yes.no&something=else" {
+		t.Fatal("unexpected collection path:", p)
+	}
+
+	// filter really is a only a shortcut for WithParameter
+	collection = client.Collection("parent/child").WithParameter("filter", "email=maybe@yes.no").WithParameter("something", "else")
+	if p := collection.CollectionPath(); p != "/parents/all/children?filter=email=maybe@yes.no&something=else" {
 		t.Fatal("unexpected collection path:", p)
 	}
 

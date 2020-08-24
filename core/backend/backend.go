@@ -222,10 +222,12 @@ func (b *Backend) handleResourceRoutes() {
 		if rc.singleton != nil {
 			// a singleton is a specialized collection
 			tmp := collectionConfiguration{
-				Resource:    rc.singleton.Resource,
-				Permits:     rc.singleton.Permits,
-				SchemaID:    rc.singleton.SchemaID,
-				Description: rc.singleton.Description,
+				Resource:             rc.singleton.Resource,
+				Permits:              rc.singleton.Permits,
+				SchemaID:             rc.singleton.SchemaID,
+				Description:          rc.singleton.Description,
+				StaticProperties:     rc.singleton.StaticProperties,
+				SearchableProperties: rc.singleton.SearchableProperties,
 			}
 			b.createCollectionResource(router, tmp, true)
 		}
@@ -300,11 +302,6 @@ func bytesToEtag(b []byte) string {
 }
 func bytesPlusTotalCountToEtag(b []byte, t int) string {
 	return fmt.Sprintf("\"%x%x\"", sha1.Sum(b), t)
-}
-
-func asJSON(object interface{}) string {
-	j, _ := json.MarshalIndent(object, "", "  ")
-	return string(j)
 }
 
 // clever recursive function to patch a generic json object.

@@ -215,7 +215,7 @@ func HandleAuthorizationRoute(router *mux.Router) {
 		if auth == nil {
 			w.WriteHeader(http.StatusNoContent)
 		} else {
-			jsonData, _ := json.MarshalIndent(auth, "", " ")
+			jsonData, _ := json.Marshal(auth)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Write(jsonData)
 		}

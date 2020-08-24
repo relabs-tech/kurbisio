@@ -65,7 +65,8 @@ var configurationJSON string = `{
 	],
 	"singletons": [
 	  {
-		"resource": "o/s"
+		"resource": "o/s",
+		"static_properties":["name"]
 	  },
 	  {
 		"resource":"notification/single"
@@ -126,6 +127,11 @@ type TestService struct {
 }
 
 var testService TestService
+
+func asJSON(object interface{}) string {
+	j, _ := json.Marshal(object)
+	return string(j)
+}
 
 func TestMain(m *testing.M) {
 	if err := envdecode.Decode(&testService); err != nil {
@@ -215,7 +221,60 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
-	_, err = testService.client.RawDelete("/as/" + a.AID.String())
+	// test the fast put for static properties
+	aPut.StaticProp = "another new value for static property"
+	_, err = testService.client.RawPut("/as/"+aRes.AID.String()+"/static_prop/"+aPut.StaticProp, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testService.client.RawGet("/as/"+aRes.AID.String(), &aRes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aPut.Foo != aRes.Foo ||
+		aPut.ExternalID != aRes.ExternalID ||
+		aPut.StaticProp != aRes.StaticProp ||
+		aPut.CreatedAt != aRes.CreatedAt {
+		t.Fatal("unexpected result:", asJSON(aGet))
+	}
+
+	// create another object with a different searchable property
+	anotherNew := A{
+		Foo:            "bar",
+		ExternalID:     "another_external",
+		StaticProp:     "static",
+		SearchableProp: "not_searchable",
+		CreatedAt:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+	}
+
+	_, err = testService.client.RawPost("/as", &anotherNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// get the entire collection: 2 items
+	var collectionResult []A
+	_, err = testService.client.RawGet("/as", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 2 {
+		t.Fatal("unexpected number of items in collection, expected only 2:", asJSON(collectionResult))
+	}
+
+	// we now search for the searachable property and should only find our single item a
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected only 1:", asJSON(collectionResult))
+	}
+	if collectionResult[0].AID != a.AID {
+		t.Fatal("wrong item in collection:", asJSON(collectionResult))
+	}
+
+	_, err = testService.client.RawDelete("/as") // clear entire collection
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,6 +452,38 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sUpdateResult.Name != "updated" {
+		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
+	}
+	if sUpdateResult.OID != sResult.OID {
+		t.Fatal("got a new object, should have gotten the same object")
+	}
+
+	// now update with direct property update
+	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s/name/updated_again", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sUpdateResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sUpdateResult.Name != "updated_again" {
+		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
+	}
+	if sUpdateResult.OID != sResult.OID {
+		t.Fatal("got a new object, should have gotten the same object")
+	}
+
+	// now update with direct property update, but flip the ids
+	status, err = testService.client.RawPut("/os/all/ss/"+o.OID.String()+"/name/third_update", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = testService.client.RawGet("/os/all/ss/"+o.OID.String(), &sUpdateResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sUpdateResult.Name != "third_update" {
 		t.Fatal("properties not as expected:", asJSON(sUpdateResult))
 	}
 	if sUpdateResult.OID != sResult.OID {

@@ -111,9 +111,8 @@ func (r Collection) WithParent(parentID uuid.UUID) Collection {
 	return r.WithSelector(r.resources[len(r.resources)-2], parentID)
 }
 
-// WithFilter returns a new collection client with a URL parameter added.
-// Filters apply only to lists.
-func (r Collection) WithFilter(key string, value string) Collection {
+// WithParameter returns a new collection client with a URL parameter added.
+func (r Collection) WithParameter(key string, value string) Collection {
 
 	parameter := key + "=" + value
 	return Collection{
@@ -123,6 +122,12 @@ func (r Collection) WithFilter(key string, value string) Collection {
 		// we want a true copy to avoid side effects
 		parameters: append(append([]string{}, r.parameters...), parameter),
 	}
+}
+
+// WithFilter returns a new collection client with a URL filter parameter added.
+// This is a shortcut for WithParameter("filter", key+"="+value)
+func (r Collection) WithFilter(key string, value string) Collection {
+	return r.WithParameter("filter", key+"="+value)
 }
 
 func (r Collection) paths() (collectionPath, singletonPath string) {
@@ -231,6 +236,11 @@ func (r Item) Update(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPut(r.Path(), body, result)
 }
 
+// UpdateProperty updates a single static property
+func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
+	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
+}
+
 // Patch updates selected fields of an item
 func (r Item) Patch(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPatch(r.Path(), body, result)
@@ -259,7 +269,7 @@ func (p Page) HasData() bool {
 
 // Get gets one page of the collection
 func (p *Page) Get(result interface{}) (int, error) {
-	path := p.r.WithFilter("page", strconv.Itoa(p.page)).CollectionPath()
+	path := p.r.WithParameter("page", strconv.Itoa(p.page)).CollectionPath()
 	status, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
 	if err != nil {
 		return status, err
@@ -275,7 +285,7 @@ func (p *Page) Get(result interface{}) (int, error) {
 	if !found {
 		until := header.Get("Pagination-Until")
 		if len(until) > 0 {
-			p.r = p.r.WithFilter("until", until)
+			p.r = p.r.WithParameter("until", until)
 		}
 	}
 	return status, nil
@@ -401,7 +411,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 	var err error
 	j, ok := body.([]byte)
 	if !ok {
-		j, err = json.MarshalIndent(body, "", "  ")
+		j, err = json.Marshal(body)
 		if err != nil {
 			return http.StatusBadRequest, err
 		}
@@ -462,7 +472,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 	var err error
 	j, ok := body.([]byte)
 	if !ok {
-		j, err = json.MarshalIndent(body, "", "  ")
+		j, err = json.Marshal(body)
 		if err != nil {
 			return http.StatusBadRequest, err
 		}
@@ -524,7 +534,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 	var err error
 	j, ok := body.([]byte)
 	if !ok {
-		j, err = json.MarshalIndent(body, "", "  ")
+		j, err = json.Marshal(body)
 		if err != nil {
 			return http.StatusBadRequest, err
 		}

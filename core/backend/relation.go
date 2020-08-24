@@ -223,7 +223,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				}
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			jsonData, _ := json.MarshalIndent(response, "", " ")
+			jsonData, _ := json.Marshal(response)
 			w.Write(jsonData)
 			return
 		}
@@ -288,7 +288,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				}
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			jsonData, _ := json.MarshalIndent(response, "", " ")
+			jsonData, _ := json.Marshal(response)
 			w.Write(jsonData)
 			return
 		}

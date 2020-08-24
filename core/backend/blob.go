@@ -237,22 +237,29 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
-			default:
+			case "filter":
+				i := strings.IndexRune(value, '=')
+				if i < 0 {
+					err = fmt.Errorf("cannot parse filter, must be of type property=value")
+					break
+				}
+				filterKey := value[:i]
+				filterValue := value[i+1:]
+
 				found := false
-				for i := searchablePropertiesIndex; i < len(columns); i++ {
-					if key == columns[i] {
-						if found {
-							err = fmt.Errorf("only one searchable property or external index allowed")
-							break
-						}
-						externalIndex = value
+				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+					if filterKey == columns[i] {
+						externalIndex = filterValue
 						externalColumn = columns[i]
 						found = true
 					}
 				}
 				if !found {
-					err = fmt.Errorf("unknown query parameter")
+					err = fmt.Errorf("unknown filter property '%s'", filterKey)
 				}
+
+			default:
+				err = fmt.Errorf("unknown")
 			}
 			if err != nil {
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
@@ -317,7 +324,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			response = append(response, object)
 		}
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
 		// ETag must also be provided in headers in case If-None-Match is set
 		w.Header().Set("Etag", etag)
@@ -535,7 +542,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -644,7 +651,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		jsonData, _ := json.MarshalIndent(response, "", " ")
+		jsonData, _ := json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -725,7 +732,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		for i := 0; i < propertiesIndex; i++ {
 			notification[columns[i]] = params[columns[i]]
 		}
-		jsonData, _ := json.MarshalIndent(notification, "", " ")
+		jsonData, _ := json.Marshal(notification)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

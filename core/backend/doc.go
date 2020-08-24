@@ -168,12 +168,19 @@ If validation fails, error 400 will be returned.
 Static Properties
 
 In the example above, we have extended the user and the device collections with an external index. Likewise it is possible to extend
-resource with list of static string properties, using an array "static_properties". The main purpose of this is to enable easier SQL
-queries against generated tables, for example we use it to store the authorization_status for IoT devices. In the regular case, properties
-of a resource should not be declared static.
+resource with list of static string properties, using an array "static_properties". Static properties (searchable or not) have the
+advantage, that they can be updated must faster than any other dynamic property. If the user resource from above had a static
+propery "name", you could update that name quickly with
+    POST /user/{user_id}/name/{new_name}
+It is only in rare occasions when you actually need this. In the regular case, properties of a resource should not need to be
+declared static, and property updates should be done with a standard PATCH request, returning the fully patched object.
 
-Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a query
-parameter in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
+There is one more application for static properties: Since they have their own underlying SQL column, they also enable easier
+SQL queries against generated tables for other services with direct acccess to the database.  For example, we use a static property
+to store the provisioning_status for IoT devices.
+
+Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a filer
+in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
 
 Sorting and Creation Time
 
@@ -190,9 +197,9 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
-The GET request on collections can be customized with any of the searchable properties or an external index.
+The GET request on collections can be customized with any of the searchable properties or an external index as a filter.
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
-	GET /users?identity=test@test.com
+	GET /users?filter=identity=test@test.com
 
 The system supports pagination and filtering of responses by creation time.
 	  ?limit=n  sets a page limit of n items
