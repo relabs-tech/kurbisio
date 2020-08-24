@@ -13,7 +13,7 @@ docker run --rm --name some-postgres -p 5432:5432 -e POSTGRES_PASSWORD=docker -d
 Then use standard go commands, like
 
 ```
-POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable" go test ./... -count 1
+POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable" POSTGRES_PASSWORD="docker" go test ./... -count 1
 ```
 
 The -count 1 parameter disables test result caching. If you also specify -v you will see t.Log(...) output also for the 

@@ -14,10 +14,12 @@ import (
 
 // TestService holds the configuration for this service
 //
-// use POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable"
+// use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
+// and POSTRGRES_PASSWORD="docker"
 type TestService struct {
-	Postgres string `env:"POSTGRES,required" description:"the connection string for the Postgres DB"`
-	registry Registry
+	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
+	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
+	registry         Registry
 }
 
 var testService TestService
@@ -27,7 +29,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, "_core_registry_unit_test_")
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_core_registry_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

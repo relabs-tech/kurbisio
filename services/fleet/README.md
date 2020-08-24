@@ -14,7 +14,7 @@ Two examples of device's implementations are provided.
 
 1. Start the fleet service:
    From the `services/fleet` folder run the following command:\
-   `POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable" go run fleet.go`
+   `POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"  POSTGRES_PASSWORD=docker go run fleet.go`
 
 1. Create users and services:
    From the `services/fleet/test/backend` and in a different shell than the previous command, run:\

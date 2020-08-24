@@ -40,9 +40,11 @@ var configurationJSON string = `
 
 // Service holds the configuration for this service
 //
-// use POSTGRES="host=localhost port=5432 user=postgres password=docker dbname=postgres sslmode=disable"
+// use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
+// and POSTRGRES_PASSWORD="docker"
 type Service struct {
-	Postgres string `env:"POSTGRES,required" description:"the connection string for the Postgres DB"`
+	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
+	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
 }
 
 func main() {
@@ -51,7 +53,7 @@ func main() {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(service.Postgres, "basic")
+	db := csql.OpenWithSchema(service.Postgres, service.PostgresPassword, "basic")
 	defer db.Close()
 
 	router := mux.NewRouter()

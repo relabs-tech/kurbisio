@@ -2,6 +2,7 @@ package csql
 
 import (
 	"database/sql"
+	"fmt"
 
 	_ "github.com/lib/pq" // load database driver for postgres
 	"github.com/relabs-tech/backends/core/logger"
@@ -21,9 +22,9 @@ var ErrNoRows = sql.ErrNoRows
 // OpenWithSchema opens a kurbisio postgres database with a schema.
 // The schema gets created if it does not exist yet.
 // The returned database also has the uuid-ossp extension loaded.
-func OpenWithSchema(dataSourceName, schema string) *DB {
+func OpenWithSchema(dataSourceName, dataSourcePassword, schema string) *DB {
 	logger.Default().Infoln("connecting to postgres database: ", dataSourceName)
-	db, err := sql.Open("postgres", dataSourceName)
+	db, err := sql.Open("postgres", fmt.Sprintf("%s password=%s", dataSourceName, dataSourcePassword))
 	if err != nil {
 		panic(err)
 	}

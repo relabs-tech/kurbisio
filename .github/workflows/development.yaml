@@ -41,13 +41,15 @@ jobs:
           go generate ./...
           go test ./...
         env:
-          POSTGRES: "host=postgres port=5432 user=runner password=docker dbname=postgres sslmode=disable"
+          POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
+          POSTGRES_PASSWORD: "docker"
 
       - name: go test race
         run: |
           go test ./... -race
         env:
-          POSTGRES: "host=postgres port=5432 user=runner password=docker dbname=postgres sslmode=disable"
+          POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
+          POSTGRES_PASSWORD: "docker"
 
   build:
     runs-on: [docker, backend]
