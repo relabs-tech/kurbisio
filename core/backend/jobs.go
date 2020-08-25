@@ -462,6 +462,8 @@ func timeoutJobKey(event string) string {
 }
 
 func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
+	rlog := logger.FromContext(ctx)
+	rlog.Debugf("commitWithNotification START")
 	request := notificationJobKey(resource, operation)
 
 	// only create a notification if somebody requested it
@@ -475,6 +477,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 
 	contextData := logger.SerializeLoggerContext(ctx)
 
+	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
 		"(type, resource,name,resource_id,payload,created_at,attempts_left,context)"+
@@ -490,12 +493,17 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	).Scan(&serial)
 
 	if err != nil {
+		rlog.Debugf("commitWithNotification before: tx.Rollback()")
 		tx.Rollback()
 		return err
 	}
+	rlog.Debugf("commitWithNotification before: err = tx.Commit()")
 	err = tx.Commit()
+	rlog.Debugf("commitWithNotification after: err = tx.Commit()")
 	if err == nil {
 		b.TriggerJobs()
+		rlog.Debugf("commitWithNotification after: b.TriggerJobs()")
 	}
+	rlog.Debugf("commitWithNotification END")
 	return err
 }
