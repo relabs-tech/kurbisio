@@ -96,12 +96,6 @@ CONSTRAINT job_compression UNIQUE(type,name,resource,resource_id)
 		}
 	}
 
-	_, err := b.db.Exec(`ALTER table ` + b.db.Schema + `."_job_"
-ADD COLUMN IF NOT EXISTS context JSON NOT NULL DEFAULT'{}'::jsonb;`)
-	if err != nil {
-		panic(err)
-	}
-
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1
 WHERE serial = (

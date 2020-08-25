@@ -3,6 +3,7 @@ on:
     branches:
       - master
       - refs/tags/*
+      - direct_deploy
     tags:
       - "[0-9].[0-9]+.[0-9]+-[0-9]+"
   pull_request:
