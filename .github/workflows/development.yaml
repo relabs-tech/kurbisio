@@ -72,7 +72,7 @@ jobs:
           GOOS=linux GOARCH=amd64 go build
     
       - name: deploy to AWS
-        if: startsWith(github.ref, 'refs/tags')
+        if: startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/direct_deploy'
         run: |
           cd services/fitness
           sam build
