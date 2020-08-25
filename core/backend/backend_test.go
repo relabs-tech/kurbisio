@@ -2,6 +2,7 @@ package backend
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -682,13 +683,13 @@ func TestNotifications(t *testing.T) {
 		createCount, updateCount, deleteCount, pointsCount int
 	)
 	var lock sync.Mutex
-	createHandler := func(n Notification) error {
+	createHandler := func(ctx context.Context, n Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		createCount++
 		return nil
 	}
-	updateHandler := func(n Notification) error {
+	updateHandler := func(ctx context.Context, n Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		updateCount++
@@ -702,7 +703,7 @@ func TestNotifications(t *testing.T) {
 		}
 		return nil
 	}
-	deleteHandler := func(n Notification) error {
+	deleteHandler := func(ctx context.Context, n Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		deleteCount++

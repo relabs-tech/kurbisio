@@ -23,33 +23,37 @@ import (
 // Notification is a database notification. Receive them
 // with HandleResource()
 type Notification struct {
-	Serial       int
-	Resource     string
-	Operation    core.Operation
-	ResourceID   uuid.UUID
-	Payload      []byte
-	CreatedAt    time.Time
-	AttemptsLeft int
-	Context      context.Context
+	Resource   string
+	ResourceID uuid.UUID
+	Operation  core.Operation
+	Payload    []byte
 }
 
-// Event is a higher level event. Receive them with HandleEvent(), raise them with RaiseEvent()
+// Event is a higher level event. Receive them with HandleEvent(), raise them with RaiseEvent(), scehdule them with ScheduleEvent()
 type Event struct {
-	Serial       int
-	Name         string
-	Resource     string
-	ResourceID   uuid.UUID
-	Payload      []byte
-	CreatedAt    time.Time
-	AttemptsLeft int
-	Context      context.Context
+	Type       string
+	Key        string
+	Resource   string
+	ResourceID uuid.UUID
+	Payload    []byte
+}
+
+// WithPayload adds a payload to an event. Payload can be an object or a []byte
+func (e Event) WithPayload(payload interface{}) Event {
+	data, ok := payload.([]byte)
+	if !ok {
+		data, _ = json.Marshal(payload)
+	}
+	e.Payload = data
+	return e
 }
 
 // job can be a database notification or a highl-level event
 type job struct {
 	Serial       int
+	Job          string
 	Type         string
-	Name         string
+	Key          string
 	Resource     string
 	ResourceID   uuid.UUID
 	Payload      []byte
@@ -59,15 +63,15 @@ type job struct {
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
-func (j *job) notification() Notification {
+func (j *job) notification() (Notification, context.Context) {
 	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
-	return Notification{j.Serial, j.Resource, core.Operation(j.Name), j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
+	return Notification{Resource: j.Resource, Operation: core.Operation(j.Type), ResourceID: j.ResourceID, Payload: j.Payload}, ctx
 }
 
 // event returns the job as high-level event. Only makes sense if the job type is "event"
-func (j *job) event() Event {
+func (j *job) event() (Event, context.Context) {
 	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
-	return Event{j.Serial, j.Name, j.Resource, j.ResourceID, j.Payload, j.CreatedAt, j.AttemptsLeft, ctx}
+	return Event{Type: j.Type, Key: j.Key, Resource: j.Resource, ResourceID: j.ResourceID, Payload: j.Payload}, ctx
 }
 
 type txJob struct {
@@ -79,17 +83,21 @@ func (b *Backend) handleJobs(router *mux.Router) {
 	if b.updateSchema {
 		_, err := b.db.Exec(`CREATE table IF NOT EXISTS ` + b.db.Schema + `."_job_" 
 (serial SERIAL,
-type VARCHAR NOT NULL,
-name VARCHAR NOT NULL DEFAULT '',
+job VARCHAR NOT NULL,
+type VARCHAR NOT NULL DEFAULT '',
+key VARCHAR NOT NULL DEFAULT '',
 resource VARCHAR NOT NULL DEFAULT '', 
 resource_id uuid NOT NULL DEFAULT uuid_nil(), 
 payload JSON NOT NULL DEFAULT'{}'::jsonb,
 created_at TIMESTAMP NOT NULL DEFAULT now(), 
 attempts_left INTEGER NOT NULL,
 context JSON NOT NULL DEFAULT'{}'::jsonb,
+scheduled_at TIMESTAMP,
 PRIMARY KEY(serial),
-CONSTRAINT job_compression UNIQUE(type,name,resource,resource_id)
-);`)
+CONSTRAINT job_compression UNIQUE(job,type,key,resource,resource_id)
+);
+CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(scheduled_at);
+`)
 
 		if err != nil {
 			panic(err)
@@ -101,12 +109,12 @@ SET attempts_left = attempts_left - 1
 WHERE serial = (
 SELECT serial
  FROM ` + b.db.Schema + `."_job_"
- WHERE attempts_left > 0
+ WHERE attempts_left > 0 AND (scheduled_at IS NULL OR $1 > scheduled_at)
  ORDER BY attempts_left, serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING serial, type, name, resource, resource_id, payload, created_at, attempts_left, context;
+RETURNING serial, job, type, key, resource, resource_id, payload, created_at, attempts_left, context;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
@@ -122,7 +130,7 @@ WHERE serial = $1 RETURNING serial;`
 
 func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
-	event := params["event"]
+	eventType := params["event"]
 	rlog := logger.FromContext(r.Context())
 	rlog.Infoln("in events with auth")
 	if b.authorizationEnabled {
@@ -133,18 +141,21 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var (
+		key        string
 		resource   string
 		resourceID uuid.UUID
 	)
 	urlQuery := r.URL.Query()
-	for key, array := range urlQuery {
+	for param, array := range urlQuery {
 		var err error
 		if len(array) > 1 {
-			http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+			http.Error(w, "illegal parameter array '"+param+"'", http.StatusBadRequest)
 			return
 		}
 		value := array[0]
-		switch key {
+		switch param {
+		case "key":
+			param = value
 		case "resource":
 			resource = value
 		case "resource_id":
@@ -153,7 +164,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 			err = fmt.Errorf("unknown query parameter")
 		}
 		if err != nil {
-			http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+			http.Error(w, "parameter '"+param+"': "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -167,7 +178,9 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	if len(body) > 0 { // we do not want to pass an empty []byte
 		payload = body
 	}
-	status, err := b.raiseEventWithResourceInternal(r.Context(), event, resource, resourceID, payload)
+	event := Event{Type: eventType, Key: key, Resource: resource, ResourceID: resourceID}.WithPayload(payload)
+	status, err := b.raiseEventWithResourceInternal(r.Context(), event, nil)
+
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
@@ -192,27 +205,27 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 					debug.PrintStack()
 				}
 			}()
-			switch job.Type {
+			switch job.Job {
 			case "notification":
-				notification := job.notification()
-				rlog = logger.FromContext(notification.Context)
+				notification, ctx := job.notification()
+				rlog = logger.FromContext(ctx)
 				key = notificationJobKey(notification.Resource, notification.Operation)
 				if handler, ok := b.callbacks[key]; ok {
-					err = handler.notification(notification)
+					err = handler.notification(ctx, notification)
 				} else {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
 			case "event":
-				event := job.event()
-				rlog = logger.FromContext(event.Context)
-				key = eventJobKey(event.Name)
+				event, ctx := job.event()
+				rlog = logger.FromContext(ctx)
+				key = eventJobKey(event.Type)
 				if handler, ok := b.callbacks[key]; ok {
-					err = handler.event(event)
+					err = handler.event(ctx, event)
 				} else {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
 			default:
-				err = fmt.Errorf("unknown job type %s", job.Type)
+				err = fmt.Errorf("unknown job type %s", job.Job)
 			}
 			return
 		}()
@@ -309,10 +322,12 @@ process:
 		}
 
 		var j job
-		err = tx.QueryRow(b.jobsUpdateQuery).Scan(
+		now := time.Now().UTC()
+		err = tx.QueryRow(b.jobsUpdateQuery, now).Scan(
 			&j.Serial,
+			&j.Job,
 			&j.Type,
-			&j.Name,
+			&j.Key,
 			&j.Resource,
 			&j.ResourceID,
 			&j.Payload,
@@ -346,12 +361,12 @@ process:
 }
 
 type jobHandler struct {
-	notification func(Notification) error
-	event        func(Event) error
+	notification func(context.Context, Notification) error
+	event        func(context.Context, Event) error
 }
 
 // HandleEvent installs a callback handler the specified event
-func (b *Backend) HandleEvent(event string, handler func(Event) error) {
+func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; ok {
 		log.Fatalf("callback handler for %s already installed", key)
@@ -362,60 +377,66 @@ func (b *Backend) HandleEvent(event string, handler func(Event) error) {
 // RaiseEvent raises the requested event. Payload can be nil, an object or a []byte.
 // Callbacks registered with HandleEvent() will be called.
 //
-// Multiple events of same kind will be compressed.
-func (b *Backend) RaiseEvent(ctx context.Context, event string, payload interface{}) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, event, "", uuid.UUID{}, payload)
+// Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
+// i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use a unique key
+//
+// Use ScheduleEvent if you want to schedule an event at a specific time.
+func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, event, nil)
 	return err
 }
 
-// RaiseEventWithResource raises the requested event. Payload can be nil, an object or a []byte.
+// ScheduleEvent schedules the requested event at a specific point in time. Payload can be nil, an object or a []byte.
 // Callbacks registered with HandleEvent() will be called.
 //
-// Multiple events of the same kind to the very same resource (resource + resourceID) will be compressed,
-// i.e. the newest payload will overwrite the previous payload.
-func (b *Backend) RaiseEventWithResource(ctx context.Context, event string, resource string, resourceID uuid.UUID, payload interface{}) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, event, resource, resourceID, payload)
+// Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
+// i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use a unique key
+//
+// Use RaiseEvent if you want to raise the event immediately.
+func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt time.Time) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, event, &scheduleAt)
 	return err
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event string, resource string, resourceID uuid.UUID, payload interface{}) (int, error) {
-	key := eventJobKey(event)
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Event, scheduleAt *time.Time) (int, error) {
+	key := eventJobKey(event.Type)
 	if _, ok := b.callbacks[key]; !ok {
 		return http.StatusConflict, fmt.Errorf("no callback handler installed for %s", key)
 	}
 	var (
-		ok          bool
 		err         error
 		data        []byte
 		contextData []byte
 	)
-	if payload != nil {
-		data, ok = payload.([]byte)
-		if !ok {
-			data, err = json.Marshal(payload)
-			if err != nil {
-				return http.StatusBadRequest, err
-			}
-		}
+
+	if event.Payload != nil {
+		data = event.Payload
 	} else {
 		data = []byte("{}")
 	}
 
 	contextData = logger.SerializeLoggerContext(ctx)
+	var scheduleAtUTC *time.Time
+	if scheduleAt != nil {
+		tmp := scheduleAt.UTC()
+		scheduleAtUTC = &tmp
+	}
 
 	var serial int
 	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(type,name,resource,resource_id,payload,created_at,attempts_left,context)"+
-		"VALUES('event',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
-		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6,context=$7 RETURNING serial;",
-		event,
-		resource,
-		resourceID,
+		"(job,type,key, resource,resource_id,payload,created_at,attempts_left,context, scheduled_at)"+
+		"VALUES('event',$1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT ON CONSTRAINT job_compression "+
+		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7,context=$8,scheduled_at=$9 RETURNING serial;",
+		event.Type,
+		event.Key,
+		event.Resource,
+		event.ResourceID,
 		data,
 		time.Now().UTC(),
 		b.pipelineMaxAttempts,
 		contextData,
+		scheduleAtUTC,
 	).Scan(&serial)
 
 	if err != nil {
@@ -428,7 +449,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event stri
 // HandleResource installs a callback handler for the given resource and the specified operations.
 // If no operations are specified, the handler will be installed for all modifying operations, i.e. create,
 // update and delete
-func (b *Backend) HandleResource(resource string, handler func(Notification) error, operations ...core.Operation) {
+func (b *Backend) HandleResource(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
 	if len(operations) == 0 {
 		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete}
 	}
@@ -451,10 +472,6 @@ func eventJobKey(event string) string {
 	return "event: " + event
 }
 
-func timeoutJobKey(event string) string {
-	return "timeout: " + event
-}
-
 func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
 	rlog := logger.FromContext(ctx)
 	rlog.Debugf("commitWithNotification START")
@@ -474,11 +491,11 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(type, resource,name,resource_id,payload,created_at,attempts_left,context)"+
+		"(job,type,resource,resource_id,payload,created_at,attempts_left,context)"+
 		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
 		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6,context=$7 RETURNING serial;",
-		resource,
 		operation,
+		resource,
 		resourceID,
 		payload,
 		time.Now().UTC(),
