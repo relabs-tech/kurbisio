@@ -62,6 +62,9 @@ var configurationJSON string = `{
 	  {
 		"resource": "with_schema",
 		"schema_id": "http://some_host.com/workout.json"
+	  },
+	  {
+		  "resource":"order"
 	  }
 	],
 	"singletons": [
@@ -588,6 +591,83 @@ func TestCreatedTimeAndNullID(t *testing.T) {
 	}
 	if a.CreatedAt.IsZero() {
 		t.Fatal("CreatedAt was not expected to be Zero")
+	}
+}
+
+func TestCollectionOrder(t *testing.T) {
+
+	type Order struct {
+		CreatedAt time.Time `json:"created_at"`
+		Serial    int64     `json:"serial"`
+	}
+
+	t0 := time.Now().UTC().Add(-time.Hour).Round(time.Millisecond) // round to postgres precision
+
+	_, err := testService.client.RawDelete("/orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		newOrder := Order{CreatedAt: t0.Add(time.Duration(i) * time.Minute), Serial: int64(i)}
+		_, err := testService.client.RawPost("/orders", &newOrder, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	isAscending := func(list []Order) bool {
+		for i, order := range list {
+			if order.Serial != int64(i) {
+				return false
+			}
+		}
+		return true
+	}
+
+	isDescending := func(list []Order) bool {
+		for i, order := range list {
+			if order.Serial != int64(len(list)-1-i) {
+				return false
+			}
+		}
+		return true
+	}
+
+	list := []Order{}
+	// default is descending
+	_, err = testService.client.RawGet("/orders", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 10 {
+		t.Fatalf("unexpected size %d", len(list))
+	}
+	if !isDescending(list) {
+		t.Fatalf("list is not descending %v", list)
+	}
+
+	// explicit descending
+	_, err = testService.client.RawGet("/orders?order=desc", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 10 {
+		t.Fatalf("unexpected size %d", len(list))
+	}
+	if !isDescending(list) {
+		t.Fatalf("list is not descending %v", list)
+	}
+
+	// explicit ascending
+	_, err = testService.client.RawGet("/orders?order=asc", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 10 {
+		t.Fatalf("unexpected size %d", len(list))
+	}
+	if !isAscending(list) {
+		t.Fatalf("list is not ascending %v", list)
 	}
 }
 

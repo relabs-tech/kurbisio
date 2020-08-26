@@ -173,7 +173,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
+	sqlPaginationDesc := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;",
+		columns[0], propertiesIndex+4, propertiesIndex+5)
+
+	sqlPaginationAsc := fmt.Sprintf("ORDER BY created_at ASC,%s ASC LIMIT $%d OFFSET $%d;",
+		columns[0], propertiesIndex+4, propertiesIndex+5)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
@@ -254,6 +258,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			from            time.Time
 			externalColumn  string
 			externalValue   string
+			ascendingOrder  bool
 		)
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
@@ -300,6 +305,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				if !found {
 					err = fmt.Errorf("unknown filter property '%s'", filterKey)
 				}
+			case "order":
+				if value != "asc" && value != "desc" {
+					err = fmt.Errorf("order must be asc or desc")
+					break
+				}
+				ascendingOrder = (value == "asc")
 
 			default:
 				err = fmt.Errorf("unknown")
@@ -341,7 +352,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
-		sqlQuery += sqlPagination
+		if ascendingOrder {
+			sqlQuery += sqlPaginationAsc
+
+		} else {
+			sqlQuery += sqlPaginationDesc
+		}
 
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {

@@ -201,7 +201,8 @@ The GET request on collections can be customized with any of the searchable prop
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?filter=identity=test@test.com
 
-The system supports pagination and filtering of responses by creation time.
+The system supports pagination and filtering of responses by creation time:
+	  ?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
 	  ?limit=n  sets a page limit of n items
 	  ?page=n   selects page number n. The first page is page 1
 	  ?from=t   selects items created at or after the timestamp t
