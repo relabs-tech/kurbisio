@@ -86,10 +86,9 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		if rlog == nil {
 			rlog = logger.Default()
 		}
-		rlog.Infoln("kid:", kid)
 		key, ok := wellKnownKeys[kid]
 		if ok {
-			rlog.Infoln("jwksLookup: got key for kid", kid)
+			rlog.Debugln("jwksLookup: got key for kid", kid)
 			return key, nil
 		}
 		rlog.Warningf("have %d well known keys, but not this one", len(wellKnownKeys))

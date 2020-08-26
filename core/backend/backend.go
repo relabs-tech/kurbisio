@@ -352,8 +352,8 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 	}
 
 	rlog := logger.FromContext(nil)
-	rlog.Infoln("create shortcut from", shortcut, "to", targetDoc)
-	rlog.Infoln("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
+	rlog.Debugln("create shortcut from", shortcut, "to", targetDoc)
+	rlog.Debugln("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
 
 	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
 		rlog := logger.FromContext(r.Context())
@@ -363,7 +363,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 
 		var match mux.RouteMatch
 		r.URL.Path = matchPrefix + tail
-		rlog.Infoln("try to match route", r.URL.Path)
+		rlog.Debugln("try to match route", r.URL.Path)
 		if !router.Match(r, &match) {
 			rlog.Errorln("Found no match")
 			http.NotFound(w, r)
