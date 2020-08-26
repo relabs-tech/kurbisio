@@ -64,7 +64,6 @@ jobs:
       - name: build
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
-          npm install quicktype
           go generate ./...
           for f in services/fitness/data/workout_plan_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/workout_plan_properties.json  ; done
           for f in services/fitness/data/conversation_templates/*.json; do go run services/fitness/tools/schema/main.go -filename $f -schema https://loyalty2you.com/schemas/conversation_properties.json  ; done
@@ -74,18 +73,11 @@ jobs:
       - name: deploy to AWS
         if: startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/direct_deploy'
         run: |
-          cd services/fitness
-          sam build
-
-          sam package \
-            --s3-bucket fitness-backend-bucket
-
-          sam deploy \
-            --stack-name fitness \
-            --s3-bucket fitness-backend-bucket \
-            --capabilities CAPABILITY_IAM \
-            --region eu-central-1 \
-            --parameter-overrides gitSHA=${GITHUB_SHA::8} versionTag=${GITHUB_REF##*/}
+          cd services/fitness/deployment_config
+          ./sam-deploy-lambdas.sh \
+            --template fitness-pub.yaml \
+            --gitSHA ${GITHUB_SHA::7} \
+            --version ${GITHUB_REF##*/}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
