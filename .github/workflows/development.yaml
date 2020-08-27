@@ -77,7 +77,8 @@ jobs:
           ./sam-deploy-lambdas.sh \
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
-            --version ${GITHUB_REF##*/}
+            --version ${GITHUB_REF##*/} \
+            --prod
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
