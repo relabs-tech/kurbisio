@@ -385,6 +385,17 @@ This returns a JSON body like this:
 	]
 }
 
+Version
 
+The Version of the software running can be obtain from a dedicated endpoint. The version can be set
+at compile time with the following parameter:
+-ldflags '-X github.com/relabs-tech/backends/core/backend.Version="1.2.3"'
+
+   /version
+
+   This returns a Json body like this:
+{
+	"version": "1.2.3"
+}
 */
 package backend

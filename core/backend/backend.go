@@ -136,6 +136,7 @@ func New(bb *Builder) *Backend {
 	access.HandleAuthorizationRoute(b.router)
 	b.handleResourceRoutes()
 	b.handleStatistics(b.router)
+	b.handleVersion(b.router)
 	b.handleJobs(b.router)
 	if b.updateSchema {
 		registry.Write("schema_version", newVersion)
