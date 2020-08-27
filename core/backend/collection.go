@@ -815,6 +815,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					continue property_loop
 				}
 			}
+			for i := propertiesIndex + 1; i < propertiesEndIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
 			if key == "created_at" || key == "revision" {
 				continue
 			}
@@ -1083,6 +1088,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	property_loop:
 		for key, value := range bodyJSON {
 			for i := 0; i < propertiesIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			for i := propertiesIndex + 1; i < propertiesEndIndex; i++ {
 				if key == columns[i] {
 					continue property_loop
 				}
