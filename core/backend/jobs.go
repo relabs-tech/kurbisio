@@ -93,9 +93,9 @@ created_at TIMESTAMP NOT NULL DEFAULT now(),
 attempts_left INTEGER NOT NULL,
 context JSON NOT NULL DEFAULT'{}'::jsonb,
 scheduled_at TIMESTAMP,
-PRIMARY KEY(serial),
-CONSTRAINT job_compression UNIQUE(job,type,key,resource,resource_id)
+PRIMARY KEY(serial)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_event_compression ON ` + b.db.Schema + `._job_(type,key,resource,resource_id) WHERE job = 'event';
 CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(scheduled_at);
 `)
 
@@ -425,8 +425,8 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 
 	var serial int
 	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,key, resource,resource_id,payload,created_at,attempts_left,context, scheduled_at)"+
-		"VALUES('event',$1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT ON CONSTRAINT job_compression "+
+		"(job,type,key,resource,resource_id,payload,created_at,attempts_left,context, scheduled_at)"+
+		"VALUES('event',$1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' "+
 		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7,context=$8,scheduled_at=$9 RETURNING serial;",
 		event.Type,
 		event.Key,
@@ -448,10 +448,10 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 
 // HandleResource installs a callback handler for the given resource and the specified operations.
 // If no operations are specified, the handler will be installed for all modifying operations, i.e. create,
-// update and delete
+// update, delete and clear
 func (b *Backend) HandleResource(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
 	if len(operations) == 0 {
-		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete}
+		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete, core.OperationClear}
 	}
 	for _, operation := range operations {
 		key := notificationJobKey(resource, operation)
@@ -492,8 +492,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
 		"(job,type,resource,resource_id,payload,created_at,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) ON CONFLICT ON CONSTRAINT job_compression "+
-		"DO UPDATE SET payload=$4,created_at=$5,attempts_left=$6,context=$7 RETURNING serial;",
+		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) RETURNING serial;",
 		operation,
 		resource,
 		resourceID,

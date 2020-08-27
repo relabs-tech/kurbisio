@@ -179,13 +179,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	sqlPaginationAsc := fmt.Sprintf("ORDER BY created_at ASC,%s ASC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex+4, propertiesIndex+5)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
-	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\"", schema, resource)
-	if propertiesIndex > 1 {
-		clearQuery += " WHERE " + compareIDsString(columns[1:propertiesIndex])
-	}
-	clearQuery += ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	sqlReturnPrimaryID := " RETURNING " + primary + "_id;"
 
@@ -329,7 +324,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
+			sqlQuery = readQueryWithTotal + sqlWhereAll + fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
 			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
@@ -643,18 +638,97 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		var (
+			queryParameters []interface{}
+			sqlQuery        string
+			until           time.Time
+			from            time.Time
+			externalColumn  string
+			externalValue   string
+		)
+		parameters := map[string]interface{}{}
 		urlQuery := r.URL.Query()
-		if len(urlQuery) > 0 {
-			http.Error(w, "clear does not take any parameters", http.StatusBadRequest)
+		for key, array := range urlQuery {
+			var err error
+			if len(array) > 1 {
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+			switch key {
+			case "until":
+				until, err = time.Parse(time.RFC3339, value)
+			case "from":
+				from, err = time.Parse(time.RFC3339, value)
+			case "filter":
+				i := strings.IndexRune(value, '=')
+				if i < 0 {
+					err = fmt.Errorf("cannot parse filter, must be of type property=value")
+					break
+				}
+				filterKey := value[:i]
+				filterValue := value[i+1:]
+
+				found := false
+				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+					if filterKey == columns[i] {
+						externalValue = filterValue
+						externalColumn = columns[i]
+						found = true
+					}
+				}
+				if !found {
+					err = fmt.Errorf("unknown filter property '%s'", filterKey)
+				}
+
+			default:
+				err = fmt.Errorf("unknown")
+			}
+
+			if err != nil {
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			parameters[key] = value
+		}
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		queryParameters := make([]interface{}, propertiesIndex-1)
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			queryParameters[i-1] = params[columns[i]]
+		if externalValue == "" { // delete entire collection
+			sqlQuery = clearQuery + sqlWhereAll + ";"
+			queryParameters = make([]interface{}, propertiesIndex-1+4)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+		} else {
+			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d);", externalColumn, propertiesIndex+4)
+			queryParameters = make([]interface{}, propertiesIndex-1+4+1)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+			queryParameters[propertiesIndex-1+4] = externalValue
 		}
 
-		_, err = b.db.Query(clearQuery, queryParameters...)
+		// add before and after and pagination
+		queryParameters[propertiesIndex-1+0] = until.IsZero()
+		queryParameters[propertiesIndex-1+1] = until.UTC()
+		queryParameters[propertiesIndex-1+2] = from.IsZero()
+		queryParameters[propertiesIndex-1+3] = from.UTC()
+
+		_, err = tx.Exec(sqlQuery, queryParameters...)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		notificationJSON, _ := json.Marshal(parameters)
+		fmt.Printf("\n\n\nCREATE CLEAR NOTIFICATION: %s\n", string(notificationJSON))
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

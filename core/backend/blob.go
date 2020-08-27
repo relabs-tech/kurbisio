@@ -686,7 +686,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			queryParameters[i-1] = params[columns[i]]
 		}
 
-		_, err = b.db.Query(clearQuery, queryParameters...)
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = tx.Query(clearQuery, queryParameters...)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, []byte(""))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
