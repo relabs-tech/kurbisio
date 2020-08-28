@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/logger"
 )
 
@@ -105,12 +106,13 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 	}
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
-SET attempts_left = attempts_left - 1
+SET attempts_left = attempts_left - 1,
+scheduled_at = CASE WHEN attempts_left>=3 then $2 WHEN attempts_left=2 THEN $3 ELSE $4 END::TIMESTAMP
 WHERE serial = (
 SELECT serial
  FROM ` + b.db.Schema + `."_job_"
  WHERE attempts_left > 0 AND (scheduled_at IS NULL OR $1 > scheduled_at)
- ORDER BY attempts_left, serial
+ ORDER BY serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
@@ -126,6 +128,61 @@ WHERE serial = $1 RETURNING serial;`
 		logger.Default().Infoln("called route for", r.URL, r.Method)
 		b.eventsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
+
+	router.HandleFunc("/kurbisio/health", func(w http.ResponseWriter, r *http.Request) {
+		logger.Default().Infoln("called route for", r.URL, r.Method)
+		b.health(w, r)
+	}).Methods(http.MethodOptions, http.MethodGet)
+}
+
+func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
+	rlog := logger.FromContext(r.Context())
+	rlog.Infoln("in health")
+
+	type Jobs struct {
+		Failed  int64 `json:"failed"`
+		Failing int64 `json:"failing"`
+		Overdue int64 `json:"overdue"`
+	}
+
+	var jobs Jobs
+
+	// get the number of failed jobs
+	failedJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left = 0 limit 1;`
+	err := b.db.QueryRow(failedJobsQuery).Scan(&jobs.Failed)
+	if err != nil && err != csql.ErrNoRows {
+		rlog.WithError(err).Errorf("cannot query jobs table")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	// get the number of jobs who failed at least once but are still scheduled for a retry
+	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 3 limit 1;`
+	err = b.db.QueryRow(failingJobsQuery).Scan(&jobs.Failing)
+	if err != nil && err != csql.ErrNoRows {
+		rlog.WithError(err).Errorf("cannot query jobs table")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	// get the number of jobs who should have been executed at least ten minutes ago
+	overdueJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND
+	((scheduled_at IS NULL AND $1 > created_at) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)) limit 1;`
+	tenMinutesAgo := time.Now().UTC().Add(-10 * time.Minute)
+	err = b.db.QueryRow(overdueJobsQuery, tenMinutesAgo).Scan(&jobs.Overdue)
+	if err != nil && err != csql.ErrNoRows {
+		rlog.WithError(err).Errorf("cannot query jobs table")
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	jsonData, _ := json.Marshal(struct {
+		Jobs Jobs `json:"jobs"`
+	}{
+		Jobs: jobs,
+	})
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(jsonData)
 }
 
 func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +212,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		value := array[0]
 		switch param {
 		case "key":
-			param = value
+			key = value
 		case "resource":
 			resource = value
 		case "resource_id":
@@ -174,9 +231,11 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var payload interface{}
+	var payload []byte
 	if len(body) > 0 { // we do not want to pass an empty []byte
 		payload = body
+	} else {
+		payload = []byte("{}")
 	}
 	event := Event{Type: eventType, Key: key, Resource: resource, ResourceID: resourceID}.WithPayload(payload)
 	status, err := b.raiseEventWithResourceInternal(r.Context(), event, nil)
@@ -323,7 +382,12 @@ process:
 
 		var j job
 		now := time.Now().UTC()
-		err = tx.QueryRow(b.jobsUpdateQuery, now).Scan(
+		err = tx.QueryRow(b.jobsUpdateQuery,
+			now,
+			now.Add(5*time.Minute),  // first retry timeout
+			now.Add(15*time.Minute), // second retry timeout
+			now.Add(45*time.Minute), // third retry timeout before we give up
+		).Scan(
 			&j.Serial,
 			&j.Job,
 			&j.Type,
