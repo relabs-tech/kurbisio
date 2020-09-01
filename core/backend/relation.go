@@ -359,13 +359,19 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		}
 		res, err := b.db.Exec(insertQuery, queryParameters...)
 		if err != nil {
-			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+			var code pq.ErrorCode
+			if err, ok := err.(*pq.Error); ok {
+				code = err.Code
+			}
+			switch code {
+			case "23505":
 				// put is omnipotent, so no error if the relation already exists
 				w.WriteHeader(http.StatusNoContent)
-
-				return
+			case "23503":
+				http.Error(w, "resource does not exist", http.StatusBadRequest)
+			default:
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		count, err := res.RowsAffected()
