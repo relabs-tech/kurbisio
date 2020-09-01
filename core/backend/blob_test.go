@@ -1,10 +1,11 @@
 package backend
 
 import (
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"net/http"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEtagGetBlob(t *testing.T) {
@@ -217,5 +218,5 @@ func TestBlobExternalID(t *testing.T) {
 	}
 	status, err := testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
 	status, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
-	assert.Equal(t, http.StatusConflict, status, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, status, err)
 }

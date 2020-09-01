@@ -22,7 +22,7 @@ import (
 )
 
 // Notification is a database notification. Receive them
-// with HandleResource()
+// with HandleResourceNotification()
 type Notification struct {
 	Resource   string
 	ResourceID uuid.UUID
@@ -333,33 +333,47 @@ func (b *Backend) HasJobsToProcess() bool {
 
 // ProcessJobsAsync starts a job processing loop. It returns immediately. This
 // function must only be called once.
-// The function triggers processing of left-over jobs in the database right away.
-func (b *Backend) ProcessJobsAsync() {
+//
+// If heartbeat is larger than 0, the function also starts a heartbeat timer for
+// processing of scheduled events and notifications.
+//
+// Left-over jobs in the database are processed right away.
+func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 	if b.processJobsAsyncRuns {
 		panic("already processing jobs")
 	}
 	b.processJobsAsyncRuns = true
 	b.processJobsAsyncTrigger = make(chan struct{}, 10)
 
+	if heartbeat > 0 {
+		// start heartbeat to process scheduled events and notifications
+		go func() {
+			for {
+				time.Sleep(heartbeat)
+				b.TriggerJobs()
+			}
+		}()
+	}
+
 	go func() {
-		b.ProcessJobsSync(-1)
+		b.ProcessJobsSync(0) // process left over events
 		for {
 			<-b.processJobsAsyncTrigger
 			if b.HasJobsToProcess() {
-				b.ProcessJobsSync(-1)
+				b.ProcessJobsSync(0)
 			}
 		}
 	}()
 
 }
 
-// ProcessJobsSync processes all pending jobs up to the specified mximum and then returns. It returns true if it
-// has maxed out and there are more jobs to process, otherwise it returns false.
-// It you pass -1, it will process all pending jobs. The behaviour for 0 is undefined.
-func (b *Backend) ProcessJobsSync(max int) bool {
+// ProcessJobsSync commisions all pending jobs up to the specified maximum duration and then returns after the last commissioned job was
+// fully processed. It returns true if it has maxed out and there are more jobs to process, otherwise it returns false.
+// It you pass 0, it will process all pending jobs.
+func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 	rlog := logger.FromContext(nil)
-	rlog.Infoln("process jobs")
 	jobCount := 0
+	startTime := time.Now()
 
 process:
 	b.HasJobsToProcess() // reset flag
@@ -409,7 +423,7 @@ process:
 		}
 		jobs <- txJob{j, tx}
 		jobCount++
-		if maxedOut = max >= 0 && jobCount >= max; maxedOut {
+		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; maxedOut {
 			break
 		}
 	}
@@ -420,7 +434,11 @@ process:
 		goto process // goto considered useful
 	}
 
-	rlog.Infof("process jobs done, did %d jobs (maxedOut == %t)", jobCount, maxedOut)
+	maxedOutString := ""
+	if maxedOut {
+		maxedOutString = " (maxed out)"
+	}
+	rlog.Infof("process jobs: %d done%s", jobCount, maxedOutString)
 	return maxedOut
 }
 
@@ -429,7 +447,9 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
-// HandleEvent installs a callback handler the specified event
+// HandleEvent installs a callback handler the specified event. Handlers are executed
+// out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
+// a few times with increasing timeout.
 func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; ok {
@@ -466,7 +486,7 @@ func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt tim
 func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Event, scheduleAt *time.Time) (int, error) {
 	key := eventJobKey(event.Type)
 	if _, ok := b.callbacks[key]; !ok {
-		return http.StatusConflict, fmt.Errorf("no callback handler installed for %s", key)
+		return http.StatusBadRequest, fmt.Errorf("no callback handler installed for %s", key)
 	}
 	var (
 		err         error
@@ -510,19 +530,37 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 	return http.StatusNoContent, nil
 }
 
-// HandleResource installs a callback handler for the given resource and the specified operations.
-// If no operations are specified, the handler will be installed for all modifying operations, i.e. create,
-// update, delete and clear
-func (b *Backend) HandleResource(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
+// HandleResourceNotification installs a callback handler for out-of-band notifications for a given resource
+// and a set of mutable operations.
+//
+// If no operations are specified, the handler will be installed for all mutable operations, i.e. create,
+// update, delete and clear. Notification handlers only support mutable operations. They are executed reliably
+// out-of-band when an object was modified, and retried a few times when they fail (i.e. return a non-nil error).
+//
+// The payload of a Create or Update notification is the object itself. The payload for a Delete notification
+// are the object's identifiers. The payload for a Clear notification is a map[string]string of the query
+// parameters (from,until,filter).
+//
+// If you need to intercept operations - including the immutable read and list operations -, then you can do that
+// in-band with a request handler, see HandleResourceRequest()
+func (b *Backend) HandleResourceNotification(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
+
+	if !b.hasCollectionOrSingleton(resource) {
+		logger.FromContext(nil).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
+	}
+
 	if len(operations) == 0 {
 		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete, core.OperationClear}
 	}
 	for _, operation := range operations {
+		if operation == core.OperationRead || operation == core.OperationList {
+			logger.FromContext(nil).Fatalf("resource notifications only work for mutable operations. Do you want HandleResourceRequest instead?")
+		}
 		key := notificationJobKey(resource, operation)
 		if _, ok := b.callbacks[key]; ok {
-			logger.FromContext(nil).Fatalf("callback handler for %s already installed", key)
+			logger.FromContext(nil).Fatalf("resource notification handler for %s already installed", key)
 		}
-		logger.FromContext(nil).Infof("install callback handler for %s", key)
+		logger.FromContext(nil).Infof("install resource notification handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
 	}
 }

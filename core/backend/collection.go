@@ -24,19 +24,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	schema := b.db.Schema
 	resource := rc.Resource
 
-	rlog := logger.FromContext(nil)
+	nillog := logger.FromContext(nil)
 	if singleton {
-		rlog.Infoln("create singleton collection:", resource)
+		nillog.Infoln("create singleton collection:", resource)
 	} else {
-		rlog.Infoln("create collection:", resource)
+		nillog.Infoln("create collection:", resource)
 	}
 	if rc.Description != "" {
-		rlog.Infoln("  description:", rc.Description)
+		nillog.Infoln("  description:", rc.Description)
 	}
 
 	if rc.SchemaID != "" {
 		if !b.jsonValidator.HasSchema(rc.SchemaID) {
-			rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+			nillog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 				rc.Resource, rc.SchemaID)
 		}
 	}
@@ -142,7 +142,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	if b.updateSchema {
 		_, err = b.db.Query(createQuery)
 		if err != nil {
-			rlog.Errorf("Error while updating schema when running: %s", createQuery)
+			nillog.Errorf("Error while updating schema when running: %s", createQuery)
 			panic(err)
 		}
 	}
@@ -157,10 +157,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	if singleton {
-		rlog.Infoln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
+		nillog.Infoln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
-	rlog.Infoln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
-	rlog.Infoln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+	nillog.Infoln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
+	nillog.Infoln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
@@ -256,6 +256,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			ascendingOrder  bool
 		)
 		urlQuery := r.URL.Query()
+		parameters := map[string]string{}
 		for key, array := range urlQuery {
 			var err error
 			if len(array) > 1 {
@@ -311,6 +312,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				err = fmt.Errorf("unknown")
 			}
 
+			parameters[key] = value
 			if err != nil {
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
@@ -381,7 +383,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			response = append(response, object)
 		}
 
+		// do request interceptors
 		jsonData, _ := json.Marshal(response)
+		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, parameters, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if data != nil {
+			jsonData = data
+		}
+
 		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
@@ -413,7 +425,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		list(w, r, nil)
 	}
 
-	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 
 		resourceID := params[this+"_id"]
@@ -469,21 +481,41 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
+		// do request interceptors
+		jsonData, _ := json.Marshal(response)
+		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), nil, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if data != nil {
+			jsonData = data
+		}
+
+		// add children if requested
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
 			switch key {
 			case "children":
+				if data != nil { // data was changed in interceptor
+					err = json.Unmarshal(jsonData, &response)
+					if err != nil {
+						http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
+
 				status, err := b.addChildrenToGetResponse(array, r, response)
 				if err != nil {
 					http.Error(w, err.Error(), status)
 					return
 				}
+				jsonData, _ = json.Marshal(response)
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 			}
 		}
 
-		jsonData, _ := json.Marshal(response)
 		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
@@ -495,7 +527,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
-	itemWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	readWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -505,7 +537,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		item(w, r, nil)
+		read(w, r, nil)
 	}
 
 	updatePropertyWithAuth := func(w http.ResponseWriter, r *http.Request, property string) {
@@ -536,6 +568,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		found := false
+		for i := staticPropertiesIndex; i < len(columns) && !found; i++ {
+			if property == columns[i] {
+				found = true
+			}
+		}
+		if !found {
+			http.Error(w, "unknown static property", http.StatusBadRequest)
+			return
+		}
+
 		value := params[property]
 		query := fmt.Sprintf(updatePropertyQuery, property)
 
@@ -546,31 +589,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		queryParameters[i] = value
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		var primaryID uuid.UUID
 		err = b.db.QueryRow(query, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
-			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		notification := make(map[string]interface{})
-		for i := 0; i < propertiesIndex; i++ {
-			notification[columns[i]] = params[columns[i]]
-			notification[property] = value
-		}
-		jsonData, _ := json.Marshal(notification)
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -588,6 +612,35 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
+		resourceID := params[this+"_id"]
+		if resourceID == "all" {
+			http.Error(w, "all is not a valid "+this, http.StatusBadRequest)
+			return
+		}
+		if singleton {
+			if params[owner+"_id"] == "all" {
+				if resourceID == "" {
+					http.Error(w, "all is not a valid "+owner+"_id for deleting a single "+this+". Did you meant to say "+core.Plural(this)+"?", http.StatusBadRequest)
+					return
+				}
+				params[owner+"_id"] = resourceID
+			} else if resourceID != "" && resourceID != params[owner+"_id"] {
+				http.Error(w, "identifier mismatch for "+this, http.StatusBadRequest)
+				return
+			}
+		}
+
+		primaryID, err := uuid.Parse(params[columns[0]])
+		if err != nil {
+			http.Error(w, "broken primary identifier", http.StatusBadRequest)
+			return
+		}
+
+		_, err = b.intercept(r.Context(), resource, core.OperationDelete, primaryID, nil, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -599,7 +652,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		var primaryID uuid.UUID
 		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnPrimaryID, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
@@ -646,7 +698,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			externalColumn  string
 			externalValue   string
 		)
-		parameters := map[string]interface{}{}
+		parameters := map[string]string{}
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
 			var err error
@@ -692,6 +744,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			parameters[key] = value
 		}
 
+		_, err = b.intercept(r.Context(), resource, core.OperationClear, uuid.UUID{}, parameters, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -727,7 +785,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		notificationJSON, _ := json.Marshal(parameters)
-		fmt.Printf("\n\n\nCREATE CLEAR NOTIFICATION: %s\n", string(notificationJSON))
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -738,6 +795,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
+
+		rlog := logger.FromContext(r.Context())
+
 		params := mux.Vars(r)
 		if bodyJSON == nil {
 			err := json.NewDecoder(r.Body).Decode(&bodyJSON)
@@ -793,15 +853,41 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		jsonData, _ := json.Marshal(bodyJSON)
+
 		if rc.SchemaID != "" {
-			validateJSON, _ := json.Marshal(bodyJSON)
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
+			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
-					string(validateJSON), rc.SchemaID, err)
+					string(jsonData), rc.SchemaID, err)
 				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
-					string(validateJSON), rc.SchemaID, err), http.StatusBadRequest)
+					string(jsonData), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
+		// primaryID can be string or uuid.UUID
+		primaryUUID, ok := bodyJSON[columns[0]].(uuid.UUID)
+		if !ok {
+			primaryString, ok := bodyJSON[columns[0]].(string)
+			if ok {
+				primaryUUID, err = uuid.Parse(primaryString)
+				if err != nil {
+					http.Error(w, "broken primary identifier", http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		data, err := b.intercept(r.Context(), resource, core.OperationCreate, primaryUUID, nil, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if data != nil {
+			json.Unmarshal(data, &bodyJSON)
+			if err != nil {
+				http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
@@ -874,13 +960,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = tx.QueryRow(insertQuery, values...).Scan(&id)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
-			http.Error(w, "singleton "+this+" already exists", http.StatusConflict)
+			http.Error(w, "singleton "+this+" already exists", http.StatusUnprocessableEntity)
 			return
 		} else if err != nil {
 			status := http.StatusInternalServerError
 			// Non unique external keys are reported as code Code 23505
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
-				status = http.StatusConflict
+				status = http.StatusUnprocessableEntity
 			}
 			tx.Rollback()
 			http.Error(w, err.Error(), status)
@@ -897,7 +983,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		jsonData, _ := json.Marshal(response)
+		jsonData, _ = json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -924,6 +1010,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+
+		rlog := logger.FromContext(r.Context())
 
 		params := mux.Vars(r)
 		var bodyJSON map[string]interface{}
@@ -997,7 +1085,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Write(rec.Body.Bytes())
 				return
-			} else if rec.Code == http.StatusConflict && !retried {
+			} else if rec.Code == http.StatusUnprocessableEntity && !retried {
 				// race condition: somebody else has create the object right now
 				retried = true
 				goto Retry
@@ -1013,12 +1101,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		if revision != 0 && revision != currentRevision {
 			tx.Rollback()
-			http.Error(w, this+" revision does not match", http.StatusConflict)
+			// revision does not match, return conflict status with the conflicting object
+			w.WriteHeader(http.StatusConflict)
+			jsonData, _ := json.Marshal(object)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Write(jsonData)
 			return
 		}
 		mergeProperties(object)
 
-		primaryID = current[0].(*uuid.UUID).String()
+		primaryUUID := *current[0].(*uuid.UUID)
+		primaryID = primaryUUID.String()
 
 		// for MethodPatch we get the existing object from the database and patch property by property
 		if r.Method == http.MethodPatch {
@@ -1063,22 +1156,35 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			// zero uuid counts as no uuid
 			if ok && value != "00000000-0000-0000-0000-000000000000" && value != idAsString {
 				tx.Rollback()
-				http.Error(w, "illegal "+k, http.StatusConflict)
+				http.Error(w, "illegal "+k, http.StatusBadRequest)
 				return
 			}
 			// update the bodyJSON so we can validate
 			bodyJSON[k] = values[i]
 		}
 
+		jsonData, _ := json.Marshal(bodyJSON)
 		if rc.SchemaID != "" {
-			validateJSON, _ := json.Marshal(bodyJSON)
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(validateJSON), rc.SchemaID); err != nil {
+			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 				rlog.Errorf("properties '%v' field does not follow schemaID %s, %v",
-					string(validateJSON), rc.SchemaID, err)
+					string(jsonData), rc.SchemaID, err)
 				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
-					string(validateJSON), rc.SchemaID, err), http.StatusBadRequest)
+					string(jsonData), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
+		data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, nil, jsonData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if data != nil {
+			json.Unmarshal(data, &bodyJSON)
+			if err != nil {
+				http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
@@ -1154,7 +1260,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		mergeProperties(response)
 
-		jsonData, _ := json.Marshal(response)
+		jsonData, _ = json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1169,7 +1275,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// store the collection functions  for later usage in relations
 	b.collectionFunctions[resource] = &collectionFunctions{
 		list: list,
-		item: item,
+		read: read,
 	}
 
 	// CREATE
@@ -1193,7 +1299,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// READ
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		itemWithAuth(w, r)
+		readWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// PUT FOR STATIC PROPERTIES
@@ -1213,7 +1319,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 	}
 
-	// READ ALL
+	// LIST
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)
@@ -1238,7 +1344,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// READ
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		itemWithAuth(w, r)
+		readWithAuth(w, r)
 
 	}).Methods(http.MethodOptions, http.MethodGet)
 

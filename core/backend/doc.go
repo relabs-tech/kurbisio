@@ -149,8 +149,8 @@ Revisions
 Every item has an integer property "revision", which is incremented every time the item is updated. Revisions can be
 used to make updates safe in systems with multiple concurrent writers. If a PUT or PATCH request contains a
 non-zero revision number which does not match the item's current revision, then the request is discarded and
-an error message (409 - Conflict) is returned. A PUT or PATCH request with a revision of zero, or no revision at all, will
-not be checked for possible conflicts.
+the conflicting newer version of the object is returned with an error status (409 - Conflict).
+A PUT or PATCH request with a revision of zero, or no revision at all, will not be checked for possible conflicts.
 
 Wildcard Queries
 

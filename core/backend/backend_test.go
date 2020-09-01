@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +60,9 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"notification/normal"
+	  },
+	  {
+		"resource":"interception"
 	  },
 	  {
 		"resource": "with_schema",
@@ -792,17 +797,17 @@ func TestNotifications(t *testing.T) {
 
 	backend := testService.backend
 
-	backend.HandleResource("notification", createHandler, core.OperationCreate)
-	backend.HandleResource("notification/normal", createHandler, core.OperationCreate)
-	backend.HandleResource("notification/single", createHandler, core.OperationCreate)
+	backend.HandleResourceNotification("notification", createHandler, core.OperationCreate)
+	backend.HandleResourceNotification("notification/normal", createHandler, core.OperationCreate)
+	backend.HandleResourceNotification("notification/single", createHandler, core.OperationCreate)
 
-	backend.HandleResource("notification", updateHandler, core.OperationUpdate)
-	backend.HandleResource("notification/normal", updateHandler, core.OperationUpdate)
-	backend.HandleResource("notification/single", updateHandler, core.OperationUpdate)
+	backend.HandleResourceNotification("notification", updateHandler, core.OperationUpdate)
+	backend.HandleResourceNotification("notification/normal", updateHandler, core.OperationUpdate)
+	backend.HandleResourceNotification("notification/single", updateHandler, core.OperationUpdate)
 
-	backend.HandleResource("notification", deleteHandler, core.OperationDelete)
-	backend.HandleResource("notification/normal", deleteHandler, core.OperationDelete)
-	backend.HandleResource("notification/single", deleteHandler, core.OperationDelete)
+	backend.HandleResourceNotification("notification", deleteHandler, core.OperationDelete)
+	backend.HandleResourceNotification("notification/normal", deleteHandler, core.OperationDelete)
+	backend.HandleResourceNotification("notification/single", deleteHandler, core.OperationDelete)
 
 	client := testService.client
 
@@ -860,7 +865,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessJobsSync(-1)
+	backend.ProcessJobsSync(0)
 
 	// delete child singleton object with wildcard path
 	_, err = client.RawDelete("/notifications/all/singles/" + nid)
@@ -876,7 +881,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessJobsSync(-1)
+	backend.ProcessJobsSync(0)
 
 	// update child collection object with singleton path and 3 points
 	nsres["points"] = int64(3)
@@ -886,7 +891,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessJobsSync(-1)
+	backend.ProcessJobsSync(0)
 
 	// delete child singleton object with singleton path
 	_, err = client.RawDelete("/notifications/" + nid + "/single")
@@ -901,7 +906,7 @@ func TestNotifications(t *testing.T) {
 	}
 
 	// do notification processing
-	backend.ProcessJobsSync(-1)
+	backend.ProcessJobsSync(0)
 
 	if createCount != 4 {
 		t.Fatalf("unexpected number of creates: %d", createCount)
@@ -914,6 +919,116 @@ func TestNotifications(t *testing.T) {
 	}
 	if pointsCount != 11 {
 		t.Fatalf("unexpected number of points: %d", pointsCount)
+	}
+
+}
+
+func TestRequestInterceptors(t *testing.T) {
+	backend := testService.backend
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		var object map[string]interface{}
+		json.Unmarshal(data, &object)
+		object["interceptor_create"] = "Kilroy was here!"
+		return json.Marshal(object)
+	}, core.OperationCreate)
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		var object map[string]interface{}
+		json.Unmarshal(data, &object)
+		object["interceptor_update"] = "Kilroy was here!"
+		return json.Marshal(object)
+	}, core.OperationUpdate)
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		var object map[string]interface{}
+		json.Unmarshal(data, &object)
+		object["interceptor_read"] = "Kilroy was here!"
+		return json.Marshal(object)
+	}, core.OperationRead)
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		return nil, errors.New("Kilroy does not want this to be deleted")
+	}, core.OperationDelete)
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		return nil, errors.New("Kilroy does not want the entire list to be cleared")
+	}, core.OperationClear)
+
+	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		var list []map[string]interface{}
+		json.Unmarshal(data, &list)
+		for i := range list {
+			list[i]["interceptor_list"] = "Kilroy was here!"
+		}
+		return json.Marshal(list)
+	}, core.OperationList)
+
+	client := testService.client
+
+	// create root object
+	type Interception map[string]interface{}
+	nreq := Interception{"secret": "pssst!"}
+	var nres Interception
+	_, err := client.RawPost("/interceptions", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that we got the newly created object back
+	assert.Equal(t, nres["secret"], "pssst!")
+	// check that the create interceptor did its work
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_create"])
+	// check that the read interceptor was NOT called
+	assert.NotEqual(t, "Kilroy was here!", nres["interceptor_read"])
+
+	id, _ := nres["interception_id"].(string)
+	_, err = client.RawPut("/interceptions/"+id, &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that we got the newly created objecttback
+	assert.Equal(t, "pssst!", nres["secret"])
+	// check that the work of the create interceptor was persisted in the database
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_create"])
+	// check that the update interceptor did its work
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_update"])
+	// check that the read interceptor was NOT called
+	assert.NotEqual(t, "Kilroy was here!", nres["interceptor_read"])
+
+	_, err = client.RawGet("/interceptions/"+id, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that we got the newly created objecttback
+	assert.Equal(t, nres["secret"], "pssst!")
+	// check that the work of the create interceptor was persisted in the database
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_create"])
+	// check that the work of the update interceptor was persisted in the database
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_update"])
+	// check that the read interceptor was called
+	assert.Equal(t, "Kilroy was here!", nres["interceptor_read"])
+
+	status, err := client.RawDelete("/interceptions/" + id)
+	assert.Equal(t, http.StatusBadRequest, status)
+	if err == nil || !strings.HasSuffix(err.Error(), "Kilroy does not want this to be deleted") {
+		t.Fatal("missing Kilroy's message for deletion:", err)
+	}
+
+	status, err = client.RawDelete("/interceptions")
+	assert.Equal(t, http.StatusBadRequest, status)
+	if err == nil || !strings.HasSuffix(err.Error(), "Kilroy does not want the entire list to be cleared") {
+		t.Fatal("missing Kilroy's message for clear:", err)
+	}
+
+	var list []Interception
+	_, err = client.RawGet("/interceptions", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range list {
+		// check that the list interceptor was called
+		assert.Equal(t, "Kilroy was here!", list[i]["interceptor_list"])
+
 	}
 
 }

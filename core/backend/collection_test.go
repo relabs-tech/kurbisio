@@ -189,14 +189,14 @@ func TestEtagCollectionRegenerated(t *testing.T) {
 }
 
 // TestCollectionExternalID verifies that if we try to create twice an element with the same
-// external id, we get a 409 error
+// external id, we get a 422 error
 func TestCollectionExternalID(t *testing.T) {
 	a := A{ExternalID: "an external id"}
 	if _, err := testService.client.RawPost("/as", a, &a); err != nil {
 		t.Fatal(err)
 	}
 	status, err := testService.client.RawPost("/as", a, &a)
-	assert.Equal(t, http.StatusConflict, status, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, status, err)
 }
 
 func TestCollectionWithSchemaValidation(t *testing.T) {

@@ -35,7 +35,9 @@ type Backend struct {
 	authorizationEnabled bool
 	updateSchema         bool
 
-	callbacks map[string]jobHandler
+	collectionsAndSingletons []string
+	callbacks                map[string]jobHandler
+	interceptors             map[string]requestHandler
 
 	pipelineConcurrency     int
 	pipelineMaxAttempts     int
@@ -109,6 +111,7 @@ func New(bb *Builder) *Backend {
 		Registry:             registry.New(bb.DB),
 		authorizationEnabled: bb.AuthorizationEnabled,
 		callbacks:            make(map[string]jobHandler),
+		interceptors:         make(map[string]requestHandler),
 		pipelineConcurrency:  pipelineConcurrency,
 		pipelineMaxAttempts:  pipelineMaxAttempts,
 	}
@@ -198,11 +201,13 @@ func (b *Backend) handleResourceRoutes() {
 	for i := range b.config.Collections {
 		rc := &b.config.Collections[i]
 		allResources = append(allResources, anyResourceConfiguration{collection: rc})
+		b.collectionsAndSingletons = append(b.collectionsAndSingletons, rc.Resource)
 	}
 
 	for i := range b.config.Singletons {
 		rc := &b.config.Singletons[i]
 		allResources = append(allResources, anyResourceConfiguration{singleton: rc})
+		b.collectionsAndSingletons = append(b.collectionsAndSingletons, rc.Resource)
 	}
 
 	for i := range b.config.Blobs {
@@ -254,7 +259,7 @@ type relationInjection struct {
 
 type collectionFunctions struct {
 	list func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	item func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	read func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 }
 
 // returns $1,...,$n
@@ -317,6 +322,15 @@ func patchObject(object map[string]interface{}, patch map[string]interface{}) {
 			object[k] = v
 		}
 	}
+}
+
+func (b *Backend) hasCollectionOrSingleton(resource string) bool {
+	for _, r := range b.collectionsAndSingletons {
+		if r == resource {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {

@@ -357,7 +357,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		list(w, r, nil)
 	}
 
-	item := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -430,7 +430,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(blob)
 	}
 
-	getItemWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	readWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -439,7 +439,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-		item(w, r, nil)
+		read(w, r, nil)
 	}
 
 	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -526,7 +526,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			status := http.StatusBadRequest
 			// Non unique external keys are reported as code Code 23505
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
-				status = http.StatusConflict
+				status = http.StatusUnprocessableEntity
 			}
 			tx.Rollback()
 			http.Error(w, "cannot create "+this+": "+err.Error(), status)
@@ -625,7 +625,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		if err == sql.ErrNoRows {
 			tx.Rollback()
 			if authorizedForCreate {
-				http.Error(w, "cannot create "+this, http.StatusConflict)
+				http.Error(w, "cannot create "+this, http.StatusUnprocessableEntity)
 			} else {
 				http.Error(w, "no such "+this, http.StatusNotFound)
 			}
@@ -758,7 +758,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// store the collection helper for later usage in relations
 	b.collectionFunctions[this] = &collectionFunctions{
 		list: list,
-		item: item,
+		read: read,
 	}
 
 	// CREATE
@@ -770,10 +770,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// READ
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		getItemWithAuth(w, r)
+		readWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
-	// READ ALL
+	// LIST
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)

@@ -173,7 +173,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	rlog.Infoln("  handle routes:", rightListRoute, "GET")
 	rlog.Infoln("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
 
-	// READ ALL LEFT
+	// LIST LEFT
 	router.HandleFunc(leftListRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
@@ -237,7 +237,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		rightCollection.list(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
-	// READ ALL RIGHT
+	// LIST RIGHT
 	router.HandleFunc(rightListRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 
@@ -324,7 +324,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		rightCollection.item(w, r, injectRelation)
+		rightCollection.read(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ RIGHT
@@ -348,7 +348,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			queryParameters: queryParameters,
 		}
 
-		leftCollection.item(w, r, injectRelation)
+		leftCollection.read(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	create := func(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +360,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		res, err := b.db.Exec(insertQuery, queryParameters...)
 		if err != nil {
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
-				http.Error(w, "relation exists", http.StatusConflict)
+				// put is omnipotent, so no error if the relation already exists
+				w.WriteHeader(http.StatusNoContent)
+
 				return
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)

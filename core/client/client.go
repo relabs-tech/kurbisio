@@ -236,7 +236,8 @@ func (r Item) Update(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPut(r.Path(), body, result)
 }
 
-// UpdateProperty updates a single static property
+// UpdateProperty updates a single static property in the fastes possible
+// way. Note: this method does not trigger any resource update notification
 func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
 	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
 }
@@ -317,7 +318,7 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 
 	}
 	if status != http.StatusOK {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
 	}
 
 	var err error
@@ -354,7 +355,7 @@ func (c *Client) RawGetWithHeader(path string, header map[string]string, result 
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
 	}
 
 	var err error
@@ -391,7 +392,7 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, rec.Body.String())
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
 	}
 
 	if rec.Body != nil {
@@ -423,7 +424,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 
 	status := rec.Code
 	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, strings.TrimSpace(rec.Body.String()))
 	}
 
 	if rec.Body != nil && result != nil {
@@ -452,7 +453,7 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 
 	status := rec.Code
 	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, strings.TrimSpace(rec.Body.String()))
 	}
 	var err error
 	if rec.Body != nil && result != nil {
@@ -461,7 +462,7 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 	return status, err
 }
 
-// RawPut puts a resource to path. Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// RawPut puts a resource to path. Expects http.StatusOK, http.StatusCreated, http.StatusNoContent or http.StatusConflict as valid responses,
 // otherwise it will flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
@@ -483,8 +484,8 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 	c.router.ServeHTTP(rec, r)
 
 	status := rec.Code
-	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
+	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
 	}
 	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -513,7 +514,7 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 
 	status := rec.Code
 	if status != http.StatusOK && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
 	}
 
 	var err error
@@ -546,7 +547,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 
 	status := rec.Code
 	if status != http.StatusOK && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
 	}
 	if rec.Body != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -571,7 +572,7 @@ func (c Client) RawDelete(path string) (int, error) {
 
 	status := rec.Code
 	if status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusNoContent, rec.Body.String())
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
 	}
 	return status, nil
 }
