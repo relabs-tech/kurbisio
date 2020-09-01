@@ -71,7 +71,7 @@ func (v *Validator) validate(loader gojsonschema.JSONLoader, schemaID string) er
 
 	schema, ok := v.schemaValidators[schemaID]
 	if !ok {
-		return fmt.Errorf("there is not schema %s ", schemaID)
+		return fmt.Errorf("there is no schema %s ", schemaID)
 	}
 
 	result, err := schema.Validate(loader)

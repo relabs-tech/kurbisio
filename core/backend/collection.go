@@ -1055,6 +1055,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
+			rlog.Errorf("Update of resource `%s` failed with error: %v", resource, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
