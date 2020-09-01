@@ -70,7 +70,7 @@ jobs:
           cd services/fitness
           GOOS=linux GOARCH=amd64 go build
     
-      - name: deploy to AWS
+      - name: deploy to prod
         if: startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/direct_deploy'
         run: |
           cd services/fitness/deployment_config
@@ -79,6 +79,19 @@ jobs:
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
             --prod
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-central-1
+
+      - name: deploy to stage
+        if: github.ref == 'refs/heads/master'
+        run: |
+          cd services/fitness/deployment_config
+          ./sam-deploy-lambdas.sh \
+            --template fitness-pub.yaml \
+            --gitSHA ${GITHUB_SHA::7} \
+            --version ${GITHUB_REF##*/}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
