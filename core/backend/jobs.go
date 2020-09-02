@@ -535,13 +535,15 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 // HandleResourceNotification installs a callback handler for out-of-band notifications for a given resource
 // and a set of mutable operations.
 //
-// If no operations are specified, the handler will be installed for all mutable operations, i.e. create,
-// update, delete and clear. Notification handlers only support mutable operations. They are executed reliably
+// If no operations are specified, the handler will be installed for all mutable operations on single
+// resources, i.e. create, update and delete.
+//
+// Notification handlers only support mutable operations. They are executed reliably
 // out-of-band when an object was modified, and retried a few times when they fail (i.e. return a non-nil error).
 //
-// The payload of a Create or Update notification is the object itself. The payload for a Delete notification
-// are the object's identifiers. The payload for a Clear notification is a map[string]string of the query
-// parameters (from,until,filter).
+// The payload of a Create, Update or Delete notification is the object itself. The payload for a Clear notification
+// is a map[string]string of the query parameters (from,until,filter) and the collection's identifiers from the
+// request URL.
 //
 // If you need to intercept operations - including the immutable read and list operations -, then you can do that
 // in-band with a request handler, see HandleResourceRequest()

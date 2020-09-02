@@ -182,7 +182,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
-	sqlReturnPrimaryID := " RETURNING " + primary + "_id;"
+	sqlReturnObject := " RETURNING " + strings.Join(columns, ", ") + ", created_at, revision"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ")"
@@ -662,7 +662,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4729", http.StatusInternalServerError)
 			return
 		}
-		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnPrimaryID, queryParameters...).Scan(&primaryID)
+
+		var createdAt time.Time
+		values, object := createScanValuesAndObject(&createdAt, new(int))
+		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
@@ -675,11 +678,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		notification := make(map[string]interface{})
-		for i := 0; i < propertiesIndex; i++ {
-			notification[columns[i]] = params[columns[i]]
-		}
-		jsonData, _ := json.Marshal(notification)
+		jsonData, _ := json.Marshal(object)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4750: cannot QueryRow")
@@ -797,6 +796,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		// add collection identifiers to parameters for the notification
+		for i := 1; i < propertiesIndex; i++ {
+			idOrAll := params[columns[i]]
+			if idOrAll != "all" {
+				parameters[columns[i]] = idOrAll
+			}
+		}
 		notificationJSON, _ := json.Marshal(parameters)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
