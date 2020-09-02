@@ -87,7 +87,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: eu-central-1
 
-      - name: deploy to stage
+      - name: deploy to staging
         if: github.ref == 'refs/heads/master'
         run: |
           cd services/fitness/deployment_config
@@ -95,9 +95,9 @@ jobs:
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
-            --env stage
+            --env stating
           cd ../data/conversation_templates/
-          go run upload.go --url https://stage.api.loyalty2you.com
+          go run upload.go --url https://staging.api.loyalty2you.com
           cd -
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
