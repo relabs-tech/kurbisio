@@ -78,7 +78,7 @@ jobs:
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
-            --prod
+            --env prod
           cd ../data/conversation_templates/
           go run upload.go --url https://api.loyalty2you.com
           cd -
@@ -94,9 +94,10 @@ jobs:
           ./sam-deploy-lambdas.sh \
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
-            --version ${GITHUB_REF##*/}
+            --version ${GITHUB_REF##*/} \
+            --env stage
           cd ../data/conversation_templates/
-          go run upload.go --url https://stage-api.loyalty2you.com
+          go run upload.go --url https://stage.api.loyalty2you.com
           cd -
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
