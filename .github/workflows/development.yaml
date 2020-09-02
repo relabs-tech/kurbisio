@@ -95,7 +95,7 @@ jobs:
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
-            --env stating
+            --env staging
           cd ../data/conversation_templates/
           go run upload.go --url https://staging.api.loyalty2you.com
           cd -
