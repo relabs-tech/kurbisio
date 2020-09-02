@@ -125,44 +125,41 @@ WHERE serial = $1 RETURNING serial;`
 	logger.Default().Infoln("  handle route: /kurbisio/events PUT")
 
 	router.HandleFunc("/kurbisio/events/{event}", func(w http.ResponseWriter, r *http.Request) {
-		logger.Default().Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		b.eventsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	router.HandleFunc("/kurbisio/health", func(w http.ResponseWriter, r *http.Request) {
-		logger.Default().Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		b.health(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 }
 
-func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
-	rlog := logger.FromContext(r.Context())
-	rlog.Infoln("in health")
-
-	type Jobs struct {
+// Health contains the backend's health status
+type Health struct {
+	Jobs struct {
 		Failed  int64 `json:"failed"`
 		Failing int64 `json:"failing"`
 		Overdue int64 `json:"overdue"`
-	}
+	} `json:"jobs"`
+}
 
-	var jobs Jobs
-
+// Health returns the backend's health status
+func (b *Backend) Health() (Health, error) {
+	health := Health{}
+	jobs := &health.Jobs
 	// get the number of failed jobs
 	failedJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left = 0 limit 1;`
 	err := b.db.QueryRow(failedJobsQuery).Scan(&jobs.Failed)
 	if err != nil && err != csql.ErrNoRows {
-		rlog.WithError(err).Errorf("cannot query jobs table")
-		http.Error(w, "database error", http.StatusInternalServerError)
-		return
+		return health, err
 	}
 
 	// get the number of jobs who failed at least once but are still scheduled for a retry
 	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 3 limit 1;`
 	err = b.db.QueryRow(failingJobsQuery).Scan(&jobs.Failing)
 	if err != nil && err != csql.ErrNoRows {
-		rlog.WithError(err).Errorf("cannot query jobs table")
-		http.Error(w, "database error", http.StatusInternalServerError)
-		return
+		return health, err
 	}
 
 	// get the number of jobs who should have been executed at least ten minutes ago
@@ -171,16 +168,21 @@ func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
 	tenMinutesAgo := time.Now().UTC().Add(-10 * time.Minute)
 	err = b.db.QueryRow(overdueJobsQuery, tenMinutesAgo).Scan(&jobs.Overdue)
 	if err != nil && err != csql.ErrNoRows {
-		rlog.WithError(err).Errorf("cannot query jobs table")
-		http.Error(w, "database error", http.StatusInternalServerError)
+		return health, err
+	}
+	return health, nil
+}
+
+func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
+	rlog := logger.FromContext(r.Context())
+	health, err := b.Health()
+	if err != nil {
+		rlog.WithError(err).Errorln("cannot query database")
+		http.Error(w, "cannot query database", http.StatusInternalServerError)
 		return
 	}
+	jsonData, _ := json.Marshal(health)
 
-	jsonData, _ := json.Marshal(struct {
-		Jobs Jobs `json:"jobs"`
-	}{
-		Jobs: jobs,
-	})
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(jsonData)
 }
