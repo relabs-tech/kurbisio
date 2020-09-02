@@ -177,8 +177,8 @@ func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
 	rlog := logger.FromContext(r.Context())
 	health, err := b.Health()
 	if err != nil {
-		rlog.WithError(err).Errorln("cannot query database")
-		http.Error(w, "cannot query database", http.StatusInternalServerError)
+		rlog.WithError(err).Errorln("Error 4222: cannot query database")
+		http.Error(w, "Error 4222: ", http.StatusInternalServerError)
 		return
 	}
 	jsonData, _ := json.Marshal(health)

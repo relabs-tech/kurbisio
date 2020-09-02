@@ -163,7 +163,8 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				err = jmb.DB.QueryRow(authQuery, identity).Scan(&authID, &properties)
 
 				if err != nil && err != sql.ErrNoRows {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					rlog.WithError(err).Errorf("Error 4723: cannot execute authorization query `%s`", authQuery)
+					http.Error(w, "Error 4723", http.StatusInternalServerError)
 					return
 				}
 				if err == nil {

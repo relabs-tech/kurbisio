@@ -3,6 +3,7 @@ package twin
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/relabs-tech/backends/core/logger"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -97,7 +98,8 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2640")
+			http.Error(w, "Error 2640", http.StatusInternalServerError)
 			return
 		}
 		response := []twin{}
@@ -140,7 +142,8 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2641")
+			http.Error(w, "Error 2641", http.StatusInternalServerError)
 			return
 		}
 
@@ -174,7 +177,8 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2642")
+			http.Error(w, "Error 2642", http.StatusInternalServerError)
 			return
 		}
 
@@ -208,7 +212,8 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2643")
+			http.Error(w, "Error 2643", http.StatusInternalServerError)
 			return
 		}
 
@@ -254,7 +259,8 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 		}
 		count, err := res.RowsAffected()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2644")
+			http.Error(w, "Error 2644", http.StatusInternalServerError)
 			return
 		}
 
@@ -306,7 +312,8 @@ ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6;`,
 		}
 		count, err := res.RowsAffected()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Default().WithError(err).Errorf("Error 2645")
+			http.Error(w, "Error 2645", http.StatusInternalServerError)
 			return
 		}
 

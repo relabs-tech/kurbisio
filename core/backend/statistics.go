@@ -58,7 +58,8 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 		row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
 		var size, count int64
 		if err := row.Scan(&size, &count); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.FromContext(nil).WithError(err).Errorln("Error 4028: Scan")
+			http.Error(w, "Error 4028: ", http.StatusInternalServerError)
 			return
 		}
 		var averageSize float64 = 0

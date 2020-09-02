@@ -208,7 +208,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			rows, err := b.db.Query(leftQuery, queryParameters...)
 			if err != sql.ErrNoRows {
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					rlog.WithError(err).Errorln("Error 4123: cannot query database")
+					http.Error(w, "Error 4123: ", http.StatusInternalServerError)
 					return
 				}
 				defer rows.Close()
@@ -216,7 +217,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 					id := uuid.UUID{}
 					err := rows.Scan(&id)
 					if err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
+						rlog.WithError(err).Errorln("Error 4124: Next")
+						http.Error(w, "Error 4124: ", http.StatusInternalServerError)
 						return
 					}
 					response = append(response, id)
@@ -273,7 +275,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			rows, err := b.db.Query(rightQuery, queryParameters...)
 			if err != sql.ErrNoRows {
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					rlog.WithError(err).Errorln("Error 4125: Query")
+					http.Error(w, "Error 4125: ", http.StatusInternalServerError)
 					return
 				}
 				defer rows.Close()
@@ -281,7 +284,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 					id := uuid.UUID{}
 					err := rows.Scan(&id)
 					if err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
+						rlog.WithError(err).Errorln("Error 4126: Scan")
+						http.Error(w, "Error 4126: ", http.StatusInternalServerError)
 						return
 					}
 					response = append(response, id)
@@ -370,14 +374,16 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			case "23503":
 				http.Error(w, "resource does not exist", http.StatusBadRequest)
 			default:
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				rlog.WithError(err).Errorln("Error 4127: Exec")
+				http.Error(w, "Error 4127: ", http.StatusInternalServerError)
 			}
 			return
 		}
 		count, err := res.RowsAffected()
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorln("Error 4128: RowsAffected")
+			http.Error(w, "Error 4128: ", http.StatusInternalServerError)
 			return
 		}
 
@@ -431,7 +437,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		}
 		count, err := res.RowsAffected()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorln("Error 4129: RowsAffected")
+			http.Error(w, "Error 4129: ", http.StatusInternalServerError)
 			return
 		}
 

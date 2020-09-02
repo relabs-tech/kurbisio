@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/relabs-tech/backends/core/logger"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -115,7 +116,8 @@ func (a *API) addMiddleware(router *mux.Router) {
 						}
 
 						if err != nil {
-							http.Error(w, err.Error(), http.StatusInternalServerError)
+							logger.Default().WithError(err).Errorf("Error 2736")
+							http.Error(w, "Error 2736", http.StatusInternalServerError)
 							return
 						}
 						auth = &access.Authorization{
@@ -177,7 +179,8 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 			}
 
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				logger.Default().WithError(err).Errorf("Error 2737")
+				http.Error(w, "Error 2737", http.StatusInternalServerError)
 				return
 			}
 
@@ -203,13 +206,15 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 			// this is the part that takes time
 			certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				logger.Default().WithError(err).Errorf("Error 2738")
+				http.Error(w, "Error 2738", http.StatusInternalServerError)
 				return
 			}
 
 			certBytes, err := x509.CreateCertificate(rand.Reader, cert, caCert, &certPrivKey.PublicKey, caPrivKey)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				logger.Default().WithError(err).Errorf("Error 2739")
+				http.Error(w, "Error 2739", http.StatusInternalServerError)
 				return
 			}
 			certPEM := new(bytes.Buffer)
@@ -232,7 +237,8 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 			}
 			count, err := res.RowsAffected()
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				logger.Default().WithError(err).Errorf("Error 2740")
+				http.Error(w, "Error 2740", http.StatusInternalServerError)
 				return
 			}
 

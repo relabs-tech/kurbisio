@@ -359,7 +359,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+				http.Error(w, "Error 4724", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -372,7 +373,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values, object := createScanValuesAndObject(&createdAt, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+				http.Error(w, "Error 4725", http.StatusInternalServerError)
 				return
 			}
 			mergeProperties(object)
@@ -387,7 +389,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.Marshal(response)
 		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, parameters, jsonData)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4726: cannot request interceptors")
+			http.Error(w, "Error 4726", http.StatusInternalServerError)
 			return
 		}
 		if data != nil {
@@ -475,8 +478,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			// Invalid UUIDs are reported as "invalid_text_representation" which is Code 22P02
 			if err, ok := err.(*pq.Error); ok && err.Code == "22P02" {
 				status = http.StatusBadRequest
+				http.Error(w, "invalid uuid", status)
+				return
 			}
-			http.Error(w, err.Error(), status)
+			nillog.WithError(err).Errorf("Error 4727: cannot QueryRow")
+			http.Error(w, "Error 4727", status)
 			return
 		}
 		mergeProperties(response)
@@ -485,7 +491,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.Marshal(response)
 		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), nil, jsonData)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4747: cannot QueryRow")
+			http.Error(w, "Error 4747", http.StatusInternalServerError)
 			return
 		}
 		if data != nil {
@@ -500,7 +507,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				if data != nil { // data was changed in interceptor
 					err = json.Unmarshal(jsonData, &response)
 					if err != nil {
-						http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
+						nillog.WithError(err).Errorf("Error 4748: interceptor")
+						http.Error(w, "Error 4748", http.StatusInternalServerError)
 						return
 					}
 				}
@@ -596,7 +604,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4728: cannot QueryRow query:`%s`", query)
+			http.Error(w, "Error 4728", http.StatusInternalServerError)
 			return
 		}
 
@@ -649,7 +658,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4729: cannot BeginTx")
+			http.Error(w, "Error 4729", http.StatusInternalServerError)
 			return
 		}
 		err = b.db.QueryRow(deleteQuery+sqlWhereOne+sqlReturnPrimaryID, queryParameters...).Scan(&primaryID)
@@ -660,7 +670,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4730: cannot QueryRow")
+			http.Error(w, "Error 4730", http.StatusInternalServerError)
 			return
 		}
 
@@ -671,12 +682,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.Marshal(notification)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4750: cannot QueryRow")
+			http.Error(w, "Error 4750", http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-
 	}
 
 	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -752,7 +763,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4731: BeginTx")
+			http.Error(w, "Error 4731", http.StatusInternalServerError)
 			return
 		}
 
@@ -780,14 +792,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		_, err = tx.Exec(sqlQuery, queryParameters...)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
+			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
 		}
 
 		notificationJSON, _ := json.Marshal(parameters)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
+			http.Error(w, "Error 4770", http.StatusInternalServerError)
 			return
 		}
 
@@ -887,7 +901,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if data != nil {
 			json.Unmarshal(data, &bodyJSON)
 			if err != nil {
-				http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
+				rlog.WithError(err).Error("Error 4733: interceptor")
+				http.Error(w, "Error 4733", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -953,7 +968,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4733: BeginTx")
+			http.Error(w, "Error 4733", http.StatusInternalServerError)
 			return
 		}
 		var id uuid.UUID
@@ -969,7 +985,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				status = http.StatusUnprocessableEntity
 			}
 			tx.Rollback()
-			http.Error(w, err.Error(), status)
+			rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
+			http.Error(w, "Error 4734", status)
 			return
 		}
 
@@ -978,7 +995,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4735: createScanValuesAndObject")
+			http.Error(w, "Error 4735", http.StatusInternalServerError)
 			return
 		}
 		mergeProperties(response)
@@ -986,7 +1004,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ = json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Error("Error 4735: commitWithNotification")
+			http.Error(w, "Error 4735", http.StatusInternalServerError)
 			return
 		}
 
@@ -1055,8 +1074,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			rlog.Errorf("Update of resource `%s` failed with error: %v", resource, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4736: Update of resource `%s`", resource)
+			http.Error(w, "Error 4736", http.StatusInternalServerError)
 			return
 		}
 
@@ -1097,7 +1116,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Error("Error 4737: Rollback")
+			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
 		if revision != 0 && revision != currentRevision {
@@ -1185,7 +1205,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if data != nil {
 			json.Unmarshal(data, &bodyJSON)
 			if err != nil {
-				http.Error(w, "interceptor: "+err.Error(), http.StatusInternalServerError)
+				rlog.WithError(err).Errorf("Error 4738: interceptor")
+				http.Error(w, "Error 4738", http.StatusInternalServerError)
 				return
 			}
 		}
@@ -1247,7 +1268,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		} else if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4739: QueryRow")
+			http.Error(w, "Error 4739", http.StatusInternalServerError)
 			return
 		}
 
@@ -1256,7 +1278,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", &primaryID).Scan(values...)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4740: QueryRow")
+			http.Error(w, "Error 4740", http.StatusInternalServerError)
 			return
 		}
 		mergeProperties(response)
@@ -1264,7 +1287,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ = json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4739: commitWithNotification")
+			http.Error(w, "Error 4739", http.StatusInternalServerError)
 			return
 		}
 
