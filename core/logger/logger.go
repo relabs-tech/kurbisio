@@ -130,15 +130,34 @@ func ContextWithLoggerIdentity(ctx context.Context, identity string) (context.Co
 // SerializeLoggerContext extracts the logger from the context and returns a json
 // representation of the relevant parameters.
 func SerializeLoggerContext(ctx context.Context) []byte {
-	if ctx == nil {
-		return []byte("{}")
-	}
-	rlog, ok := ctx.Value(contextKeyRequestLogger).(*logrus.Entry)
-	if !ok {
+	ctxValues := loggerValues(ctx)
+	if ctxValues.RequestID == "" {
 		return []byte("{}")
 	}
 
+	res, err := json.Marshal(ctxValues)
+	if err != nil {
+		return []byte("{}")
+	}
+	return res
+}
+
+// RequestIDFromContext returns the request id for the given context.
+func RequestIDFromContext(ctx context.Context) string {
+	v := loggerValues(ctx)
+	return v.RequestID
+}
+
+func loggerValues(ctx context.Context) contextLoggerValues {
 	var ctxValues contextLoggerValues
+
+	if ctx == nil {
+		return ctxValues
+	}
+	rlog, ok := ctx.Value(contextKeyRequestLogger).(*logrus.Entry)
+	if !ok {
+		return ctxValues
+	}
 
 	if rlog.Data[requestIDLoggerKey] != nil {
 		if s, ok := rlog.Data[requestIDLoggerKey].(string); ok {
@@ -150,12 +169,7 @@ func SerializeLoggerContext(ctx context.Context) []byte {
 			ctxValues.Identity = s
 		}
 	}
-
-	res, err := json.Marshal(ctxValues)
-	if err != nil {
-		return []byte("{}")
-	}
-	return res
+	return ctxValues
 }
 
 // deserializeLoggerContext creates a logger from the provided json data and returns a new context with this
