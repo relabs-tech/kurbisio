@@ -48,9 +48,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	resource := rc.Left + ":" + rc.Right
 	rlog := logger.Default()
-	rlog.Infoln("create relation:", resource)
+	rlog.Debugln("create relation:", resource)
 	if rc.Description != "" {
-		rlog.Infoln("  description:", rc.Description)
+		rlog.Debugln("  description:", rc.Description)
 	}
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 
@@ -168,10 +168,10 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	rlog.Infoln("  handle routes:", leftListRoute, "GET")
-	rlog.Infoln("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
-	rlog.Infoln("  handle routes:", rightListRoute, "GET")
-	rlog.Infoln("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
+	rlog.Debugln("  handle routes:", leftListRoute, "GET")
+	rlog.Debugln("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
+	rlog.Debugln("  handle routes:", rightListRoute, "GET")
+	rlog.Debugln("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
 
 	// LIST LEFT
 	router.HandleFunc(leftListRoute, func(w http.ResponseWriter, r *http.Request) {

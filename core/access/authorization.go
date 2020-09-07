@@ -207,8 +207,8 @@ func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 // The route returns the current authorization for the authenticated
 // requester.
 func HandleAuthorizationRoute(router *mux.Router) {
-	logger.Default().Infoln("authorization")
-	logger.Default().Infoln("  handle route: /authorization GET")
+	logger.Default().Debugln("authorization")
+	logger.Default().Debugln("  handle route: /authorization GET")
 	router.HandleFunc("/authorization", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		auth := AuthorizationFromContext(r.Context())

@@ -15,8 +15,8 @@ var (
 )
 
 func (b *Backend) handleVersion(router *mux.Router) {
-	logger.Default().Infoln("version")
-	logger.Default().Infoln("  handle version route: /version GET")
+	logger.Default().Debugln("version")
+	logger.Default().Debugln("  handle version route: /version GET")
 	router.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		b.versionWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)

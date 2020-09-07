@@ -131,7 +131,7 @@ func New(bb *Builder) *Backend {
 	if b.updateSchema {
 		logger.Default().Infoln("new configuration - will update database schema")
 	} else {
-		logger.Default().Infoln("use previous schema version")
+		logger.Default().Debugln("use previous schema version")
 	}
 
 	logger.AddRequestID(b.router)
@@ -191,7 +191,7 @@ func (r byDepth) Less(i, j int) bool {
 // handleResourceRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleResourceRoutes() {
 
-	logger.FromContext(nil).Infoln("backend: handle resource routes")
+	logger.FromContext(nil).Debugln("backend: handle resource routes")
 	router := b.router
 
 	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of

@@ -45,7 +45,7 @@ func (b *Backend) HandleResourceRequest(resource string,
 		if _, ok := b.interceptors[key]; ok {
 			logger.FromContext(nil).Fatalf("resource request handler for %s already installed", key)
 		}
-		logger.FromContext(nil).Infof("install resource request handler for %s", key)
+		logger.FromContext(nil).Debugf("install resource request handler for %s", key)
 		b.interceptors[key] = handler
 	}
 }

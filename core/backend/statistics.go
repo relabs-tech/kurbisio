@@ -25,8 +25,8 @@ type statisticsDetails struct {
 }
 
 func (b *Backend) handleStatistics(router *mux.Router) {
-	logger.Default().Infoln("statistics")
-	logger.Default().Infoln("  handle statistics route: /kuribisio/statistics GET")
+	logger.Default().Debugln("statistics")
+	logger.Default().Debugln("  handle statistics route: /kuribisio/statistics GET")
 	router.HandleFunc("/kurbisio/statistics", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		b.statisticsWithAuth(w, r)

@@ -121,8 +121,8 @@ RETURNING serial, job, type, key, resource, resource_id, payload, created_at, at
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
 
-	logger.Default().Infoln("job processing pipelines")
-	logger.Default().Infoln("  handle route: /kurbisio/events PUT")
+	logger.Default().Debugln("job processing pipelines")
+	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
 
 	router.HandleFunc("/kurbisio/events/{event}", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
@@ -304,7 +304,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 			if err != nil {
 				rlog.Errorln("error committing "+key+"#"+strconv.Itoa(serial)+":", err.Error())
 			} else {
-				rlog.Infoln(" successfully handled " + key + "#" + strconv.Itoa(serial))
+				rlog.Debugln(" successfully handled " + key + "#" + strconv.Itoa(serial))
 			}
 		}
 	}
@@ -440,7 +440,7 @@ process:
 	if maxedOut {
 		maxedOutString = " (maxed out)"
 	}
-	rlog.Infof("process jobs: %d done%s", jobCount, maxedOutString)
+	rlog.Debugf("process jobs: %d done%s", jobCount, maxedOutString)
 	return maxedOut
 }
 
@@ -564,7 +564,7 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(nil).Fatalf("resource notification handler for %s already installed", key)
 		}
-		logger.FromContext(nil).Infof("install resource notification handler for %s", key)
+		logger.FromContext(nil).Debugf("install resource notification handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
 	}
 }

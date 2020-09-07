@@ -26,12 +26,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	nillog := logger.FromContext(nil)
 	if singleton {
-		nillog.Infoln("create singleton collection:", resource)
+		nillog.Debugln("create singleton collection:", resource)
 	} else {
-		nillog.Infoln("create collection:", resource)
+		nillog.Debugln("create collection:", resource)
 	}
 	if rc.Description != "" {
-		nillog.Infoln("  description:", rc.Description)
+		nillog.Debugln("  description:", rc.Description)
 	}
 
 	if rc.SchemaID != "" {
@@ -157,10 +157,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	if singleton {
-		nillog.Infoln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
+		nillog.Debugln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
 	}
-	nillog.Infoln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
-	nillog.Infoln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+	nillog.Debugln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
+	nillog.Debugln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
