@@ -1100,7 +1100,8 @@ func TestPaginationCollection(t *testing.T) {
 	// Verify that we can get all elements by iterating through pages
 	limit := 10
 	var received = make(map[uuid.UUID]A)
-	for page := 1; page <= (numberOfElements-1)/limit+1; page++ {
+	// we read one extra page to validate that we still get correct pagination information
+	for page := 1; page <= (numberOfElements-1)/limit+2; page++ {
 		path := fmt.Sprintf("/as?limit=%d&page=%d", limit, page)
 		var as []A
 		status, h, err := testService.client.RawGetWithHeader(path, map[string]string{}, &as)

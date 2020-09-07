@@ -397,12 +397,32 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			jsonData = data
 		}
 
-		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
-		w.Header().Set("Etag", etag)
-		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
-			w.WriteHeader(http.StatusNotModified)
-			return
+		if page > 0 && totalCount == 0 {
+			// sql does not return total count if we ask beyond limits, hence
+			// we need a second query
+			queryParameters[propertiesIndex-1+4] = 1
+			queryParameters[propertiesIndex-1+5] = 0
+			rows, err := b.db.Query(sqlQuery, queryParameters...)
+			if err != nil {
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+					http.Error(w, "Error 4724", http.StatusInternalServerError)
+					return
+				}
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var createdAt time.Time
+				values, _ := createScanValuesAndObject(&createdAt, new(int), &totalCount)
+				err := rows.Scan(values...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+					http.Error(w, "Error 4725", http.StatusInternalServerError)
+					return
+				}
+			}
 		}
+
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
 		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
@@ -410,6 +430,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		if !from.IsZero() {
 			w.Header().Set("Pagination-Until", from.Format(time.RFC3339))
+		}
+
+		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
+		w.Header().Set("Etag", etag)
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 		w.Write(jsonData)
 
