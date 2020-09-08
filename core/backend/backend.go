@@ -242,6 +242,7 @@ func (b *Backend) handleResourceRoutes() {
 				Description:          rc.singleton.Description,
 				StaticProperties:     rc.singleton.StaticProperties,
 				SearchableProperties: rc.singleton.SearchableProperties,
+				WithLog:              rc.singleton.WithLog,
 			}
 			b.createCollectionResource(router, tmp, true)
 		}

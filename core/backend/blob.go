@@ -36,7 +36,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
 	createColumns := []string{
 		this + "_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY",
-		"created_at timestamp NOT NULL DEFAULT now()",
+		"timestamp timestamp NOT NULL DEFAULT now()",
 	}
 
 	columns := []string{this + "_id"}
@@ -65,8 +65,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
 	// query to create all indices after the table creation
-	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(created_at);",
-		"sort_index_"+this+"_created_at",
+	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
+		"sort_index_"+this+"_timestamp",
 		schema, resource)
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
@@ -131,28 +131,28 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	rlog.Debugln("  handle blob routes:", listRoute, "GET,POST,DELETE")
 	rlog.Debugln("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, blob FROM %s.\"%s\" ", schema, resource)
-	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, blob FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 	sqlReturnID := " RETURNING " + this + "_id;"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", created_at, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", timestamp, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
+	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
 
-	sqlPagination := fmt.Sprintf("ORDER BY created_at DESC, %s  DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
+	sqlPagination := fmt.Sprintf("ORDER BY timestamp DESC, %s  DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, created_at)"
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") RETURNING " + this + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
@@ -161,12 +161,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
 	updateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
-	updateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
+	updateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
-	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, created_at)"
+	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
 	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT " + this + "_id DO UPDATE SET "
 	insertUpdateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
-	insertUpdateQuery += ", created_at = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
+	insertUpdateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
 	maxAge := ""
 	if !rc.Mutable {
@@ -176,7 +176,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		maxAge = fmt.Sprintf("max-age=%d", rc.MaxAgeCache)
 	}
 
-	createScanValuesAndObject := func(createdAt *time.Time, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+	createScanValuesAndObject := func(timestamp *time.Time, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+1, len(columns)+1+len(extra))
 		object := map[string]interface{}{}
 		var i int
@@ -195,8 +195,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		}
 
-		values[i] = createdAt
-		object["created_at"] = createdAt
+		values[i] = timestamp
+		object["timestamp"] = timestamp
 		values = append(values, extra...)
 		return values, object
 	}
@@ -310,8 +310,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		defer rows.Close()
 		var totalCount int
 		for rows.Next() {
-			var createdAt time.Time
-			values, object := createScanValuesAndObject(&createdAt, &totalCount)
+			var timestamp time.Time
+			values, object := createScanValuesAndObject(&timestamp, &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -319,7 +319,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
-				from = createdAt
+				from = timestamp
 			}
 			response = append(response, object)
 		}
@@ -374,8 +374,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				// special blob handling for if-non-match: Since we only need the creation time
 				// for calculating the etag, we prefer doing an extra query instead of
 				// loading the entire binary blob into memory for no good reason
-				var createdAt time.Time
-				values, _ := createScanValuesAndObject(&createdAt)
+				var timestamp time.Time
+				values, _ := createScanValuesAndObject(&timestamp)
 				err = b.db.QueryRow(readQueryMetaDataOnly+sqlWhereOne+";", queryParameters...).Scan(values...)
 				if err == sql.ErrNoRows {
 					http.Error(w, "no such "+this, http.StatusNotFound)
@@ -385,7 +385,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				etag := timeToEtag(createdAt)
+				etag := timeToEtag(timestamp)
 				if ifNoneMatchFound(ifNoneMatch, etag) {
 					// ETag must also be provided in headers in case If-None-Match is set
 					w.Header().Set("Etag", etag)
@@ -396,8 +396,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		var blob []byte
-		var createdAt time.Time
-		values, response := createScanValuesAndObject(&createdAt, &blob)
+		var timestamp time.Time
+		values, response := createScanValuesAndObject(&timestamp, &blob)
 
 		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
@@ -419,7 +419,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			w.Header().Set(jsonToHeader[k], *response[k].(*string))
 		}
 		if rc.Mutable {
-			w.Header().Set("Etag", timeToEtag(createdAt))
+			w.Header().Set("Etag", timeToEtag(timestamp))
 		}
 		if len(maxAge) > 0 {
 			w.Header().Set("Cache-Control", maxAge)
@@ -511,9 +511,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		values[i] = &blob
 		i++
 
-		// last value is created_at
-		createdAt := time.Now().UTC()
-		values[i] = &createdAt
+		// last value is timestamp
+		timestamp := time.Now().UTC()
+		values[i] = &timestamp
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
@@ -606,9 +606,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		values[i] = &blob
 		i++
 
-		// last value is created_at
-		createdAt := time.Now().UTC()
-		values[i] = &createdAt
+		// last value is timestamp
+		timestamp := time.Now().UTC()
+		values[i] = &timestamp
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {

@@ -55,21 +55,26 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	dependencies := resources[:len(resources)-1]
 
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
-	var createColumns []string
+	createQueryLog := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s/log\"", schema, resource)
+	var createColumns, createColumnsLog []string
 	var columns []string
 	if !singleton {
 		columns = append(columns, this+"_id")
 		createColumns = append(createColumns, this+"_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY")
+		createColumnsLog = append(createColumnsLog, this+"_id uuid NOT NULL")
 	}
 
-	createColumns = append(createColumns, "created_at timestamp NOT NULL DEFAULT now()")
+	createColumns = append(createColumns, "timestamp timestamp NOT NULL DEFAULT now()")
+	createColumnsLog = append(createColumnsLog, "timestamp timestamp NOT NULL DEFAULT now()")
 	createColumns = append(createColumns, "revision INTEGER NOT NULL DEFAULT 1")
+	createColumnsLog = append(createColumnsLog, "revision INTEGER NOT NULL")
 
 	var foreignColumns []string
 	for i := len(dependencies) - 1; i >= 0; i-- {
 		that := dependencies[i]
 		createColumn := fmt.Sprintf("%s_id uuid NOT NULL", that)
 		createColumns = append(createColumns, createColumn)
+		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, that+"_id")
 		foreignColumns = append(foreignColumns, that+"_id")
 	}
@@ -90,9 +95,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
+	createColumnsLog = append(createColumnsLog, "properties json NOT NULL")
 	// query to create all indices after the table creation
-	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(created_at);",
-		"sort_index_"+primary+"_created_at",
+	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
+		"sort_index_"+primary+"_timestamp",
+		schema, resource)
+	createIndicesQueryLog := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s_id);",
+		"sort_index_"+primary+"_log_id",
+		schema, resource, primary)
+	createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(timestamp);",
+		"sort_index_"+primary+"_log_timestamp",
 		schema, resource)
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
@@ -102,6 +114,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	for _, property := range rc.StaticProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
 		createColumns = append(createColumns, createColumn)
+		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, property)
 	}
 
@@ -112,7 +125,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
+		createIndicesQueryLog = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			"searchable_property_"+this+"_"+property,
+			schema, resource, property)
 		createColumns = append(createColumns, createColumn)
+		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, property)
 
 	}
@@ -126,7 +143,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"external_index_"+this+"_"+name,
 			schema, resource, name)
+		// the log index is not unique
+		createIndicesQueryLog = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			"external_index_"+this+"_"+name,
+			schema, resource, name)
 		createColumns = append(createColumns, createColumn)
+		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, name)
 	}
 
@@ -137,6 +159,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createIndicesQuery
+
+	if rc.WithLog {
+		createQuery += createQueryLog + "(" + strings.Join(createColumnsLog, ", ") + ");" + createIndicesQueryLog
+	}
 
 	var err error
 	if b.updateSchema {
@@ -155,52 +181,65 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		listRoute = itemRoute + "/" + core.Plural(r)
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
+	logRoute := itemRoute + "/log"
+	singletonLogRoute := singletonRoute + "/log"
 
 	if singleton {
 		nillog.Debugln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
+		if rc.WithLog {
+			nillog.Debugln("  handle singleton log route:", singletonLogRoute, "GET")
+		}
 	}
 	nillog.Debugln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
 	nillog.Debugln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+	if rc.WithLog {
+		nillog.Debugln("  handle collection log route:", logRoute, "GET")
+	}
 
-	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", created_at, revision FROM %s.\"%s\" ", schema, resource)
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", created_at, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryWithTotalLog := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s/log\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR created_at<=$%d) AND ($%d OR created_at>=$%d) ",
+	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
 		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
-	sqlPaginationDesc := fmt.Sprintf("ORDER BY created_at DESC,%s DESC LIMIT $%d OFFSET $%d;",
+	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,revision DESC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex+4, propertiesIndex+5)
 
-	sqlPaginationAsc := fmt.Sprintf("ORDER BY created_at ASC,%s ASC LIMIT $%d OFFSET $%d;",
+	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC,revision ASC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex+4, propertiesIndex+5)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
-	sqlReturnObject := " RETURNING " + strings.Join(columns, ", ") + ", created_at, revision"
+	sqlReturnObject := " RETURNING " + strings.Join(columns, ", ") + ", timestamp, revision"
 
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", created_at)"
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", timestamp)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ")"
 	insertQuery += " RETURNING " + primary + "_id;"
+
+	insertQueryLog := fmt.Sprintf("INSERT INTO %s.\"%s/log\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", timestamp, revision)"
+	insertQueryLog += "VALUES(" + parameterString(len(columns)+2) + ")"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
 	for i := propertiesIndex; i < len(columns); i++ {
 		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
 	}
-	updateQuery += strings.Join(sets, ", ") + ", created_at = $" + strconv.Itoa(len(columns)+1)
+	updateQuery += strings.Join(sets, ", ") + ", timestamp = $" + strconv.Itoa(len(columns)+1)
 	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
 
 	updatePropertyQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	updatePropertyQuery += " %s = $" + strconv.Itoa(propertiesIndex+1)
 	updatePropertyQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
 
-	createScanValuesAndObject := func(createdAt *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+	createScanValuesAndObject := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
 		object := map[string]interface{}{}
 		var i int
@@ -219,8 +258,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		}
 
-		values[i] = createdAt
-		object["created_at"] = createdAt
+		values[i] = timestamp
+		object["timestamp"] = timestamp
 		i++
 		values[i] = revision
 		object["revision"] = revision
@@ -369,8 +408,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		defer rows.Close()
 		var totalCount int
 		for rows.Next() {
-			var createdAt time.Time
-			values, object := createScanValuesAndObject(&createdAt, new(int), &totalCount)
+			var timestamp time.Time
+			values, object := createScanValuesAndObject(&timestamp, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
@@ -380,7 +419,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			mergeProperties(object)
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
-				from = createdAt
+				from = timestamp
 			}
 			response = append(response, object)
 		}
@@ -412,8 +451,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			defer rows.Close()
 			for rows.Next() {
-				var createdAt time.Time
-				values, _ := createScanValuesAndObject(&createdAt, new(int), &totalCount)
+				var timestamp time.Time
+				values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
 				err := rows.Scan(values...)
 				if err != nil {
 					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
@@ -453,6 +492,208 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		list(w, r, nil)
+	}
+
+	log := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		var (
+			queryParameters []interface{}
+			sqlQuery        string
+			limit           int = 100
+			page            int = 1
+			until           time.Time
+			from            time.Time
+			externalColumn  string
+			externalValue   string
+			ascendingOrder  bool
+		)
+		urlQuery := r.URL.Query()
+		parameters := map[string]string{}
+		for key, array := range urlQuery {
+			var err error
+			if len(array) > 1 {
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+			switch key {
+			case "limit":
+				limit, err = strconv.Atoi(value)
+				if err == nil && (limit < 1 || limit > 100) {
+					err = fmt.Errorf("out of range")
+				}
+			case "page":
+				page, err = strconv.Atoi(value)
+				if err == nil && page < 1 {
+					err = fmt.Errorf("out of range")
+				}
+			case "until":
+				until, err = time.Parse(time.RFC3339, value)
+
+			case "from":
+				from, err = time.Parse(time.RFC3339, value)
+
+			case "filter":
+				i := strings.IndexRune(value, '=')
+				if i < 0 {
+					err = fmt.Errorf("cannot parse filter, must be of type property=value")
+					break
+				}
+				filterKey := value[:i]
+				filterValue := value[i+1:]
+
+				found := false
+				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+					if filterKey == columns[i] {
+						externalValue = filterValue
+						externalColumn = columns[i]
+						found = true
+					}
+				}
+				if !found {
+					err = fmt.Errorf("unknown filter property '%s'", filterKey)
+				}
+			case "order":
+				if value != "asc" && value != "desc" {
+					err = fmt.Errorf("order must be asc or desc")
+					break
+				}
+				ascendingOrder = (value == "asc")
+
+			default:
+				err = fmt.Errorf("unknown")
+			}
+
+			parameters[key] = value
+			if err != nil {
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		params := mux.Vars(r)
+		if externalValue == "" { // get entire collection
+			sqlQuery = readQueryWithTotalLog + sqlWhereAll
+			queryParameters = make([]interface{}, propertiesIndex-1+6)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+		} else {
+			sqlQuery = readQueryWithTotalLog + sqlWhereAll + fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
+			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
+			for i := 1; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-1] = params[columns[i]]
+			}
+			queryParameters[propertiesIndex-1+6] = externalValue
+		}
+
+		// add before and after and pagination
+		queryParameters[propertiesIndex-1+0] = until.IsZero()
+		queryParameters[propertiesIndex-1+1] = until.UTC()
+		queryParameters[propertiesIndex-1+2] = from.IsZero()
+		queryParameters[propertiesIndex-1+3] = from.UTC()
+		queryParameters[propertiesIndex-1+4] = limit
+		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+
+		if relation != nil {
+			// inject subquery for relation
+			sqlQuery += fmt.Sprintf(relation.subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.columns))
+			queryParameters = append(queryParameters, relation.queryParameters...)
+		}
+
+		if ascendingOrder {
+			sqlQuery += sqlPaginationAsc
+
+		} else {
+			sqlQuery += sqlPaginationDesc
+		}
+
+		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		if err != nil {
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+				http.Error(w, "Error 4724", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		response := []interface{}{}
+		defer rows.Close()
+		var totalCount int
+		for rows.Next() {
+			var timestamp time.Time
+			values, object := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+			err := rows.Scan(values...)
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+				http.Error(w, "Error 4725", http.StatusInternalServerError)
+				return
+			}
+			mergeProperties(object)
+			// if we did not have from, take it from the first object
+			if from.IsZero() {
+				from = timestamp
+			}
+			response = append(response, object)
+		}
+
+		jsonData, _ := json.Marshal(response)
+
+		if page > 0 && totalCount == 0 {
+			// sql does not return total count if we ask beyond limits, hence
+			// we need a second query
+			queryParameters[propertiesIndex-1+4] = 1
+			queryParameters[propertiesIndex-1+5] = 0
+			rows, err := b.db.Query(sqlQuery, queryParameters...)
+			if err != nil {
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+					http.Error(w, "Error 4724", http.StatusInternalServerError)
+					return
+				}
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var timestamp time.Time
+				values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+				err := rows.Scan(values...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+					http.Error(w, "Error 4725", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
+		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
+		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+		if !from.IsZero() {
+			w.Header().Set("Pagination-Until", from.Format(time.RFC3339))
+		}
+
+		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
+		w.Header().Set("Etag", etag)
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Write(jsonData)
+
+	}
+
+	logWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		log(w, r, nil)
 	}
 
 	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
@@ -690,8 +931,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		var createdAt time.Time
-		values, object := createScanValuesAndObject(&createdAt, new(int))
+		var timestamp time.Time
+		values, object := createScanValuesAndObject(&timestamp, new(int))
 		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
@@ -954,7 +1195,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					continue property_loop
 				}
 			}
-			if key == "created_at" || key == "revision" {
+			if key == "timestamp" || key == "revision" {
 				continue
 			}
 			extract[key] = value
@@ -983,20 +1224,21 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values[i] = value
 		}
 
-		// next value is created_at
-		createdAt := time.Now().UTC()
-		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, _ := value.(string)
-			t, err := time.Parse(time.RFC3339, timestamp)
+		// next value is timestamp
+		now := time.Now().UTC()
+		timestamp := now
+		if value, ok := bodyJSON["timestamp"]; ok {
+			timestampAsString, _ := value.(string)
+			t, err := time.Parse(time.RFC3339, timestampAsString)
 			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				http.Error(w, "illegal timestamp: "+err.Error(), http.StatusBadRequest)
 				return
 			}
 			if !t.IsZero() {
-				createdAt = t.UTC()
+				timestamp = t.UTC()
 			}
 		}
-		values[i] = &createdAt
+		values[i] = &timestamp
 		i++
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
@@ -1024,21 +1266,33 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject(&time.Time{}, new(int))
+		values, response := createScanValuesAndObject(&timestamp, new(int))
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
-			rlog.WithError(err).Errorf("Error 4735: createScanValuesAndObject")
+			rlog.WithError(err).Errorf("Error 4735: re-read object")
 			http.Error(w, "Error 4735", http.StatusInternalServerError)
 			return
 		}
 		mergeProperties(response)
-
 		jsonData, _ = json.Marshal(response)
+
+		// write log
+		if rc.WithLog {
+			timestamp = now // the log always uses current time (UTC) as timestamp
+			_, err = tx.Exec(insertQueryLog, values...)
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 4736: create log")
+				http.Error(w, "Error 4736", http.StatusInternalServerError)
+				return
+			}
+		}
+
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
 		if err != nil {
-			rlog.WithError(err).Error("Error 4735: commitWithNotification")
-			http.Error(w, "Error 4735", http.StatusInternalServerError)
+			rlog.WithError(err).Error("Error 4737: commitWithNotification")
+			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
 
@@ -1112,10 +1366,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		var timestamp time.Time
 		var currentRevision int
 		retried := false
 	Retry:
-		current, object := createScanValuesAndObject(&time.Time{}, &currentRevision)
+		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		if err == csql.ErrNoRows {
 			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
@@ -1258,7 +1513,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					continue property_loop
 				}
 			}
-			if key == "created_at" || key == "revision" {
+			if key == "timestamp" || key == "revision" {
 				continue
 			}
 			extract[key] = value
@@ -1278,20 +1533,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values[i] = value
 		}
 
-		// next value is created_at. We only change it when explicitely requested
-		createdAt := current[i]
-		if value, ok := bodyJSON["created_at"]; ok {
-			timestamp, _ := value.(string)
-			t, err := time.Parse(time.RFC3339, timestamp)
+		// next value is timestamp. We only change it when explicitely requested
+		if value, ok := bodyJSON["timestamp"]; ok {
+			timestampAsString, _ := value.(string)
+			t, err := time.Parse(time.RFC3339, timestampAsString)
 			if err != nil {
-				http.Error(w, "illegal created_at: "+err.Error(), http.StatusBadRequest)
+				http.Error(w, "illegal timestamp: "+err.Error(), http.StatusBadRequest)
 				return
 			}
 			if !t.IsZero() {
-				createdAt = t.UTC()
+				timestamp = t.UTC()
 			}
 		}
-		values[i] = createdAt
+		values[i] = timestamp
 		i++
 
 		err = tx.QueryRow(updateQuery, values...).Scan(&primaryID)
@@ -1301,23 +1555,35 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		} else if err != nil {
 			tx.Rollback()
-			rlog.WithError(err).Errorf("Error 4739: QueryRow")
+			rlog.WithError(err).Errorf("Error 4739: update object")
 			http.Error(w, "Error 4739", http.StatusInternalServerError)
 			return
 		}
 
-		// re-read new values
-		values, response := createScanValuesAndObject(&time.Time{}, &revision)
+		// re-read new values and return as json
+		values, response := createScanValuesAndObject(&timestamp, &revision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", &primaryID).Scan(values...)
 		if err != nil {
 			tx.Rollback()
-			rlog.WithError(err).Errorf("Error 4740: QueryRow")
+			rlog.WithError(err).Errorf("Error 4740: re-read object")
 			http.Error(w, "Error 4740", http.StatusInternalServerError)
 			return
 		}
 		mergeProperties(response)
-
 		jsonData, _ = json.Marshal(response)
+
+		// write log
+		if rc.WithLog {
+			timestamp = time.Now().UTC() // the log always uses current time (UTC) as timestamp
+			_, err = tx.Exec(insertQueryLog, values...)
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 4741: create log")
+				http.Error(w, "Error 4741", http.StatusInternalServerError)
+				return
+			}
+		}
+
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4739: commitWithNotification")
@@ -1395,6 +1661,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
+	// LOG
+	if rc.WithLog {
+		router.HandleFunc(logRoute, func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			logWithAuth(w, r, nil)
+		}).Methods(http.MethodOptions, http.MethodGet)
+	}
+
 	if !singleton {
 		return
 	}
@@ -1417,5 +1691,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
+
+	// LOG
+	if rc.WithLog {
+		router.HandleFunc(singletonLogRoute, func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			logWithAuth(w, r, nil)
+		}).Methods(http.MethodOptions, http.MethodGet)
+	}
 
 }

@@ -17,7 +17,7 @@ func New(db *csql.DB) Registry {
 	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_registry_" 
 (key varchar NOT NULL, 
 value json NOT NULL, 
-created_at timestamp NOT NULL, 
+timestamp timestamp NOT NULL, 
 PRIMARY KEY(key)
 );`)
 
@@ -53,24 +53,24 @@ func (r Registry) Accessor(prefix string) Accessor {
 func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
 	var (
 		rawValue  json.RawMessage
-		createdAt time.Time
+		timestamp time.Time
 	)
 	if len(r.Prefix) > 0 {
 		key = r.Prefix + ":" + key
 	}
 
 	err := r.Registry.db.QueryRow(
-		`SELECT value, created_at FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
-		key).Scan(&rawValue, &createdAt)
+		`SELECT value, timestamp FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
+		key).Scan(&rawValue, &timestamp)
 	if err == csql.ErrNoRows {
-		return createdAt, nil
+		return timestamp, nil
 	}
 	if err != nil {
-		return createdAt, fmt.Errorf("cannot read key '%s': %s", key, err.Error())
+		return timestamp, fmt.Errorf("cannot read key '%s': %s", key, err.Error())
 	}
 	err = json.Unmarshal(rawValue, &value)
 
-	return createdAt, err
+	return timestamp, err
 }
 
 // Write writes a value into the registry.
@@ -87,9 +87,9 @@ func (r Accessor) Write(key string, value interface{}) error {
 	}
 	now := time.Now().UTC()
 	res, err := r.Registry.db.Exec(
-		`INSERT INTO `+r.Registry.db.Schema+`."_registry_"(key,value,created_at)
+		`INSERT INTO `+r.Registry.db.Schema+`."_registry_"(key,value,timestamp)
 VALUES($1,$2,$3)
-ON CONFLICT (key) DO UPDATE SET value=$2,created_at=$3;`,
+ON CONFLICT (key) DO UPDATE SET value=$2,timestamp=$3;`,
 		key, string(body), now)
 
 	if err != nil {

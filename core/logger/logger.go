@@ -32,6 +32,7 @@ func InitLogger(logLevel logrus.Level) {
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
 	logrus.SetFormatter(customFormatter)
+	logrus.SetLevel(logrus.DebugLevel)
 	customFormatter.FullTimestamp = true
 	logrus.SetLevel(logLevel)
 }

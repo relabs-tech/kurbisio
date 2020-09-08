@@ -50,11 +50,11 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 	jwtRegistry := registry.New(jmb.DB).Accessor("_jwt_")
 	var wellKnownCertificates map[string]string
-	createdAt, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
+	timestamp, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
 	if err != nil {
 		panic(err)
 	}
-	if time.Now().Sub(createdAt) > 6*time.Hour {
+	if time.Now().Sub(timestamp) > 6*time.Hour {
 		// time to check for new keys
 		res, err := http.Get(jmb.PublicKeyDownloadURL)
 		if err != nil {

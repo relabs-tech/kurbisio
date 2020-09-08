@@ -58,7 +58,7 @@ type job struct {
 	Resource     string
 	ResourceID   uuid.UUID
 	Payload      []byte
-	CreatedAt    time.Time
+	Timestamp    time.Time
 	AttemptsLeft int
 	ContextData  []byte
 }
@@ -90,7 +90,7 @@ key VARCHAR NOT NULL DEFAULT '',
 resource VARCHAR NOT NULL DEFAULT '', 
 resource_id uuid NOT NULL DEFAULT uuid_nil(), 
 payload JSON NOT NULL DEFAULT'{}'::jsonb,
-created_at TIMESTAMP NOT NULL DEFAULT now(), 
+timestamp TIMESTAMP NOT NULL DEFAULT now(), 
 attempts_left INTEGER NOT NULL,
 context JSON NOT NULL DEFAULT'{}'::jsonb,
 scheduled_at TIMESTAMP,
@@ -116,7 +116,7 @@ SELECT serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING serial, job, type, key, resource, resource_id, payload, created_at, attempts_left, context;
+RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
@@ -164,7 +164,7 @@ func (b *Backend) Health() (Health, error) {
 
 	// get the number of jobs who should have been executed at least ten minutes ago
 	overdueJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND
-	((scheduled_at IS NULL AND $1 > created_at) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)) limit 1;`
+	((scheduled_at IS NULL AND $1 > timestamp) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)) limit 1;`
 	tenMinutesAgo := time.Now().UTC().Add(-10 * time.Minute)
 	err = b.db.QueryRow(overdueJobsQuery, tenMinutesAgo).Scan(&jobs.Overdue)
 	if err != nil && err != csql.ErrNoRows {
@@ -411,7 +411,7 @@ process:
 			&j.Resource,
 			&j.ResourceID,
 			&j.Payload,
-			&j.CreatedAt,
+			&j.Timestamp,
 			&j.AttemptsLeft,
 			&j.ContextData,
 		)
@@ -511,9 +511,9 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 
 	var serial int
 	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,key,resource,resource_id,payload,created_at,attempts_left,context, scheduled_at)"+
+		"(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at)"+
 		"VALUES('event',$1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' "+
-		"DO UPDATE SET payload=$5,created_at=$6,attempts_left=$7,context=$8,scheduled_at=$9 RETURNING serial;",
+		"DO UPDATE SET payload=$5,timestamp=$6,attempts_left=$7,context=$8,scheduled_at=$9 RETURNING serial;",
 		event.Type,
 		event.Key,
 		event.Resource,
@@ -597,7 +597,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,resource,resource_id,payload,created_at,attempts_left,context)"+
+		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
 		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) RETURNING serial;",
 		operation,
 		resource,

@@ -62,7 +62,7 @@ The models look like this:
 	{
 		"user_id": UUID,
 		"identity": STRING
-		"created_at": TIMESTAMP
+		"timestamp": TIMESTAMP
 		"revision": INTEGER
 		...
 	}
@@ -71,7 +71,7 @@ The models look like this:
 	{
 		"profile_id": UUID
 		"user_id": UUID,
-		"created_at": TIMESTAMP
+		"timestamp": TIMESTAMP
 		"revision": INTEGER
 		...
 	}
@@ -80,7 +80,7 @@ The models look like this:
 	{
 		"device_id": UUID,
 		"thing": STRING
-		"created_at": TIMESTAMP
+		"timestamp": TIMESTAMP
 		"revision": INTEGER
 		...
 	}
@@ -89,7 +89,7 @@ The models look like this:
 We can now create a user with a simple POST:
   curl http://localhost:3000/users -d'{"identity":"test@test.com", "name":"Jonathan Test"}'
   {
-	"created_at": "2020-03-23T16:01:08.138302Z",
+	"timestamp": "2020-03-23T16:01:08.138302Z",
  	"identity": "test@test.com",
 	"name": "Jonathan Test",
  	"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
@@ -98,7 +98,7 @@ We can now create a user with a simple POST:
 We can create a device:
   curl http://localhost:3000/devices -d'{"thing":"12345"}'
   {
- 	"created_at": "2020-03-23T16:07:23.57638Z",
+ 	"timestamp": "2020-03-23T16:07:23.57638Z",
 	"device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
 	"thing": "12345"
   }
@@ -111,7 +111,7 @@ Now we can query the devices of this specific user:
   curl http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
   [
  	{
-	  "created_at": "2020-03-23T16:07:23.57638Z",
+	  "timestamp": "2020-03-23T16:07:23.57638Z",
 	  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
 	  "thing": "12345"
 	 }
@@ -120,7 +120,7 @@ Now we can query the devices of this specific user:
 This adds a profile to the user, or updates the user's profile:
   curl-X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/profile -d'{"nickname":"jonathan"}'
   {
- 	"created_at": "2020-03-23T16:25:15.738091Z",
+ 	"timestamp": "2020-03-23T16:25:15.738091Z",
  	"profile_id": "9a09030c-516f-4dcd-a2fc-dedad219457d",
 	"nickname": "jonathan",
 	"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
@@ -182,11 +182,11 @@ to store the provisioning_status for IoT devices.
 Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a filer
 in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
 
-Sorting and Creation Time
+Sorting and Timestamp
 
-Collections of resources are sorted by the created_at timestamp, with latest first. For additional flexibility, it is possible
+Collections of resources are sorted by the timestamp, with latest first. For additional flexibility, it is possible
 to overwrite the timestamp in a POST or PUT request. If you for example import workout activities of a user, you may choose to
-use the start time of each activity as created_at time.
+use the start time of each activity as timestamp.
 
 Query Parameters and Pagination
 
@@ -214,7 +214,7 @@ The response carries the following custom headers for pagination:
 	  "Pagination-Total-Count"  the total number of items in the collection
 	  "Pagination-Page-Count"   the total number of pages in the collection
 	  "Pagination-Current-Page" the currently selected page
-	  "Pagination-Until"	    the created_at time of the first item in the response
+	  "Pagination-Until"	    the timestamp of the first item in the response
 
 The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
 avoids page drift. A well-behaving application would get the first page without any filter, and then use the timestamp
@@ -229,6 +229,17 @@ The primary resource identifier is not mandatory when creating resources. If the
 no identifier or a null identifier, then the system creates a new unique UUID for it. Yet it is possible to specify
 a primary identifier in the request, which will be honored by the system. This feature - and the choice of UUID for
 primary identifiers - makes it possible to easily transfer data between different databases.
+
+Logs
+
+The backend supports logs for any collection or singleton resource. If you specify "with_log":true for a resource in the
+configuration json, then an additional route is created. For example, if you requests logs for device, there will be
+an extra route
+
+  /devices/{device_id}/log GET
+
+which will return all versions of the device object ever created, with a timestamp when that creation or modification did
+happen. Querying the log supports all the standard collection query parameters, including pagination and filtering.
 
 Notifications
 

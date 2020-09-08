@@ -55,11 +55,11 @@ func TestRegistry(t *testing.T) {
 
 	// test non-existing key
 	var something interface{}
-	createdAt, err := testRegistry.Read("key does not exist", something)
+	timestamp, err := testRegistry.Read("key does not exist", something)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !createdAt.IsZero() {
+	if !timestamp.IsZero() {
 		t.Fatal("non existing key seems to exist")
 	}
 
@@ -69,7 +69,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var read foo
-	createdAt, err = testRegistry.Read("test", &read)
+	timestamp, err = testRegistry.Read("test", &read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRegistry(t *testing.T) {
 	if read.A != write.A || read.B != read.B {
 		t.Fatal("could not read what I wrote")
 	}
-	if createdAt.Sub(now) > time.Second {
+	if timestamp.Sub(now) > time.Second {
 		t.Fatal("created at is off")
 	}
 

@@ -50,7 +50,7 @@ var configurationJSON string = `{
 		"resource": "o"
 	  },
 	  {
-		"resource": "created_time"
+		"resource": "timestamp"
 	  },
 	  {
 		"resource": "state"
@@ -63,6 +63,10 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"interception"
+	  },
+	  {
+		"resource":"logme",
+		"with_log":true
 	  },
 	  {
 		"resource": "with_schema",
@@ -79,6 +83,10 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"notification/single"
+	  },
+	  {
+		"resource":"logme/child",
+		"with_log":true
 	  }
 	],
 	"blobs": [
@@ -170,7 +178,7 @@ type A struct {
 	ExternalID     string    `json:"external_id"`
 	StaticProp     string    `json:"static_prop"`
 	SearchableProp string    `json:"searchable_prop"`
-	CreatedAt      time.Time `json:"created_at"`
+	Timestamp      time.Time `json:"timestamp"`
 	Foo            string    `json:"foo"`
 }
 
@@ -181,7 +189,7 @@ func TestCollectionA(t *testing.T) {
 		ExternalID:     "external",
 		StaticProp:     "static",
 		SearchableProp: "searchable",
-		CreatedAt:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+		Timestamp:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	a := A{}
@@ -200,7 +208,7 @@ func TestCollectionA(t *testing.T) {
 		a.ExternalID != aNew.ExternalID ||
 		a.StaticProp != aNew.StaticProp ||
 		a.SearchableProp != aNew.SearchableProp ||
-		a.CreatedAt != aNew.CreatedAt {
+		a.Timestamp != aNew.Timestamp {
 		t.Fatal("unexpected result:", asJSON(a), "expected:", asJSON(aNew))
 	}
 
@@ -212,7 +220,7 @@ func TestCollectionA(t *testing.T) {
 	if aNew.Foo != aGet.Foo ||
 		a.ExternalID != aGet.ExternalID ||
 		a.StaticProp != aGet.StaticProp ||
-		a.CreatedAt != aGet.CreatedAt {
+		a.Timestamp != aGet.Timestamp {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
@@ -226,7 +234,7 @@ func TestCollectionA(t *testing.T) {
 	if aPut.Foo != aRes.Foo ||
 		aPut.ExternalID != aRes.ExternalID ||
 		aPut.StaticProp != aRes.StaticProp ||
-		aPut.CreatedAt != aRes.CreatedAt {
+		aPut.Timestamp != aRes.Timestamp {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
@@ -243,7 +251,7 @@ func TestCollectionA(t *testing.T) {
 	if aPut.Foo != aRes.Foo ||
 		aPut.ExternalID != aRes.ExternalID ||
 		aPut.StaticProp != aRes.StaticProp ||
-		aPut.CreatedAt != aRes.CreatedAt {
+		aPut.Timestamp != aRes.Timestamp {
 		t.Fatal("unexpected result:", asJSON(aGet))
 	}
 
@@ -253,7 +261,7 @@ func TestCollectionA(t *testing.T) {
 		ExternalID:     "another_external",
 		StaticProp:     "static",
 		SearchableProp: "not_searchable",
-		CreatedAt:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+		Timestamp:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	_, err = testService.client.RawPost("/as", &anotherNew, nil)
@@ -557,52 +565,52 @@ func TestSingletonOS(t *testing.T) {
 
 }
 
-func TestCreatedTimeAndNullID(t *testing.T) {
+func TestTimestampAndNullID(t *testing.T) {
 
-	type CreatedTime struct {
-		CreatedTimeID uuid.UUID `json:"created_time_id"`
-		CreatedAt     time.Time `json:"created_at"`
+	type Timestamp struct {
+		TimestampID uuid.UUID `json:"timestamp_id"`
+		Timestamp   time.Time `json:"timestamp"`
 	}
 
 	now := time.Now().UTC().Round(time.Millisecond) // round to postgres precision
-	cNew := CreatedTime{CreatedAt: now}
-	var c CreatedTime
-	_, err := testService.client.RawPost("/created_times", &cNew, &c)
+	cNew := Timestamp{Timestamp: now}
+	var c Timestamp
+	_, err := testService.client.RawPost("/timestamps", &cNew, &c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.CreatedTimeID == cNew.CreatedTimeID {
+	if c.TimestampID == cNew.TimestampID {
 		t.Fatal("null id was not replaced")
 	}
-	if c.CreatedAt != cNew.CreatedAt {
-		t.Fatal("created_at was not kept")
+	if c.Timestamp != cNew.Timestamp {
+		t.Fatal("timestamp was not kept")
 	}
 
-	// an empty created_at string should produce an error
+	// an empty timestamp string should produce an error
 	emptyString := struct {
-		CreatedAt string `json:"created_at"`
+		Timestamp string `json:"timestamp"`
 	}{
-		CreatedAt: "",
+		Timestamp: "",
 	}
-	_, err = testService.client.RawPost("/created_times", &emptyString, &c)
+	_, err = testService.client.RawPost("/timestamps", &emptyString, &c)
 	if err == nil {
-		t.Fatal("eerror expected")
+		t.Fatal("error expected")
 	}
 
 	// This should also work with Struct
-	a := CreatedTime{}
-	if _, err := testService.client.Collection("created_time").Create(a, &a); err != nil {
+	a := Timestamp{}
+	if _, err := testService.client.Collection("timestamp").Create(a, &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.CreatedAt.IsZero() {
-		t.Fatal("CreatedAt was not expected to be Zero")
+	if a.Timestamp.IsZero() {
+		t.Fatal("Timestamp was not expected to be Zero")
 	}
 }
 
 func TestCollectionOrder(t *testing.T) {
 
 	type Order struct {
-		CreatedAt time.Time `json:"created_at"`
+		Timestamp time.Time `json:"timestamp"`
 		Serial    int64     `json:"serial"`
 	}
 
@@ -613,7 +621,7 @@ func TestCollectionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 10; i++ {
-		newOrder := Order{CreatedAt: t0.Add(time.Duration(i) * time.Minute), Serial: int64(i)}
+		newOrder := Order{Timestamp: t0.Add(time.Duration(i) * time.Minute), Serial: int64(i)}
 		_, err := testService.client.RawPost("/orders", &newOrder, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -678,7 +686,7 @@ func TestCollectionOrder(t *testing.T) {
 
 type Blob struct {
 	BlobID      uuid.UUID `json:"blob_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	Timestamp   time.Time `json:"timestamp"`
 	ContentType string    `json:"content_type"`
 }
 
@@ -1033,18 +1041,77 @@ func TestRequestInterceptors(t *testing.T) {
 
 }
 
+func TestWithLog(t *testing.T) {
+	type Logme struct {
+		LogmeID uuid.UUID `json:"logme_id"`
+		Secret  string
+	}
+	client := testService.client
+	nreq := Logme{Secret: "don't tell anyone"}
+	var nres Logme
+	_, err := client.RawPost("/logmes", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nres.Secret = "stay tuned"
+	_, err = client.RawPut("/logmes", &nres, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// now get the log, we should have two objects with different secrets in the right order
+	var log []Logme
+	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/log?order=asc", &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, "don't tell anyone", log[0].Secret, "oldest secret")
+	assert.Equal(t, "stay tuned", log[1].Secret, "newest secret")
+
+	// now the same thing with a singleton child
+	child := Logme{Secret: "lala"}
+	_, err = client.RawPut("/logmes/"+nres.LogmeID.String()+"/child", &child, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.Secret = "lulu"
+	_, err = client.RawPut("/logmes/"+nres.LogmeID.String()+"/child", &child, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// now get the singleton child log, we should have two objects with different secrets in the right order
+	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/child/log?order=asc", &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
+	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
+
+	// do the same test with the full collection path
+	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/children/all/log?order=asc", &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
+	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
+
+}
+
 func TestPaginationCollection(t *testing.T) {
-	// Populate the DB with elements created at two created_at times
+	// Populate the DB with elements created at two timestamps
 	numberOfElements := 210
-	createdAtFirst50 := time.Now().UTC().Round(time.Millisecond)
-	createdAtRemaining := time.Now().UTC().Round(time.Millisecond).Add(time.Minute)
+	timestampFirst50 := time.Now().UTC().Round(time.Millisecond)
+	timestampRemaining := time.Now().UTC().Round(time.Millisecond).Add(time.Minute)
 	for i := 1; i <= numberOfElements; i++ {
 		aNew := A{
 			ExternalID: fmt.Sprint(i),
-			CreatedAt:  createdAtFirst50,
+			Timestamp:  timestampFirst50,
 		}
 		if i > 50 {
-			aNew.CreatedAt = createdAtRemaining
+			aNew.Timestamp = timestampRemaining
 		}
 
 		if _, err := testService.client.RawPost("/as", &aNew, &A{}); err != nil {
@@ -1064,14 +1131,14 @@ func TestPaginationCollection(t *testing.T) {
 		{"/as?limit=10&page=1", http.StatusOK, 10, false, nil},
 		{"/as?limit=10&page=10", http.StatusOK, 10, false, nil},
 		{"/as?page=0", http.StatusBadRequest, 0, true, nil},
-		{"/as?until=" + createdAtFirst50.Add(time.Second).Format(time.RFC3339), http.StatusOK, 50, false, func(tc *testing.T, a A) {
-			if a.CreatedAt.After(createdAtFirst50) {
+		{"/as?until=" + timestampFirst50.Add(time.Second).Format(time.RFC3339), http.StatusOK, 50, false, func(tc *testing.T, a A) {
+			if a.Timestamp.After(timestampFirst50) {
 				tc.Fatal("Got too recent record")
 			}
 		}},
-		{"/as?limit=45&from=" + createdAtRemaining.Format(time.RFC3339), http.StatusOK, 45, false, func(tc *testing.T, a A) {
-			if a.CreatedAt.Before(createdAtRemaining) {
-				tc.Fatal("Got too old record:", a.CreatedAt)
+		{"/as?limit=45&from=" + timestampRemaining.Format(time.RFC3339), http.StatusOK, 45, false, func(tc *testing.T, a A) {
+			if a.Timestamp.Before(timestampRemaining) {
+				tc.Fatal("Got too old record:", a.Timestamp)
 			}
 		}},
 	}

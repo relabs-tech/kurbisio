@@ -140,7 +140,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// The limit ensures reasonable fast database queries with the nested relational query. If we ever come
 	// into a situation where relations are much larger than that, we would need to work out something
-	// different: extend the relation table with all columns necessary to do pagination (created_at,
+	// different: extend the relation table with all columns necessary to do pagination (timestamp,
 	// searchable properties, external indices) and keep those in sync with the original table.
 	sqlPagination := " ORDER BY serial LIMIT 1000"
 

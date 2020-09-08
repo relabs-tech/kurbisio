@@ -22,6 +22,7 @@ type collectionConfiguration struct {
 	Permits              []access.Permit `json:"permits"`
 	Description          string          `json:"description"`
 	SchemaID             string          `json:"schema_id"`
+	WithLog              bool            `json:"with_log"`
 }
 
 // singletonConfiguration describes a singleton resource
@@ -32,6 +33,7 @@ type singletonConfiguration struct {
 	SchemaID             string          `json:"schema_id"`
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
+	WithLog              bool            `json:"with_log"`
 }
 
 // blobConfiguration describes a blob collection resource
