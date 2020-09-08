@@ -389,7 +389,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 		r.URL.Path = matchPrefix + tail
 		rlog.Debugln("try to match route", r.URL.Path)
 		if !router.Match(r, &match) {
-			rlog.Errorln("Found no match")
+			rlog.Errorf("Found no match for %s", r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
