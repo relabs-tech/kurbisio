@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
@@ -73,6 +74,9 @@ type Builder struct {
 
 	// JSONSchemasRefs is a list of references JSON Schemas as strings.
 	JSONSchemasRefs []string
+
+	// The loglevel to be used by the logger. Default is logrus.Info
+	LogLevel *logrus.Level
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -116,7 +120,11 @@ func New(bb *Builder) *Backend {
 		pipelineMaxAttempts:  pipelineMaxAttempts,
 	}
 
-	logger.InitLogger()
+	logLevel := logrus.InfoLevel
+	if bb.LogLevel != nil {
+		logLevel = *bb.LogLevel
+	}
+	logger.InitLogger(logLevel)
 
 	b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
 	if err != nil {

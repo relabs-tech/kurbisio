@@ -28,11 +28,12 @@ const (
 )
 
 // InitLogger sets up the custom time formatter for all log statements.
-func InitLogger() {
+func InitLogger(logLevel logrus.Level) {
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
 	logrus.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
+	logrus.SetLevel(logLevel)
 }
 
 // AddRequestID adds a logger with a new request ID if no logger exits yet for the context.
