@@ -1064,7 +1064,7 @@ func TestWithLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, 2, len(log), "number of items in log")
 	assert.Equal(t, "don't tell anyone", log[0].Secret, "oldest secret")
 	assert.Equal(t, "stay tuned", log[1].Secret, "newest secret")
 
@@ -1085,7 +1085,7 @@ func TestWithLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, 2, len(log), "number of items in log")
 	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
 	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
 
@@ -1094,7 +1094,7 @@ func TestWithLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, 2, len(log), "number of itmes in log")
+	assert.Equal(t, 2, len(log), "number of items in log")
 	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
 	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
 
