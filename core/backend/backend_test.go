@@ -443,8 +443,6 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("**********received o_id of %s\n", o.OID)
-
 	// create single s with initial name
 	s := S{
 		Name: "initial",
