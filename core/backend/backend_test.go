@@ -107,7 +107,6 @@ var configurationJSON string = `{
 		"external_index": "external_id"
 	  }
 	],
-	"relations": [],
 	"shortcuts": [
 		{
 			"shortcut" : "b",
@@ -444,6 +443,8 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fmt.Printf("**********received o_id of %s\n", o.OID)
+
 	// create single s with initial name
 	s := S{
 		Name: "initial",
@@ -727,12 +728,23 @@ func TestBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if headerReturn.Get("Content-Type") != header["Content-Type"] {
+	if header["Content-Type"] != headerReturn.Get("Content-Type") {
 		t.Fatal("wrong Content-Type in return header")
 	}
-
-	if headerReturn.Get("Kurbisio-Meta-Data") != header["Kurbisio-Meta-Data"] {
-		t.Fatal("wrong meta data in return header")
+	var metaOrig, metaReturn, uMetaReturn map[string]string
+	json.Unmarshal([]byte(header["Kurbisio-Meta-Data"]), &metaOrig)
+	json.Unmarshal([]byte(headerReturn.Get("Kurbisio-Meta-Data")), &metaReturn)
+	if header["Content-Type"] != metaReturn["content_type"] {
+		t.Fatal("no or incorrect content-type in meta data: " + headerReturn.Get("Kurbisio-Meta-Data"))
+	}
+	if metaOrig["hello"] != metaReturn["hello"] {
+		t.Fatal("no hello world in meta data")
+	}
+	if _, ok := metaReturn["timestamp"]; !ok {
+		t.Fatal("no timestamp in meta data")
+	}
+	if _, ok := metaReturn["blob_id"]; !ok {
+		t.Fatal("no blob_id in meta data")
 	}
 
 	if bytes.Compare(data, dataReturn) != 0 {
@@ -760,8 +772,9 @@ func TestBlob(t *testing.T) {
 		t.Fatal("wrong Content-Type in return header")
 	}
 
-	if uHeaderReturn.Get("Kurbisio-Meta-Data") != "{}" {
-		t.Fatal("got meta data, but should have been cleared")
+	json.Unmarshal([]byte(uHeaderReturn.Get("Kurbisio-Meta-Data")), &uMetaReturn)
+	if _, ok := uMetaReturn["hello"]; ok {
+		t.Fatal("got meta data for hello, but should have been cleared: " + uHeaderReturn.Get("Kurbisio-Meta-Data"))
 	}
 
 	if bytes.Compare(uData, uDataReturn) != 0 {
@@ -860,7 +873,7 @@ func TestNotifications(t *testing.T) {
 	// create child singleton object with collection path. Third create.
 	nsreq := G{"notification_id": nid}
 	var nsres G
-	_, err = client.RawPost("/notifications/"+nid+"/singles", &nsreq, &nsres)
+	_, err = client.RawPut("/notifications/"+nid+"/singles", &nsreq, &nsres)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -66,6 +66,7 @@ var configurationJSON string = `{
 type Service struct {
 	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
 	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
+	LogLevel         string `env:"LOG_LEVEL,optional,default=info" description:"The level used for logger, can be debug, warning, info, error"`
 }
 
 func main() {
@@ -80,9 +81,10 @@ func main() {
 	router := mux.NewRouter()
 
 	backend.New(&backend.Builder{
-		Config: configurationJSON,
-		DB:     db,
-		Router: router,
+		Config:   configurationJSON,
+		DB:       db,
+		Router:   router,
+		LogLevel: service.LogLevel,
 	})
 
 	iotBroker := mqtt.NewBroker(&mqtt.Builder{

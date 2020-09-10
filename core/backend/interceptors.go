@@ -29,6 +29,8 @@ type requestHandler func(ctx context.Context, request Request, data []byte) ([]b
 // see the handler's version. In case of Create or Update, the handler's version will be written to the
 // database and then be returned to the user. For the Delete operation, data will always be nil and the returned
 // data is ignored.
+//
+// Update property requests cannot be intercepted.
 func (b *Backend) HandleResourceRequest(resource string,
 
 	handler func(ctx context.Context, request Request, data []byte) ([]byte, error),

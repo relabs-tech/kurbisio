@@ -11,10 +11,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -25,9 +27,12 @@ import (
 // Client provides easy access to the REST API.
 //
 type Client struct {
-	router *mux.Router
-	auth   *access.Authorization
-	ctx    context.Context
+	router     *mux.Router
+	httpClient *http.Client
+	url        string
+	token      string
+	auth       *access.Authorization
+	ctx        context.Context
 }
 
 // NewWithRouter creates a client to make pseudo-REST requests to the backend,
@@ -41,7 +46,25 @@ func NewWithRouter(router *mux.Router) Client {
 	}
 }
 
+// NewWithURL creates a client to make REST requests to the backend
+//
+// WithToken adds an authorization token to the request header.
+func NewWithURL(url string) Client {
+	return Client{
+		url:        url,
+		httpClient: &http.Client{Timeout: 20 * time.Second},
+	}
+}
+
+// WithToken returns a new client with admin authorizations
+func (c Client) WithToken(token string) Client {
+	c.token = token
+	return c
+}
+
 // WithAdminAuthorization returns a new client with admin authorizations
+// (this works only directly against the mux router, for a normal client
+//  use WithToken()))
 func (c Client) WithAdminAuthorization() Client {
 	c.auth = &access.Authorization{
 		Roles: []string{"admin"},
@@ -50,6 +73,8 @@ func (c Client) WithAdminAuthorization() Client {
 }
 
 // WithAuthorization returns a new client with specific authorizations
+// (this works only directly against the mux router, for a normal client
+//  use WithToken())
 func (c Client) WithAuthorization(auth *access.Authorization) Client {
 	c.auth = auth
 	return c
@@ -160,15 +185,58 @@ func (r Collection) SingletonPath() string {
 	return path
 }
 
-// Create creates a new item.
+// Create always creates a new item.
+//
+// The operation corresponds to a POST request.
 func (r Collection) Create(body interface{}, result interface{}) (int, error) {
 	return r.client.RawPost(r.CollectionPath(), body, result)
 }
 
-// Update updates (or creates) an item. The item must be fully
-// qualified, i.e. it must contain all identifiers.
-func (r Collection) Update(body interface{}, result interface{}) (int, error) {
+// CreateBlob always creates a new blob item.
+//
+// The operation corresponds to a POST request.
+func (r Collection) CreateBlob(blob []byte, meta interface{}, result interface{}) (int, error) {
+	var err error
+	j, ok := meta.([]byte)
+	if !ok {
+		j, err = json.Marshal(meta)
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
+	}
+	header := map[string]string{
+		"Kurbisio-Meta-Data": string(j),
+	}
+	return r.client.RawPostBlob(r.CollectionPath(), header, blob, result)
+}
+
+// Upsert updates an item, or creates it if it doesn't exist yet.
+// The item must be fully qualified, i.e. it must contain all identifiers, either in the
+// body itself or as selectors.
+//
+// The operation corresponds to a PUT request.
+func (r Collection) Upsert(body interface{}, result interface{}) (int, error) {
 	return r.client.RawPut(r.CollectionPath(), body, result)
+}
+
+// UpsertBlob updates a blob item, or creates it if it doesn't exist yet.
+// The blob item must be fully qualified, i.e. it must contain all identifiers, either in the
+// meta body itself or as selectors.
+//
+// The operation corresponds to a PUT request.
+func (r Collection) UpsertBlob(blob []byte, meta interface{}, result interface{}) (int, error) {
+	var err error
+	j, ok := meta.([]byte)
+	if !ok {
+		j, err = json.Marshal(meta)
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
+	}
+	header := map[string]string{
+		"Kurbisio-Meta-Data": string(j),
+	}
+	return r.client.RawPutBlob(r.CollectionPath(), header, blob, result)
 }
 
 // Clear deletes the entire collection
@@ -176,6 +244,8 @@ func (r Collection) Update(body interface{}, result interface{}) (int, error) {
 // This operation does not accept any filters nor does it generate notifications.
 // If you need filters or delete notifications, you should iterate of the items
 // and delete them one by one.
+//
+// The operation corresponds to a DELETE request.
 func (r Collection) Clear() (int, error) {
 	return r.client.RawDelete(r.CollectionPath())
 }
@@ -184,6 +254,8 @@ func (r Collection) Clear() (int, error) {
 //
 // If you potentially need multiple pages, use FirstPage() instead.
 //
+//
+// The operation corresponds to a GET request.
 func (r Collection) List(result interface{}) (int, error) {
 	return r.client.RawGet(r.CollectionPath(), result)
 }
@@ -222,22 +294,31 @@ func (r Item) Subcollection(resource string) Collection {
 }
 
 // Read reads an item from a collection
+//
+// The operation corresponds to a GET request.
 func (r Item) Read(result interface{}) (int, error) {
 	return r.col.client.RawGet(r.Path(), result)
 }
 
 // Delete deletes an item from a collection
+//
+// The operation corresponds to a DELETE request.
 func (r Item) Delete() (int, error) {
 	return r.col.client.RawDelete(r.Path())
 }
 
-// Update updates an item
-func (r Item) Update(body interface{}, result interface{}) (int, error) {
+// Upsert updates an item, or creates if it doesn't exist yet.
+// The item must be fully qualified, i.e. it must contain all identifiers, either in the
+// body itself or as selectors.
+//
+// The operation corresponds to a PUT request.
+func (r Item) Upsert(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPut(r.Path(), body, result)
 }
 
 // UpdateProperty updates a single static property in the fastes possible
-// way. Note: this method does not trigger any resource update notification
+// way. Note: this method does trigger an update resource notificatino, but
+// not with the entire object, only with the updated property.
 func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
 	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
 }
@@ -257,7 +338,7 @@ type Page struct {
 // FirstPage returns a requester for the first page of a collection
 //
 // Do not specify the page filter when using the page requester, as
-// it manages page itself. You can set all others filters, including
+// it manages page itself. You can set all others parameters, including
 // limit.
 func (r Collection) FirstPage() Page {
 	return Page{page: 1, r: r}
@@ -308,25 +389,42 @@ func (p Page) Next() Page {
 //
 // result can be map[string]interface{} or a raw *[]byte
 func (c Client) RawGet(path string, result interface{}) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 
-	status := rec.Code
+	var err error
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
+	status := res.StatusCode
 	if status == http.StatusNoContent {
 		return status, nil
 
 	}
 	if status != http.StatusOK {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusOK, strings.TrimSpace(string(resBody)))
 	}
 
-	var err error
-	if rec.Body != nil && result != nil {
+	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
-			*raw = rec.Body.Bytes()
+			*raw = resBody
 		} else {
-			err = json.Unmarshal(rec.Body.Bytes(), result)
+			err = json.Unmarshal(resBody, result)
 		}
 	}
 	return status, err
@@ -339,31 +437,46 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 //
 // result can be map[string]interface{} or a raw *[]byte
 func (c *Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
 
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-	res := rec.Result()
-
+	var err error
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
 	status := res.StatusCode
+
 	if status == http.StatusNoContent {
 		return status, res.Header, nil
-
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusOK, strings.TrimSpace(string(resBody)))
 	}
 
-	var err error
-	if rec.Body != nil && result != nil {
+	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
-			*raw = rec.Body.Bytes()
+			*raw = resBody
 		} else {
-			err = json.Unmarshal(rec.Body.Bytes(), result)
+			err = json.Unmarshal(resBody, result)
 		}
 	}
 	return status, res.Header, err
@@ -376,15 +489,31 @@ func (c *Client) RawGetWithHeader(path string, header map[string]string, result 
 //
 // Returns the actual http status code and the return header
 func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blob *[]byte) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, path, nil)
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
 
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
+	var err error
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
 
-	res := rec.Result()
 	status := res.StatusCode
 	if status == http.StatusNoContent {
 		return status, res.Header, nil
@@ -392,11 +521,12 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusOK, strings.TrimSpace(rec.Body.String()))
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusOK, strings.TrimSpace(string(resBody)))
 	}
 
-	if rec.Body != nil {
-		*blob = rec.Body.Bytes()
+	if resBody != nil {
+		*blob = resBody
 	}
 	return status, res.Header, nil
 }
@@ -418,20 +548,36 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(j))
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
+	status := res.StatusCode
 	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, strings.TrimSpace(rec.Body.String()))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
 	}
 
-	if rec.Body != nil && result != nil {
+	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
-			*raw = rec.Body.Bytes()
+			*raw = resBody
 		} else {
-			err = json.Unmarshal(rec.Body.Bytes(), result)
+			err = json.Unmarshal(resBody, result)
 		}
 	}
 	return status, err
@@ -444,20 +590,37 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 //
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
-	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusCreated, strings.TrimSpace(rec.Body.String()))
-	}
 	var err error
-	if rec.Body != nil && result != nil {
-		err = json.Unmarshal(rec.Body.Bytes(), result)
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
+	status := res.StatusCode
+
+	if status != http.StatusCreated {
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
+	}
+	if resBody != nil && result != nil {
+		err = json.Unmarshal(resBody, result)
 	}
 	return status, err
 }
@@ -479,19 +642,35 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(j))
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
-	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(j))
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
 	}
-	if rec.Body != nil && result != nil {
+	status := res.StatusCode
+	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s",
+			status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+	}
+	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
-			*raw = rec.Body.Bytes()
+			*raw = resBody
 		} else {
-			err = json.Unmarshal(rec.Body.Bytes(), result)
+			err = json.Unmarshal(resBody, result)
 		}
 	}
 	return status, err
@@ -505,21 +684,37 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 // Returns the actual http status code.
 func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
-	if status != http.StatusOK && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
-	}
-
 	var err error
-	if rec.Body != nil && result != nil {
-		err = json.Unmarshal(rec.Body.Bytes(), result)
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
+	status := res.StatusCode
+
+	if status != http.StatusOK && status != http.StatusNoContent {
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s",
+			status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+	}
+	if resBody != nil && result != nil {
+		err = json.Unmarshal(resBody, result)
 	}
 	return status, err
 }
@@ -541,19 +736,35 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPatch, path, bytes.NewBuffer(j))
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
-	if status != http.StatusOK && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s", status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodPatch, c.url+path, bytes.NewBuffer(j))
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
 	}
-	if rec.Body != nil && result != nil {
+	status := res.StatusCode
+	if status != http.StatusOK && status != http.StatusNoContent {
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v or %v. Error: %s",
+			status, http.StatusOK, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+	}
+	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
-			*raw = rec.Body.Bytes()
+			*raw = resBody
 		} else {
-			err = json.Unmarshal(rec.Body.Bytes(), result)
+			err = json.Unmarshal(resBody, result)
 		}
 	}
 	return status, err
@@ -566,13 +777,30 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 //
 // Returns the actual http status code.
 func (c Client) RawDelete(path string) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, path, nil)
-	rec := httptest.NewRecorder()
-	c.router.ServeHTTP(rec, r)
-
-	status := rec.Code
+	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, c.url+path, nil)
+	var err error
+	var res *http.Response
+	var resBody []byte
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, r)
+		res = rec.Result()
+		resBody = rec.Body.Bytes()
+	} else {
+		if c.token != "" {
+			r.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(r)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer res.Body.Close()
+		resBody, _ = ioutil.ReadAll(res.Body)
+	}
+	status := res.StatusCode
 	if status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s", status, http.StatusNoContent, strings.TrimSpace(rec.Body.String()))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
+			status, http.StatusNoContent, strings.TrimSpace(string(resBody)))
 	}
 	return status, nil
 }

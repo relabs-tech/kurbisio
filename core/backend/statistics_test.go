@@ -45,7 +45,16 @@ func TestStatistics(t *testing.T) {
 		expectedResources = append(expectedResources, r.Resource)
 	}
 
-	for _, r := range stats.Resources {
+	for _, r := range stats.Collections {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Singletons {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Relations {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Blobs {
 		receivedResources = append(receivedResources, r.Resource)
 	}
 
@@ -77,7 +86,22 @@ func TestStatistics(t *testing.T) {
 }
 
 func getResourceByName(name string, stats statisticsDetails) *resourceStatistics {
-	for _, r := range stats.Resources {
+	for _, r := range stats.Collections {
+		if r.Resource == name {
+			return &r
+		}
+	}
+	for _, r := range stats.Singletons {
+		if r.Resource == name {
+			return &r
+		}
+	}
+	for _, r := range stats.Relations {
+		if r.Resource == name {
+			return &r
+		}
+	}
+	for _, r := range stats.Blobs {
 		if r.Resource == name {
 			return &r
 		}

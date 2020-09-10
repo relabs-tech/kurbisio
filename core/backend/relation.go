@@ -133,9 +133,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	// register this relation, so that other relations can relate to it
 	virtualLeftResource := rc.Left + "/" + right
 	b.relations[virtualLeftResource] = resource
-	b.collectionFunctions[virtualLeftResource] = rightCollection
+	virtualLeftCollection := rightCollection
+	virtualLeftCollection.permits = rc.LeftPermits
+	b.collectionFunctions[virtualLeftResource] = virtualLeftCollection
 	virtualRightResource := rc.Right + "/" + left
 	b.relations[virtualRightResource] = resource
+	virtualRightCollection := leftCollection
+	virtualRightCollection.permits = rc.LeftPermits
 	b.collectionFunctions[virtualRightResource] = leftCollection
 
 	// The limit ensures reasonable fast database queries with the nested relational query. If we ever come
@@ -405,6 +409,10 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
+			if !auth.IsAuthorized(rightResources[:len(rightResources)-1], core.OperationRead, params, rightCollection.permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
 		}
 		create(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
@@ -416,7 +424,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationCreate, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(rightResources, core.OperationCreate, params, rc.RightPermits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+			if !auth.IsAuthorized(leftResources[:len(leftResources)-1], core.OperationRead, params, leftCollection.permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}

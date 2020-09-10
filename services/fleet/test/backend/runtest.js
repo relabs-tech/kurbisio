@@ -102,10 +102,8 @@ function createFleet(next) {
    console.log("create fleet")
    genericPost("/fleets",
       {
-         properties: {
-            name: "Number One",
-            description: "The number one fleet in this world"
-         }
+         name: "Number One",
+         description: "The number one fleet in this world"
       }, function (response) {
          console.log(response)
          fleet_id = response.fleet_id
@@ -121,9 +119,7 @@ function createDevice(next) {
       {
          thing: "Device1",
          provisioning_status: "waiting",
-         properties: {
-            name: "The First Device",
-         }
+         name: "The First Device",
       }, function (response) {
          console.log(response)
          device_id = response.device_id
@@ -134,13 +130,11 @@ function createDevice(next) {
 
 var user_id
 function createUser(next) {
-   console.log("create user")
+   console.log("create fleet user")
    genericPost("/fleets/" + fleet_id + "/users",
       {
-         properties: {
-            first_name: "Great",
-            last_name: "Pumkin"
-         }
+         first_name: "Great",
+         last_name: "Pumkin"
       }, function (response) {
          console.log(response)
          user_id = response.user_id
@@ -152,6 +146,14 @@ function createUser(next) {
 function assignDeviceToFleet(next) {
    console.log("assign device to fleet")
    emptyPut("/fleets/" + fleet_id + "/devices/" + device_id,
+      function (response) {
+         next()
+      })
+}
+
+function assignFleetDeviceToUser(next) {
+   console.log("assign fleet device to fleet user")
+   emptyPut("/fleets/" + fleet_id + "/users/" + user_id + "/devices/" + device_id,
       function (response) {
          next()
       })
@@ -174,8 +176,10 @@ createFleet(
    () => createDevice(
       () => createUser(
          () => assignDeviceToFleet(
-            () => requestDeviceConfiguration(
-               () => { console.log("done!") }
+            () => assignFleetDeviceToUser(
+               () => requestDeviceConfiguration(
+                  () => { console.log("done!") }
+               )
             )
          )
       )

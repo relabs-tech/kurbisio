@@ -186,14 +186,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	if singleton {
 		nillog.Debugln("  handle singleton routes:", singletonRoute, "GET,PUT,PATCH,DELETE")
+		nillog.Debugln("  handle singleton routes:", listRoute, "GET,PUT,PATCH,DELETE")
+		nillog.Debugln("  handle singleton routes:", itemRoute, "GET,PUT,PATCH,DELETE")
 		if rc.WithLog {
 			nillog.Debugln("  handle singleton log route:", singletonLogRoute, "GET")
 		}
-	}
-	nillog.Debugln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
-	nillog.Debugln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
-	if rc.WithLog {
-		nillog.Debugln("  handle collection log route:", logRoute, "GET")
+	} else {
+		nillog.Debugln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
+		nillog.Debugln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+		if rc.WithLog {
+			nillog.Debugln("  handle collection log route:", logRoute, "GET")
+		}
 	}
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
@@ -201,7 +204,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaWithTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
 	readQueryWithTotalLog := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s/log\" ", schema, resource)
+	readQueryMetaWithTotalLog := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s/log\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
@@ -267,6 +274,30 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		return values, object
 	}
 
+	createScanValuesAndObjectMeta := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, propertiesIndex+2, propertiesIndex+2+len(extra))
+		object := map[string]interface{}{}
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
+		}
+		values[i] = timestamp
+		object["timestamp"] = timestamp
+		i++
+		values[i] = revision
+		object["revision"] = revision
+		values = append(values, extra...)
+		return values, object
+	}
+
+	createScanValuesAndObjectWithMeta := func(metaonly bool, timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		if metaonly {
+			return createScanValuesAndObjectMeta(timestamp, revision, extra...)
+		}
+		return createScanValuesAndObject(timestamp, revision, extra...)
+	}
+
 	mergeProperties := func(object map[string]interface{}) {
 		rawJSON := object["properties"].(*json.RawMessage)
 		delete(object, "properties")
@@ -293,6 +324,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			externalColumn  string
 			externalValue   string
 			ascendingOrder  bool
+			metaonly        bool
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
@@ -347,6 +379,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				}
 				ascendingOrder = (value == "asc")
 
+			case "metaonly":
+				metaonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
 			default:
 				err = fmt.Errorf("unknown")
 			}
@@ -358,14 +397,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		params := mux.Vars(r)
+		if metaonly {
+			sqlQuery = readQueryMetaWithTotal
+		} else {
+			sqlQuery = readQueryWithTotal
+		}
+		sqlQuery += sqlWhereAll
 		if externalValue == "" { // get entire collection
-			sqlQuery = readQueryWithTotal + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = readQueryWithTotal + sqlWhereAll + fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
+			sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
 			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
@@ -409,14 +453,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var totalCount int
 		for rows.Next() {
 			var timestamp time.Time
-			values, object := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
 				http.Error(w, "Error 4725", http.StatusInternalServerError)
 				return
 			}
-			mergeProperties(object)
+			if !metaonly {
+				mergeProperties(object)
+			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
 				from = timestamp
@@ -505,6 +551,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			externalColumn  string
 			externalValue   string
 			ascendingOrder  bool
+			metaonly        bool
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
@@ -559,6 +606,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				}
 				ascendingOrder = (value == "asc")
 
+			case "metaonly":
+				metaonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
 			default:
 				err = fmt.Errorf("unknown")
 			}
@@ -570,14 +624,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		params := mux.Vars(r)
+		if metaonly {
+			sqlQuery = readQueryMetaWithTotalLog
+		} else {
+			sqlQuery = readQueryWithTotalLog
+		}
+		sqlQuery += sqlWhereAll
 		if externalValue == "" { // get entire collection
-			sqlQuery = readQueryWithTotalLog + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = readQueryWithTotalLog + sqlWhereAll + fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
+			sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
 			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
 			for i := 1; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-1] = params[columns[i]]
@@ -621,14 +680,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var totalCount int
 		for rows.Next() {
 			var timestamp time.Time
-			values, object := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
 				http.Error(w, "Error 4725", http.StatusInternalServerError)
 				return
 			}
-			mergeProperties(object)
+			if !metaonly {
+				mergeProperties(object)
+			}
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
 				from = timestamp
@@ -865,8 +926,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		queryParameters[i] = value
 
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4729: cannot BeginTx")
+			http.Error(w, "Error 4729", http.StatusInternalServerError)
+			return
+		}
+
 		var primaryID uuid.UUID
-		err = b.db.QueryRow(query, queryParameters...).Scan(&primaryID)
+		err = tx.QueryRow(query, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -874,6 +942,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4728: cannot QueryRow query:`%s`", query)
 			http.Error(w, "Error 4728", http.StatusInternalServerError)
+			return
+		}
+		notification := map[string]string{
+			property: value,
+		}
+		notificationJSON, _ := json.Marshal(notification)
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, primaryID, notificationJSON)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4744: sqlQuery `%s`", query)
+			http.Error(w, "Error 4744", http.StatusInternalServerError)
 			return
 		}
 
@@ -1085,6 +1163,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
 
 		rlog := logger.FromContext(r.Context())
+		calledFromUpsert := bodyJSON != nil
+
+		// low-key feature for the backup/restore tool
+		var silent bool
+		if calledFromUpsert {
+			if s := r.URL.Query().Get("silent"); s != "" {
+				silent, _ = strconv.ParseBool(s)
+			}
+		}
 
 		params := mux.Vars(r)
 		if bodyJSON == nil {
@@ -1099,20 +1186,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values := make([]interface{}, len(columns)+1)
 		var i int
 
-		if !singleton {
-			// the primary resource identifier, use as specified or create a new one. Singletons
-			// do not have this, they are fully specified by their owner ID
-			primaryID, ok := bodyJSON[columns[0]]
-			if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
-				primaryID = uuid.New()
-				// update the bodyJSON so we can validate
-				bodyJSON[columns[0]] = primaryID
-			}
+		if !calledFromUpsert {
+			// the primary resource identifier, always create a new one unless we are called
+			// from upsert.
+			primaryID := uuid.New()
+			// update the bodyJSON so we can validate
+			bodyJSON[columns[0]] = primaryID
 			values[0] = primaryID
 			i++
 		}
 
-		for ; i < propertiesIndex; i++ { // the core identifiers
+		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
 			k := columns[i]
 			value, ok := bodyJSON[k]
 
@@ -1255,13 +1339,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		} else if err != nil {
 			status := http.StatusInternalServerError
+			msg := "Error 4734"
 			// Non unique external keys are reported as code Code 23505
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
 				status = http.StatusUnprocessableEntity
+				msg = "unique conststraint violation"
 			}
 			tx.Rollback()
 			rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
-			http.Error(w, "Error 4734", status)
+			http.Error(w, msg, status)
 			return
 		}
 
@@ -1289,7 +1375,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
+		if silent {
+			err = tx.Commit()
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
+		}
 		if err != nil {
 			rlog.WithError(err).Error("Error 4737: commitWithNotification")
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
@@ -1315,9 +1405,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		create(w, r, nil)
 	}
 
-	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	upsertWithAuth := func(w http.ResponseWriter, r *http.Request) {
 
 		rlog := logger.FromContext(r.Context())
+
+		// low-key feature for the backup/restore tool
+		var silent bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
 
 		params := mux.Vars(r)
 		var bodyJSON map[string]interface{}
@@ -1584,7 +1680,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		if silent {
+			err = tx.Commit()
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		}
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4739: commitWithNotification")
 			http.Error(w, "Error 4739", http.StatusInternalServerError)
@@ -1598,26 +1698,29 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// store the collection functions  for later usage in relations
 	b.collectionFunctions[resource] = &collectionFunctions{
-		list: list,
-		read: read,
+		permits: rc.Permits,
+		list:    list,
+		read:    read,
 	}
 
 	// CREATE
-	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		createWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodPost)
+	if !singleton {
+		router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			createWithAuth(w, r)
+		}).Methods(http.MethodOptions, http.MethodPost)
+	}
 
-	// UPDATE/CREATE with id
+	// UPDATE/CREATE with id in json
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		updateWithAuth(w, r)
+		upsertWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// UPDATE/CREATE with fully qualified path
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		updateWithAuth(w, r)
+		upsertWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// READ
@@ -1683,7 +1786,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// UPDATE
 	router.HandleFunc(singletonRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		updateWithAuth(w, r)
+		upsertWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE

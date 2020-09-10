@@ -21,7 +21,10 @@ type resourceStatistics struct {
 
 // statistics represents information about the backend resources
 type statisticsDetails struct {
-	Resources []resourceStatistics `json:"resources"`
+	Collections []resourceStatistics `json:"collections"`
+	Singletons  []resourceStatistics `json:"singletons"`
+	Relations   []resourceStatistics `json:"relations"`
+	Blobs       []resourceStatistics `json:"blobs"`
 }
 
 func (b *Backend) handleStatistics(router *mux.Router) {
@@ -42,38 +45,52 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s := statisticsDetails{}
-	var tables sort.StringSlice
+	var collections, singletons, relations, blobs sort.StringSlice
 	for _, r := range b.config.Collections {
-		tables = append(tables, r.Resource)
-	}
-	for _, r := range b.config.Blobs {
-		tables = append(tables, r.Resource)
+		collections = append(collections, r.Resource)
 	}
 	for _, r := range b.config.Singletons {
-		tables = append(tables, r.Resource)
+		singletons = append(singletons, r.Resource)
+	}
+	for _, r := range b.config.Relations {
+		relations = append(relations, r.Left+":"+r.Right)
+	}
+	for _, r := range b.config.Blobs {
+		blobs = append(blobs, r.Resource)
 	}
 	// Sort the resources so that ETag is unchanged regardless of the order of resources
-	tables.Sort()
-	for _, resource := range tables {
-		row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
-		var size, count int64
-		if err := row.Scan(&size, &count); err != nil {
-			logger.FromContext(nil).WithError(err).Errorln("Error 4028: Scan")
-			http.Error(w, "Error 4028: ", http.StatusInternalServerError)
-			return
-		}
-		var averageSize float64 = 0
-		if count != 0 {
-			averageSize = float64(size / count)
-		}
+	collections.Sort()
+	singletons.Sort()
+	relations.Sort()
+	blobs.Sort()
 
-		s.Resources = append(s.Resources, resourceStatistics{
-			Resource:     resource,
-			Count:        count,
-			SizeMB:       float64(size) / 1024. / 1024.,
-			AverageSizeB: averageSize,
-		})
+	queryStatisticsFromDB := func(stats *[]resourceStatistics, resources sort.StringSlice) {
+		*stats = []resourceStatistics{} // do not return null in json, but empty array
+		for _, resource := range resources {
+			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
+			var size, count int64
+			if err := row.Scan(&size, &count); err != nil {
+				logger.FromContext(nil).WithError(err).Errorln("Error 4028: Scan")
+				http.Error(w, "Error 4028: ", http.StatusInternalServerError)
+				return
+			}
+			var averageSize float64 = 0
+			if count != 0 {
+				averageSize = float64(size / count)
+			}
+
+			*stats = append(*stats, resourceStatistics{
+				Resource:     resource,
+				Count:        count,
+				SizeMB:       float64(size) / 1024. / 1024.,
+				AverageSizeB: averageSize,
+			})
+		}
 	}
+	queryStatisticsFromDB(&s.Collections, collections)
+	queryStatisticsFromDB(&s.Singletons, singletons)
+	queryStatisticsFromDB(&s.Relations, relations)
+	queryStatisticsFromDB(&s.Blobs, blobs)
 
 	jsonData, _ := json.Marshal(s)
 	etag := bytesToEtag(jsonData)

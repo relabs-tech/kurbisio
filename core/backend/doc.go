@@ -220,8 +220,8 @@ The maximum allowed limit is 100, which is also the default limit. Combining pag
 avoids page drift. A well-behaving application would get the first page without any filter, and then use the timestamp
 reported in the "Pagination-Until" header as until-parameter for querying pages further down.
 
-Note: Due to some peculiarities of Postgres, the total count and the page count are always zero
-if the requested page is out of range.
+For collections it is possible to only retrieve meta data, by specifying the ?onlymeta=true query parameter. Meta data are
+all defining identifiers, the timestamp and each object's revision number.
 
 Primary Resource Identifier
 

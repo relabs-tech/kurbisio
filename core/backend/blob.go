@@ -132,7 +132,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	rlog.Debugln("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, blob FROM %s.\"%s\" ", schema, resource)
-	readQueryMetaDataOnly := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp FROM %s.\"%s\" ", schema, resource)
+	readQueryMeta := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 	sqlReturnID := " RETURNING " + this + "_id;"
 
@@ -153,7 +153,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
-	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") RETURNING " + this + "_id;"
+	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") "
+	insertQuery += "ON CONFLICT (" + this + "_id) DO UPDATE SET " + this + "_id = $1 RETURNING " + this + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
@@ -164,7 +165,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	updateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
 	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
-	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT " + this + "_id DO UPDATE SET "
+	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT (" + this + "_id) DO UPDATE SET "
 	insertUpdateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
 	insertUpdateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
 
@@ -201,6 +202,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		return values, object
 	}
 
+	mergeProperties := func(object map[string]interface{}) {
+		rawJSON := object["properties"].(*json.RawMessage)
+		delete(object, "properties")
+		var properties map[string]interface{}
+		err := json.Unmarshal([]byte(*rawJSON), &properties)
+		if err != nil {
+			return
+		}
+		for key, value := range properties {
+			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
+				object[key] = value
+			}
+		}
+	}
 	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
 			queryParameters []interface{}
@@ -317,6 +332,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			mergeProperties(object)
+
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
 				from = timestamp
@@ -375,8 +392,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				// for calculating the etag, we prefer doing an extra query instead of
 				// loading the entire binary blob into memory for no good reason
 				var timestamp time.Time
-				values, _ := createScanValuesAndObject(&timestamp)
-				err = b.db.QueryRow(readQueryMetaDataOnly+sqlWhereOne+";", queryParameters...).Scan(values...)
+				values, response := createScanValuesAndObject(&timestamp)
+				err = b.db.QueryRow(readQueryMeta+sqlWhereOne+";", queryParameters...).Scan(values...)
 				if err == sql.ErrNoRows {
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
@@ -387,8 +404,18 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				}
 				etag := timeToEtag(timestamp)
 				if ifNoneMatchFound(ifNoneMatch, etag) {
-					// ETag must also be provided in headers in case If-None-Match is set
+					// headers must be provided also in case If-None-Match is set
 					w.Header().Set("Etag", etag)
+					for i := propertiesIndex + 1; i < len(columns); i++ {
+						k := columns[i]
+						w.Header().Set(jsonToHeader[k], *response[k].(*string))
+					}
+					w.Header().Set("Etag", timeToEtag(timestamp))
+					if len(maxAge) > 0 {
+						w.Header().Set("Cache-Control", maxAge)
+					}
+					metaData, _ := json.Marshal(response)
+					w.Header().Set("Kurbisio-Meta-Data", string(metaData))
 					w.WriteHeader(http.StatusNotModified)
 					return
 				}
@@ -424,7 +451,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		if len(maxAge) > 0 {
 			w.Header().Set("Cache-Control", maxAge)
 		}
-		w.Header().Set("Kurbisio-Meta-Data", string(*response["properties"].(*json.RawMessage)))
+
+		mergeProperties(response)
+
+		metaData, _ := json.Marshal(response)
+		w.Header().Set("Kurbisio-Meta-Data", string(metaData))
 		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
 		w.WriteHeader(http.StatusOK)
 		w.Write(blob)
@@ -458,48 +489,65 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		metaData := []byte(r.Header.Get("Kurbisio-Meta-Data"))
-		if len(metaData) == 0 {
-			metaData = []byte("{}")
-		} else {
-			var metaJSON json.RawMessage
-			err = json.Unmarshal(metaData, &metaJSON)
-			if err != nil {
-				http.Error(w, "invalid meta data: "+err.Error(), http.StatusBadRequest)
-				return
-			}
+		metaDataJSON := []byte(r.Header.Get("Kurbisio-Meta-Data"))
+		if len(metaDataJSON) == 0 {
+			metaDataJSON = []byte("{}")
+		}
+
+		var metaJSON map[string]json.RawMessage
+		err = json.Unmarshal(metaDataJSON, &metaJSON)
+		if err != nil {
+			http.Error(w, "invalid meta data: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns)+2)
 		var i int
 
-		for i = 0; i < propertiesIndex; i++ { // the core identifiers
+		values[i] = uuid.New() // create always creates a new object
+		i++
+
+		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
 			param, _ := params[columns[i]]
 			if param == "all" || len(param) == 0 {
-				if i == 0 {
-					values[0] = uuid.New()
-				} else {
+				var id, null uuid.UUID
+				if j, ok := metaJSON[columns[i]]; ok {
+					err = json.Unmarshal(j, &id)
+					if err != nil {
+						http.Error(w, "invalid "+columns[i]+" in meta data", http.StatusBadRequest)
+						return
+					}
+				}
+				if id == null {
 					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
 					return
 				}
-
+				values[i] = id
 			} else {
 				values[i] = param
 			}
 		}
-		// the dynamic properties
-		values[i] = metaData
+
+		// the meta data
+		metaDataIndex := i
 		i++
 
 		// static properties, non mandatory
 		for ; i < propertiesEndIndex; i++ {
-			values[i] = r.Header.Get(jsonToHeader[columns[i]])
+			value := r.Header.Get(jsonToHeader[columns[i]])
+			if j, ok := metaJSON[columns[i]]; ok {
+				json.Unmarshal(j, &value)
+			}
+			values[i] = value
 		}
 
 		// external (unique) indices, mandatory
 		for ; i < len(columns); i++ {
 			value := r.Header.Get(jsonToHeader[columns[i]])
+			if j, ok := metaJSON[columns[i]]; ok {
+				json.Unmarshal(j, &value)
+			}
 			if len(value) == 0 {
 				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
 				return
@@ -513,7 +561,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// last value is timestamp
 		timestamp := time.Now().UTC()
+		if j, ok := metaJSON["timestamp"]; ok {
+			json.Unmarshal(j, &timestamp)
+		}
 		values[i] = &timestamp
+
+		// prune meta data
+		for i = 0; i < len(columns); i++ {
+			if i == propertiesIndex {
+				continue
+			}
+			delete(metaJSON, columns[i])
+		}
+		metaDataJSON, _ = json.Marshal(metaJSON)
+		values[metaDataIndex] = metaDataJSON
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
@@ -535,7 +596,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = tx.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", id).Scan(values...)
+		err = tx.QueryRow(readQueryMeta+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -554,7 +615,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Write(jsonData)
 	}
 
-	updateWithAuth := func(w http.ResponseWriter, r *http.Request) {
+	upsertWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		// low-key feature for the backup/restore tool
+		var silent bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
+
 		params := mux.Vars(r)
 		authorizedForCreate := false
 		if b.authorizationEnabled {
@@ -572,34 +639,67 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		metaData := []byte(r.Header.Get("Kurbisio-Meta-Data"))
-		if len(metaData) == 0 {
-			metaData = []byte("{}")
-		} else {
-			var metaJSON json.RawMessage
-			err = json.Unmarshal(metaData, &metaJSON)
-			if err != nil {
-				http.Error(w, "invalid meta data: "+err.Error(), http.StatusBadRequest)
-				return
-			}
+		metaDataJSON := []byte(r.Header.Get("Kurbisio-Meta-Data"))
+		if len(metaDataJSON) == 0 {
+			metaDataJSON = []byte("{}")
+		}
+
+		var metaJSON map[string]json.RawMessage
+		err = json.Unmarshal(metaDataJSON, &metaJSON)
+		if err != nil {
+			http.Error(w, "invalid meta data: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		values := make([]interface{}, len(columns)+2)
 		var i int
 
-		// first add the values for the where-query
-		for i = 0; i < propertiesIndex; i++ {
-			values[i] = params[columns[i]]
+		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
+			param, _ := params[columns[i]]
+			if param == "all" || len(param) == 0 {
+				var id, null uuid.UUID
+				if j, ok := metaJSON[columns[i]]; ok {
+					err = json.Unmarshal(j, &id)
+					if err != nil {
+						http.Error(w, "invalid "+columns[i]+" in meta data", http.StatusBadRequest)
+						return
+					}
+				}
+
+				if id == null {
+					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
+					return
+				}
+				values[i] = id
+			} else {
+				values[i] = param
+			}
 		}
 
 		// the meta data as dynamic properties
-		values[i] = metaData
+		metaDataIndex := i
 		i++
 
-		// build the update set
+		// static properties, non mandatory
+		for ; i < propertiesEndIndex; i++ {
+			value := r.Header.Get(jsonToHeader[columns[i]])
+			if j, ok := metaJSON[columns[i]]; ok {
+				json.Unmarshal(j, &value)
+			}
+			values[i] = value
+		}
+
+		// external (unique) indices, mandatory
 		for ; i < len(columns); i++ {
-			k := columns[i]
-			values[i] = r.Header.Get(jsonToHeader[k])
+			value := r.Header.Get(jsonToHeader[columns[i]])
+			if j, ok := metaJSON[columns[i]]; ok {
+				json.Unmarshal(j, &value)
+			}
+			if len(value) == 0 {
+				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
+				return
+			}
+			values[i] = value
 		}
 
 		// next is the blob itself
@@ -608,7 +708,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// last value is timestamp
 		timestamp := time.Now().UTC()
+		if j, ok := metaJSON["timestamp"]; ok {
+			json.Unmarshal(j, &timestamp)
+		}
 		values[i] = &timestamp
+
+		// prune meta data
+		for i = 0; i < len(columns); i++ {
+			if i == propertiesIndex {
+				continue
+			}
+			delete(metaJSON, columns[i])
+		}
+		metaDataJSON, _ = json.Marshal(metaJSON)
+		values[metaDataIndex] = metaDataJSON
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
@@ -620,6 +733,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		query := updateQuery
 		if authorizedForCreate {
 			query = insertUpdateQuery
+		}
+		if !rc.Mutable {
+			query = insertQuery
 		}
 		err = tx.QueryRow(query, values...).Scan(&primaryID)
 		if err == sql.ErrNoRows {
@@ -639,10 +755,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = b.db.QueryRow(readQueryMetaDataOnly+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
+		err = tx.QueryRow(readQueryMeta+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
 		if err == sql.ErrNoRows {
 			tx.Rollback()
-			http.Error(w, "no such "+this, http.StatusNotFound)
+			http.Error(w, "upsert failed, no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -652,7 +768,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		jsonData, _ := json.Marshal(response)
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+
+		if silent {
+			err = tx.Commit()
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -773,6 +894,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		readWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
+	// UPDATE / CREATE with in in meta data
+	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		upsertWithAuth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut)
+
 	// LIST
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
@@ -791,14 +918,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		clearWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodDelete)
 
-	// UPDATE / CREATE with id
+	// UPDATE / CREATE with fully qualified path
 	router.HandleFunc(itemRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		if rc.Mutable {
-			updateWithAuth(w, r)
-		} else {
-			createWithAuth(w, r)
-		}
+		upsertWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 }
 

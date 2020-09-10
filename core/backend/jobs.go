@@ -541,9 +541,11 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 // Notification handlers only support mutable operations. They are executed reliably
 // out-of-band when an object was modified, and retried a few times when they fail (i.e. return a non-nil error).
 //
-// The payload of a Create, Update or Delete notification is the object itself. The payload for a Clear notification
-// is a map[string]string of the query parameters (from,until,filter) and the collection's identifiers from the
-// request URL.
+// The payload of a Create, Update or Delete notification is the object itself. The only exception is a direct
+// property update. In this case only the updated property is contained in the notification.
+//
+// The payload for a Clear notification is a map[string]string of the query parameters (from,until,filter) and
+// the collection's identifiers from the request URL.
 //
 // If you need to intercept operations - including the immutable read and list operations -, then you can do that
 // in-band with a request handler, see HandleResourceRequest()

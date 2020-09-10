@@ -75,8 +75,8 @@ type Builder struct {
 	// JSONSchemasRefs is a list of references JSON Schemas as strings.
 	JSONSchemasRefs []string
 
-	// The loglevel to be used by the logger. Default is logrus.Info
-	LogLevel *logrus.Level
+	// The loglevel to be used by the logger. Default is "info""
+	LogLevel string
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -120,9 +120,28 @@ func New(bb *Builder) *Backend {
 		pipelineMaxAttempts:  pipelineMaxAttempts,
 	}
 
-	logLevel := logrus.InfoLevel
-	if bb.LogLevel != nil {
-		logLevel = *bb.LogLevel
+	var logLevel logrus.Level
+
+	if bb.LogLevel != "" {
+		switch strings.ToLower(bb.LogLevel) {
+		case "info":
+			logLevel = logrus.InfoLevel
+			break
+		case "debug":
+			logLevel = logrus.DebugLevel
+			break
+		case "warning":
+		case "warn":
+			logLevel = logrus.WarnLevel
+			break
+		case "error":
+			logLevel = logrus.ErrorLevel
+			break
+		default:
+			fmt.Println("Unkown loglevel, using INFO")
+			logLevel = logrus.InfoLevel
+			break
+		}
 	}
 	logger.InitLogger(logLevel)
 
@@ -267,8 +286,9 @@ type relationInjection struct {
 }
 
 type collectionFunctions struct {
-	list func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	read func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	permits []access.Permit
+	list    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+	read    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
 }
 
 // returns $1,...,$n
