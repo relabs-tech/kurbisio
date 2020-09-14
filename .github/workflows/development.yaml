@@ -12,7 +12,7 @@ name: Build & Test & Deploy
 
 jobs:
   test:
-    runs-on: "ubuntu-latest"
+    runs-on: [self-hosted, Linux, native]
     container: golang
     name: test
 
@@ -56,9 +56,8 @@ jobs:
           POSTGRES_PASSWORD: "docker"
 
   build:
-    runs-on: "ubuntu-latest"
+    runs-on: [self-hosted, docker, backend]
     name: build & deploy
-    container: golang
     needs: test
     steps:
       - uses: actions/checkout@v2
