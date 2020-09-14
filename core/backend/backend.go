@@ -40,10 +40,11 @@ type Backend struct {
 	callbacks                map[string]jobHandler
 	interceptors             map[string]requestHandler
 
-	pipelineConcurrency     int
-	pipelineMaxAttempts     int
-	jobsUpdateQuery         string
-	jobsDeleteQuery         string
+	pipelineConcurrency int
+	pipelineMaxAttempts int
+
+	jobsInsertQuery, jobsRescheduleQuery, jobsUpdateQuery, jobsDeleteQuery string
+
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
 	hasJobsToProcess        bool

@@ -105,6 +105,13 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 		}
 	}
 
+	b.jobsInsertQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
+	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' 
+	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=$8,context=$9, 
+	scheduled_at=CASE WHEN $10=null THEN _job_.scheduled_at ELSE $10 END::TIMESTAMP 
+	RETURNING serial;`
+
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
 scheduled_at = CASE WHEN attempts_left>=3 then $2 WHEN attempts_left=2 THEN $3 ELSE $4 END::TIMESTAMP
@@ -120,6 +127,9 @@ RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, att
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 RETURNING serial;`
+
+	b.jobsRescheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
+SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
@@ -240,7 +250,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		payload = []byte("{}")
 	}
 	event := Event{Type: eventType, Key: key, Resource: resource, ResourceID: resourceID}.WithPayload(payload)
-	status, err := b.raiseEventWithResourceInternal(r.Context(), event, nil)
+	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, nil)
 
 	if err != nil {
 		http.Error(w, err.Error(), status)
@@ -276,7 +286,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 				} else {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
-			case "event":
+			case "event", "queued_event":
 				event, ctx := job.event()
 				rlog = logger.FromContext(ctx)
 				key = eventJobKey(event.Type)
@@ -292,20 +302,25 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 		}()
 
 		if err != nil {
-			rlog.Errorln("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
-			tx.Commit()
+			if needRescheduleError, ok := err.(NeedRescheduleError); ok {
+				var serial int
+				// reschedule in UTC
+				scheduleAt := needRescheduleError.ScheduleAt.UTC()
+				err = tx.QueryRow(b.jobsRescheduleQuery, &job.Serial, &scheduleAt, &b.pipelineMaxAttempts).Scan(&serial)
+			} else {
+				rlog.Errorln("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
+			}
 		} else {
 			// job handled sucessfully, delete form queue
 			var serial int
 			err = tx.QueryRow(b.jobsDeleteQuery, &job.Serial).Scan(&serial)
-			if err == nil {
-				err = tx.Commit()
-			}
-			if err != nil {
-				rlog.Errorln("error committing "+key+"#"+strconv.Itoa(serial)+":", err.Error())
-			} else {
-				rlog.Debugln(" successfully handled " + key + "#" + strconv.Itoa(serial))
-			}
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			rlog.Errorf("error committing %s#%d: %s", key, job.Serial, err.Error())
+		} else {
+			rlog.Debugf("successfully handled %s#%d", key, job.Serial)
 		}
 	}
 }
@@ -449,9 +464,19 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
+// NeedRescheduleError is a custom error for HandleEvent
+type NeedRescheduleError struct {
+	ScheduleAt time.Time
+}
+
+func (err NeedRescheduleError) Error() string {
+	return "need to reschedule"
+}
+
 // HandleEvent installs a callback handler the specified event. Handlers are executed
 // out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
-// a few times with increasing timeout.
+// a few times with increasing timeout. If the handler fails with a NeedRescheduleError,
+// the event will be rescheduled at the requested time.
 func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; ok {
@@ -464,11 +489,20 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 // Callbacks registered with HandleEvent() will be called.
 //
 // Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
-// i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use a unique key
+// i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use QueueEvent() instead.
 //
 // Use ScheduleEvent if you want to schedule an event at a specific time.
 func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, event, nil)
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, nil)
+	return err
+}
+
+// QueueEvent adds the requested event to the queue. Payload can be nil, an object or a []byte.
+// Callbacks registered with HandleEvent() will be called.
+//
+// Queued events are always going to be delievered, there is no compression happening.
+func (b *Backend) QueueEvent(ctx context.Context, event Event) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, "queued-event", event, nil)
 	return err
 }
 
@@ -480,12 +514,12 @@ func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
 //
 // Use RaiseEvent if you want to raise the event immediately.
 func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt time.Time) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, event, &scheduleAt)
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt)
 	return err
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Event, scheduleAt *time.Time) (int, error) {
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time) (int, error) {
 	key := eventJobKey(event.Type)
 	if _, ok := b.callbacks[key]; !ok {
 		return http.StatusBadRequest, fmt.Errorf("no callback handler installed for %s", key)
@@ -510,10 +544,8 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, event Even
 	}
 
 	var serial int
-	err = b.db.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at)"+
-		"VALUES('event',$1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' "+
-		"DO UPDATE SET payload=$5,timestamp=$6,attempts_left=$7,context=$8,scheduled_at=$9 RETURNING serial;",
+	err = b.db.QueryRow(b.jobsInsertQuery,
+		job,
 		event.Type,
 		event.Key,
 		event.Resource,
@@ -578,6 +610,10 @@ func notificationJobKey(resource string, operation core.Operation) string {
 
 func eventJobKey(event string) string {
 	return "event: " + event
+}
+
+func taskJobKey(event string) string {
+	return "task: " + event
 }
 
 func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {

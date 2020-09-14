@@ -47,7 +47,8 @@ func (r Registry) Accessor(prefix string) Accessor {
 }
 
 // Read reads a value from the registry. It returns the
-// time when the value was written.
+// time when the value was written, or a zero timpestamp
+// if there is no value.
 //
 // If the accessor has a prefix, the key is prepended with "{prefix}:"
 func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
@@ -101,6 +102,25 @@ ON CONFLICT (key) DO UPDATE SET value=$2,timestamp=$3;`,
 	}
 	if count == 0 {
 		return fmt.Errorf("could not write key %s", key)
+	}
+	return nil
+
+}
+
+// Delete deletes a value from the registry.
+//
+// If the accessor has a prefix, the key is prepended with "{prefix}:"
+func (r Accessor) Delete(key string) error {
+
+	if len(r.Prefix) > 0 {
+		key = r.Prefix + ":" + key
+	}
+	_, err := r.Registry.db.Exec(
+		`DELETE FROM `+r.Registry.db.Schema+`."_registry_ WHERE key=$1;`,
+		key)
+
+	if err != nil {
+		return err
 	}
 	return nil
 }
