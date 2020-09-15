@@ -533,24 +533,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		metaDataIndex := i
 		i++
 
-		// static properties, non mandatory
-		for ; i < propertiesEndIndex; i++ {
-			value := r.Header.Get(jsonToHeader[columns[i]])
-			if j, ok := metaJSON[columns[i]]; ok {
-				json.Unmarshal(j, &value)
-			}
-			values[i] = value
-		}
-
-		// external (unique) indices, mandatory
+		// static properties and external indices, non mandatory
 		for ; i < len(columns); i++ {
 			value := r.Header.Get(jsonToHeader[columns[i]])
 			if j, ok := metaJSON[columns[i]]; ok {
 				json.Unmarshal(j, &value)
-			}
-			if len(value) == 0 {
-				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
-				return
 			}
 			values[i] = value
 		}
