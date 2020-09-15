@@ -22,6 +22,9 @@ const (
 	contextKeyIdentity      contextKey = "_identity_"
 )
 
+// OnlyAdminAccess requires admin access for everything
+var OnlyAdminAccess bool
+
 /*Authorization is a context object which stores authorization information
 for user, things, or machines.
 
@@ -103,6 +106,10 @@ func (a *Authorization) IsAuthorized(resources []string, operation core.Operatio
 
 	if a.HasRole("admin") {
 		return true // admin is always authorized
+	}
+
+	if OnlyAdminAccess {
+		return false
 	}
 
 	for _, permit := range permits {
