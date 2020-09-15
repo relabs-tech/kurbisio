@@ -136,13 +136,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	propertiesEndIndex := len(columns) // where properties end
 
-	// an external index is a manadory and unique varchar property.
+	// an external index is a unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", name)
-		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", name)
+		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
 			"external_index_"+this+"_"+name,
-			schema, resource, name)
+			schema, resource, name, name)
 		// the log index is not unique
 		createIndicesQueryLog = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
 			"external_index_"+this+"_"+name,
@@ -1289,21 +1289,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		values[i] = propertiesJSON
 		i++
 
-		// static properties, non mandatory
-		for ; i < propertiesEndIndex; i++ {
-			value, ok := bodyJSON[columns[i]]
-			if !ok {
-				value = ""
-			}
-			values[i] = value
-		}
-
-		// external (unique) indices, mandatory
+		// static properties and external indices, non mandatory
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
 			if !ok {
-				http.Error(w, "missing external index "+columns[i], http.StatusBadRequest)
-				return
+				value = ""
 			}
 			values[i] = value
 		}
@@ -1340,10 +1330,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		} else if err != nil {
 			status := http.StatusInternalServerError
 			msg := "Error 4734"
-			// Non unique external keys are reported as code Code 23505
-			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+			// Non unique external keys are reported as code Code 23505, not null constraints as COde 23502
+			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502") {
 				status = http.StatusUnprocessableEntity
-				msg = "unique conststraint violation"
+				msg = "conststraint violation"
 			}
 			tx.Rollback()
 			rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
