@@ -179,7 +179,7 @@ There is one more application for static properties: Since they have their own u
 SQL queries against generated tables for other services with direct acccess to the database.  For example, we use a static property
 to store the provisioning_status for IoT devices.
 
-Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a filer
+Static properties can be made searchable by adding them to the "searchable_properties" array instead. This activates a filter
 in the collection get route with the name of the property. See the chapter on query parameters and pagination below.
 
 Sorting and Timestamp

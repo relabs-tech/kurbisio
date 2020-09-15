@@ -277,6 +277,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				err = fmt.Errorf("unknown")
 			}
 			if err != nil {
+				rlog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}

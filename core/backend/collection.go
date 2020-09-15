@@ -392,6 +392,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			parameters[key] = value
 			if err != nil {
+				nillog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -619,6 +620,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			parameters[key] = value
 			if err != nil {
+				nillog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1094,6 +1096,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 
 			if err != nil {
+				nillog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
