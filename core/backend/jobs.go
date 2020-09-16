@@ -286,7 +286,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 				} else {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
-			case "event", "queued_event":
+			case "event", "queued-event":
 				event, ctx := job.event()
 				rlog = logger.FromContext(ctx)
 				key = eventJobKey(event.Type)
