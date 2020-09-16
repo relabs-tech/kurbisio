@@ -1168,11 +1168,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		rlog := logger.FromContext(r.Context())
 		calledFromUpsert := bodyJSON != nil
 
-		// low-key feature for the backup/restore tool
-		var silent bool
+		// low-key features for the backup/restore tool
+		var silent, force bool
 		if calledFromUpsert {
 			if s := r.URL.Query().Get("silent"); s != "" {
 				silent, _ = strconv.ParseBool(s)
+			}
+			if s := r.URL.Query().Get("force"); s != "" {
+				force, _ = strconv.ParseBool(s)
 			}
 		}
 
@@ -1230,7 +1233,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		jsonData, _ := json.Marshal(bodyJSON)
 
-		if rc.SchemaID != "" {
+		validateSchema := rc.SchemaID != "" && !force && r.Method != http.MethodPatch
+
+		if validateSchema {
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
@@ -1402,10 +1407,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		rlog := logger.FromContext(r.Context())
 
-		// low-key feature for the backup/restore tool
-		var silent bool
+		// low-key features for the backup/restore tool
+		var silent, force bool
 		if s := r.URL.Query().Get("silent"); s != "" {
 			silent, _ = strconv.ParseBool(s)
+		}
+		if s := r.URL.Query().Get("force"); s != "" {
+			force, _ = strconv.ParseBool(s)
 		}
 
 		params := mux.Vars(r)
@@ -1562,7 +1570,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.Marshal(bodyJSON)
-		if rc.SchemaID != "" {
+		validateSchema := rc.SchemaID != "" && !force && r.Method != http.MethodPatch
+		if validateSchema {
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
