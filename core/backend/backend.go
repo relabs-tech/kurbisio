@@ -148,7 +148,7 @@ func New(bb *Builder) *Backend {
 
 	b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
 	if err != nil {
-		logger.Default().Fatalf("Cannot created json Validator %v", err)
+		logger.Default().Fatalf("Cannot create json Validator %v", err)
 	}
 
 	registry := b.Registry.Accessor("_backend_")
