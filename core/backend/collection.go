@@ -1233,7 +1233,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		jsonData, _ := json.Marshal(bodyJSON)
 
-		validateSchema := rc.SchemaID != "" && !force && r.Method != http.MethodPatch
+		validateSchema := rc.SchemaID != "" && !force
 
 		if validateSchema {
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
@@ -1570,7 +1570,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		jsonData, _ := json.Marshal(bodyJSON)
-		validateSchema := rc.SchemaID != "" && !force && r.Method != http.MethodPatch
+		validateSchema := rc.SchemaID != "" && !force
 		if validateSchema {
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
