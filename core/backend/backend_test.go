@@ -87,6 +87,9 @@ var configurationJSON string = `{
 	  {
 		"resource":"logme/child",
 		"with_log":true
+	  },
+	  {
+		"resource":"interception/single"
 	  }
 	],
 	"blobs": [
@@ -966,6 +969,21 @@ func TestRequestInterceptors(t *testing.T) {
 		return json.Marshal(object)
 	}, core.OperationRead)
 
+	backend.HandleResourceRequest("interception/single", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+		if len(data) == 0 {
+			object := map[string]interface{}{"single_read_create": "Kilroy was here!"}
+			client := testService.client
+			var result []byte
+			_, err := client.Collection("interception/single").WithSelectors(request.Selectors).Singleton().Upsert(&object, &result)
+			fmt.Println(err)
+			return result, err
+		}
+		var object map[string]interface{}
+		json.Unmarshal(data, &object)
+		object["single_read"] = "Kilroy was here!"
+		return json.Marshal(object)
+	}, core.OperationRead)
+
 	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
 		return nil, errors.New("Kilroy does not want this to be deleted")
 	}, core.OperationDelete)
@@ -1026,6 +1044,26 @@ func TestRequestInterceptors(t *testing.T) {
 	assert.Equal(t, "Kilroy was here!", nres["interceptor_update"])
 	// check that the read interceptor was called
 	assert.Equal(t, "Kilroy was here!", nres["interceptor_read"])
+
+	// check intercepting singleton creation
+	var sres Interception
+	_, err = client.RawGet("/interceptions/"+id+"/single", &sres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that the singleton read interceptor was called
+	assert.Equal(t, "Kilroy was here!", sres["single_read_create"])
+	// check that the singleton read interceptor was called without data
+	assert.Nil(t, sres["single_read"])
+
+	// check intercepting singleton creation did work
+	sres = nil
+	_, err = client.RawGet("/interceptions/"+id+"/single", &sres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that the singleton read interceptor was called with data
+	assert.Equal(t, "Kilroy was here!", sres["single_read"])
 
 	status, err := client.RawDelete("/interceptions/" + id)
 	assert.Equal(t, http.StatusBadRequest, status)

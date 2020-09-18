@@ -398,6 +398,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
 		if metaonly {
 			sqlQuery = readQueryMetaWithTotal
 		} else {
@@ -473,7 +477,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// do request interceptors
 		jsonData, _ := json.Marshal(response)
-		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, parameters, jsonData)
+		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, selectors, parameters, jsonData)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4726: cannot request interceptors")
 			http.Error(w, "Error 4726", http.StatusInternalServerError)
@@ -761,6 +765,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
 
 		resourceID := params[this+"_id"]
 		if resourceID == "all" {
@@ -797,7 +805,25 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
-				w.WriteHeader(http.StatusNoContent)
+				jsonData, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, nil)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4751: interceptor")
+					http.Error(w, "Error 4751", http.StatusInternalServerError)
+					return
+				}
+				if jsonData != nil {
+					etag := bytesToEtag(jsonData)
+					w.Header().Set("Etag", etag)
+					if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+						w.WriteHeader(http.StatusNotModified)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusOK)
+					w.Write(jsonData)
+				} else {
+					w.WriteHeader(http.StatusNoContent)
+				}
 				return
 			}
 			http.Error(w, "no such "+this, http.StatusNotFound)
@@ -820,10 +846,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// do request interceptors
 		jsonData, _ := json.Marshal(response)
-		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), nil, jsonData)
+		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4747: cannot QueryRow")
-			http.Error(w, "Error 4747", http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4748: interceptor")
+			http.Error(w, "Error 4748", http.StatusInternalServerError)
 			return
 		}
 		if data != nil {
@@ -838,8 +864,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				if data != nil { // data was changed in interceptor
 					err = json.Unmarshal(jsonData, &response)
 					if err != nil {
-						nillog.WithError(err).Errorf("Error 4748: interceptor")
-						http.Error(w, "Error 4748", http.StatusInternalServerError)
+						nillog.WithError(err).Errorf("Error 4749: interceptor")
+						http.Error(w, "Error 4749", http.StatusInternalServerError)
 						return
 					}
 				}
@@ -962,6 +988,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
+
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
@@ -993,7 +1024,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		_, err = b.intercept(r.Context(), resource, core.OperationDelete, primaryID, nil, nil)
+		_, err = b.intercept(r.Context(), resource, core.OperationDelete, primaryID, selectors, nil, nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1040,6 +1071,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
 
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
+
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
@@ -1103,7 +1139,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			parameters[key] = value
 		}
 
-		_, err = b.intercept(r.Context(), resource, core.OperationClear, uuid.UUID{}, parameters, nil)
+		_, err = b.intercept(r.Context(), resource, core.OperationClear, uuid.UUID{}, selectors, parameters, nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1180,6 +1216,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
+
 		if bodyJSON == nil {
 			err := json.NewDecoder(r.Body).Decode(&bodyJSON)
 			if err != nil {
@@ -1259,7 +1300,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				}
 			}
 		}
-		data, err := b.intercept(r.Context(), resource, core.OperationCreate, primaryUUID, nil, jsonData)
+		data, err := b.intercept(r.Context(), resource, core.OperationCreate, primaryUUID, selectors, nil, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1417,6 +1458,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+		}
 		var bodyJSON map[string]interface{}
 		err = json.NewDecoder(r.Body).Decode(&bodyJSON)
 		if err != nil {
@@ -1583,7 +1628,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, nil, jsonData)
+		data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, selectors, nil, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

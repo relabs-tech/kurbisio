@@ -101,7 +101,7 @@ func (c Client) context() context.Context {
 type Collection struct {
 	client     *Client
 	resources  []string
-	selectors  map[string]uuid.UUID
+	selectors  map[string]string
 	parameters []string
 }
 
@@ -116,7 +116,24 @@ func (c Client) Collection(resource string) Collection {
 // WithSelector returns a new collection client with a selector added
 func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 	// we want a true copy to avoid side effects
-	selectors := map[string]uuid.UUID{strings.TrimSuffix(key, "_id"): value}
+	selectors := map[string]string{strings.TrimSuffix(key, "_id"): value.String()}
+	for k, v := range r.selectors {
+		selectors[k] = v
+	}
+	return Collection{
+		client:     r.client,
+		resources:  r.resources,
+		selectors:  selectors,
+		parameters: r.parameters,
+	}
+}
+
+// WithSelectors returns a new collection client with all selectors added
+func (r Collection) WithSelectors(keyValues map[string]string) Collection {
+	selectors := map[string]string{}
+	for k, v := range keyValues {
+		selectors[k] = v
+	}
 	for k, v := range r.selectors {
 		selectors[k] = v
 	}
@@ -149,6 +166,21 @@ func (r Collection) WithParameter(key string, value string) Collection {
 	}
 }
 
+// WithParameters returns a new collection client with all URL parameters added.
+func (r Collection) WithParameters(keyValues map[string]string) Collection {
+	var parameters []string
+	for key, value := range keyValues {
+		parameters = append(parameters, key+"="+value)
+	}
+	return Collection{
+		client:    r.client,
+		resources: r.resources,
+		selectors: r.selectors,
+		// we want a true copy to avoid side effects
+		parameters: append(append([]string{}, r.parameters...), parameters...),
+	}
+}
+
 // WithFilter returns a new collection client with a URL filter parameter added.
 // This is a shortcut for WithParameter("filter", key+"="+value)
 func (r Collection) WithFilter(key string, value string) Collection {
@@ -162,7 +194,7 @@ func (r Collection) paths() (collectionPath, singletonPath string) {
 		collectionPath = itemPath + "/" + core.Plural(resource)
 		param := "all"
 		if selector, ok := r.selectors[resource]; ok {
-			param = selector.String()
+			param = selector
 		}
 		itemPath = itemPath + "/" + core.Plural(resource) + "/" + param
 	}

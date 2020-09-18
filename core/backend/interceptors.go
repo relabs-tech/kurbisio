@@ -14,6 +14,7 @@ type Request struct {
 	Resource   string
 	ResourceID uuid.UUID
 	Operation  core.Operation
+	Selectors  map[string]string
 	Parameters map[string]string
 }
 
@@ -58,7 +59,7 @@ func requestKey(resource string, operation core.Operation) string {
 }
 
 func (b *Backend) intercept(ctx context.Context, resource string, operation core.Operation, resourceID uuid.UUID,
-	parameters map[string]string, data []byte) ([]byte, error) {
+	selectors map[string]string, parameters map[string]string, data []byte) ([]byte, error) {
 	request := requestKey(resource, operation)
 	if interceptor, ok := b.interceptors[request]; ok {
 		return interceptor(ctx,
@@ -66,6 +67,7 @@ func (b *Backend) intercept(ctx context.Context, resource string, operation core
 				Resource:   resource,
 				ResourceID: resourceID,
 				Operation:  operation,
+				Selectors:  selectors,
 				Parameters: parameters,
 			},
 			data)
