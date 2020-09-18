@@ -158,12 +158,20 @@ You can replace any id in a path segment with the keyword "all". For example, if
 to retrieve all profiles from all users, they would query
    GET /users/all/profiles
 
-Schema and Properties
+Schema Validation
 
 Every resource by default is essentially a free-form JSON object. This gives a high degree of flexibility, but is prone to errors.
 Therefore you can define a JSON schema ID for any Singleton or Collection resource. If the "schema_id" is
 defined, any attempt to PUT, POST or PATCH  this resource will be validated against this schema.
 If validation fails, error 400 will be returned.
+
+Default Properties
+
+Any Singleton or Collection resource can have an additional property "default", which defines default properties for
+all instances. Default properties are automatically added whenever objects are created or updated in the database.
+In addition, they are also added when older versions of objects are read from the database. Default properties
+are especially useful in combination with schema validation, as they make it possible to add new required properties
+without having to migrate all existing objects in the database.
 
 Static Properties
 

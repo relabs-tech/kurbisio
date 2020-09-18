@@ -73,7 +73,15 @@ var configurationJSON string = `{
 		"schema_id": "http://some_host.com/workout.json"
 	  },
 	  {
-		  "resource":"order"
+		"resource":"order"
+	  },
+	  {
+		"resource":"default",
+		"default":{
+			"foo":"bar",
+			"foo_value":42,
+			"foo_bool":true
+		}
 	  }
 	],
 	"singletons": [
@@ -90,6 +98,12 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"interception/single"
+	  },
+	  {
+		"resource":"default/single",
+		"default": {
+			"lion":"king"
+		}
 	  }
 	],
 	"blobs": [
@@ -1012,7 +1026,7 @@ func TestRequestInterceptors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check that we got the newly created object back
-	assert.Equal(t, nres["secret"], "pssst!")
+	assert.Equal(t, "pssst!", nres["secret"])
 	// check that the create interceptor did its work
 	assert.Equal(t, "Kilroy was here!", nres["interceptor_create"])
 	// check that the read interceptor was NOT called
@@ -1087,6 +1101,100 @@ func TestRequestInterceptors(t *testing.T) {
 		assert.Equal(t, "Kilroy was here!", list[i]["interceptor_list"])
 
 	}
+
+}
+
+func TestResourceDefaults(t *testing.T) {
+	client := testService.client
+
+	// create root object
+	type Default map[string]interface{}
+	nreq := Default{"secret": "pssst!"}
+	var nres Default
+	_, err := client.RawPost("/defaults", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that we got the newly created object back
+	assert.Equal(t, "pssst!", nres["secret"])
+	// check that the default did its work
+	assert.Equal(t, "bar", nres["foo"])
+	assert.Equal(t, float64(42), nres["foo_value"])
+	assert.Equal(t, true, nres["foo_bool"])
+
+	id, _ := nres["default_id"].(string)
+	nres = nil
+	// get an empty singleton and check the defaults
+	_, err = client.RawGet("/defaults/"+id+"/single", &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "king", nres["lion"])
+
+	// now try the same with upsert (put)
+	nres = nil
+	nreq["default_id"] = uuid.New().String()
+	_, err = client.RawPut("/defaults", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check that we got the newly created object back
+	assert.Equal(t, nreq["default_id"], nres["default_id"])
+	assert.Equal(t, "pssst!", nres["secret"])
+	// check that the default did its work
+	assert.Equal(t, "bar", nres["foo"])
+	assert.Equal(t, float64(42), nres["foo_value"])
+	assert.Equal(t, true, nres["foo_bool"])
+
+	id, _ = nres["default_id"].(string)
+	nres = nil
+	// patch an empty singleton and check the defaults
+	patch := map[string]interface{}{"the": "patch"}
+	_, err = client.RawPatch("/defaults/"+id+"/single", &patch, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// did the patch work?
+	assert.Equal(t, "patch", nres["the"])
+	// did the  object get the defaults?
+	assert.Equal(t, "king", nres["lion"])
+
+	// is all that persisted? Repeat with get
+	nres = nil
+	_, err = client.RawGet("/defaults/"+id+"/single", &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "patch", nres["the"])
+	assert.Equal(t, "king", nres["lion"])
+
+	// the defaults should also be applied to lists
+	var list []Default
+	_, err = client.RawGet("/defaults", &list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range list {
+		// check that the default was added
+		assert.Equal(t, "bar", list[i]["foo"])
+	}
+
+	// it should be possible to overwrite a default
+	nreq["foo"] = "restaurant"
+	nres = nil
+	_, err = client.RawPut("/defaults/"+id, &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "restaurant", nres["foo"])
+
+	// check that this was persisted
+	nres = nil
+	_, err = client.RawGet("/defaults/"+id, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "restaurant", nres["foo"])
 
 }
 

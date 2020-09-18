@@ -47,7 +47,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	owner := ""
 	if singleton {
 		if len(resource) < 2 {
-			panic(fmt.Errorf("singleton resource %s lacks owner", this))
+			nillog.Errorf("singleton resource %s lacks owner", this)
+			panic("invalid configuration")
 		}
 		owner = resources[len(resources)-2]
 		primary = owner
@@ -169,7 +170,28 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		_, err = b.db.Query(createQuery)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error while updating schema when running: %s", createQuery)
-			panic(err)
+			panic("invalid configuration")
+		}
+	}
+
+	// if we have a default object and a valid schema, validate the default object
+	if rc.Default != nil && rc.SchemaID != "" && b.jsonValidator.HasSchema(rc.SchemaID) {
+		var defaultJSON map[string]interface{}
+		err := json.Unmarshal(rc.Default, &defaultJSON)
+		if err != nil {
+			nillog.WithError(err).Errorf("parse error in backend configuration - default for %s: %s", this, err)
+			panic("invalid configuration")
+		}
+		// add dummy core identifiers
+		var id uuid.UUID
+		for i := 0; i < propertiesIndex; i++ {
+			defaultJSON[columns[i]] = id
+		}
+		jsonData, _ := json.Marshal(defaultJSON)
+		if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+			nillog.WithError(err).Errorf("validating default for %s: field does not follow schemaID %s",
+				resource, rc.SchemaID)
+			panic("invalid configuration")
 		}
 	}
 
@@ -400,7 +422,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 1; i < propertiesIndex; i++ { // skip ID
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 		if metaonly {
 			sqlQuery = readQueryMetaWithTotal
@@ -467,7 +489,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			if !metaonly {
 				mergeProperties(object)
+				// apply defaults if applicable
+				if rc.Default != nil {
+					var defaultJSON map[string]interface{}
+					json.Unmarshal(rc.Default, &defaultJSON)
+					patchObject(defaultJSON, object)
+					object = defaultJSON
+				}
 			}
+
 			// if we did not have from, take it from the first object
 			if from.IsZero() {
 				from = timestamp
@@ -767,7 +797,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 
 		resourceID := params[this+"_id"]
@@ -805,11 +835,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
-				jsonData, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, nil)
+				var jsonData []byte
+				// apply defaults if applicable
+				if rc.Default != nil {
+					var bodyJSON map[string]interface{}
+					json.Unmarshal(rc.Default, &bodyJSON)
+					for i := 0; i < propertiesIndex; i++ {
+						bodyJSON[columns[i]] = params[columns[i]]
+					}
+					jsonData, _ = json.Marshal(bodyJSON)
+				}
+				data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)
 				if err != nil {
 					nillog.WithError(err).Errorf("Error 4751: interceptor")
 					http.Error(w, "Error 4751", http.StatusInternalServerError)
 					return
+				}
+				if data != nil {
+					jsonData = data
 				}
 				if jsonData != nil {
 					etag := bytesToEtag(jsonData)
@@ -843,6 +886,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		mergeProperties(response)
+
+		// apply defaults if applicable
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, response)
+			response = defaultJSON
+		}
 
 		// do request interceptors
 		jsonData, _ := json.Marshal(response)
@@ -990,7 +1041,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 
 		if b.authorizationEnabled {
@@ -1073,7 +1124,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 1; i < propertiesIndex; i++ { // skip ID
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 
 		if b.authorizationEnabled {
@@ -1218,7 +1269,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 1; i < propertiesIndex; i++ { // skip ID
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 
 		if bodyJSON == nil {
@@ -1272,6 +1323,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, bodyJSON)
+			bodyJSON = defaultJSON
+		}
+
 		jsonData, _ := json.Marshal(bodyJSON)
 
 		validateSchema := rc.SchemaID != "" && !force
@@ -1300,17 +1358,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				}
 			}
 		}
-		data, err := b.intercept(r.Context(), resource, core.OperationCreate, primaryUUID, selectors, nil, jsonData)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if data != nil {
-			json.Unmarshal(data, &bodyJSON)
+
+		if !force {
+			data, err := b.intercept(r.Context(), resource, core.OperationCreate, primaryUUID, selectors, nil, jsonData)
 			if err != nil {
-				rlog.WithError(err).Error("Error 4733: interceptor")
-				http.Error(w, "Error 4733", http.StatusInternalServerError)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
+			}
+			if data != nil {
+				json.Unmarshal(data, &bodyJSON)
+				if err != nil {
+					rlog.WithError(err).Error("Error 4733: interceptor")
+					http.Error(w, "Error 4733", http.StatusInternalServerError)
+					return
+				}
 			}
 		}
 
@@ -1460,7 +1521,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
-			selectors[strings.TrimSuffix(columns[i], "_id")] = params[columns[i]]
+			selectors[columns[i]] = params[columns[i]]
 		}
 		var bodyJSON map[string]interface{}
 		err = json.NewDecoder(r.Body).Decode(&bodyJSON)
@@ -1579,6 +1640,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			bodyJSON = objectJSON
 		}
 
+		// apply defaults if applicable
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, bodyJSON)
+			bodyJSON = defaultJSON
+		}
+
 		// build insert query and validate that we have all parameters
 		values := make([]interface{}, len(columns)+1)
 
@@ -1628,17 +1697,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, selectors, nil, jsonData)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if data != nil {
-			json.Unmarshal(data, &bodyJSON)
+		if !force {
+			data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, selectors, nil, jsonData)
 			if err != nil {
-				rlog.WithError(err).Errorf("Error 4738: interceptor")
-				http.Error(w, "Error 4738", http.StatusInternalServerError)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
+			}
+			if data != nil {
+				json.Unmarshal(data, &bodyJSON)
+				if err != nil {
+					rlog.WithError(err).Errorf("Error 4738: interceptor")
+					http.Error(w, "Error 4738", http.StatusInternalServerError)
+					return
+				}
 			}
 		}
 

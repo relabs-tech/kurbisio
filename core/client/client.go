@@ -132,7 +132,7 @@ func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 func (r Collection) WithSelectors(keyValues map[string]string) Collection {
 	selectors := map[string]string{}
 	for k, v := range keyValues {
-		selectors[k] = v
+		selectors[strings.TrimSuffix(k, "_id")] = v
 	}
 	for k, v := range r.selectors {
 		selectors[k] = v

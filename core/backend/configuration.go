@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"encoding/json"
+
 	"github.com/relabs-tech/backends/core/access"
 )
 
@@ -23,6 +25,7 @@ type collectionConfiguration struct {
 	Description          string          `json:"description"`
 	SchemaID             string          `json:"schema_id"`
 	WithLog              bool            `json:"with_log"`
+	Default              json.RawMessage `json:"default"`
 }
 
 // singletonConfiguration describes a singleton resource
@@ -34,6 +37,7 @@ type singletonConfiguration struct {
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
 	WithLog              bool            `json:"with_log"`
+	Default              json.RawMessage `json:"default"`
 }
 
 // blobConfiguration describes a blob collection resource

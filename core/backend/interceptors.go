@@ -11,10 +11,16 @@ import (
 // Request is a database request. Receive them
 // with HandleResourceRequest()
 type Request struct {
-	Resource   string
+	// Resource for which this request is made
+	Resource string
+	// the primary ID for the resource, for singletons this is the parent ID, for
+	// list requests this is a  null uuid.
 	ResourceID uuid.UUID
-	Operation  core.Operation
-	Selectors  map[string]string
+	// Operation for this request
+	Operation core.Operation
+	// Selectors are the identifiers from the request URL, can be UUID or "all"
+	Selectors map[string]string
+	// Parameters are the query parameters from the request URL
 	Parameters map[string]string
 }
 
