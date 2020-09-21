@@ -1708,9 +1708,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if data != nil {
-				tx.Rollback()
 				json.Unmarshal(data, &bodyJSON)
 				if err != nil {
+					tx.Rollback()
 					rlog.WithError(err).Errorf("Error 4738: interceptor")
 					http.Error(w, "Error 4738", http.StatusInternalServerError)
 					return
