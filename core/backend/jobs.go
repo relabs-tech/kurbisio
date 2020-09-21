@@ -405,6 +405,9 @@ process:
 	var maxedOut bool
 
 	for {
+		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
+			rlog.Error("This is taking a long time...")
+		})
 		tx, err := b.db.BeginTx(context.Background(), nil)
 		if err != nil {
 			rlog.Errorln("failed to begin transaction:", err.Error())
@@ -430,7 +433,7 @@ process:
 			&j.AttemptsLeft,
 			&j.ContextData,
 		)
-
+		timeout.Stop()
 		if err != nil {
 			if err != sql.ErrNoRows {
 				rlog.Errorln("failed to retrieve job:", err.Error())
