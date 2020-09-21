@@ -1702,10 +1702,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if !force {
 			data, err := b.intercept(r.Context(), resource, core.OperationUpdate, primaryUUID, selectors, nil, jsonData)
 			if err != nil {
+				tx.Rollback()
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			if data != nil {
+				tx.Rollback()
 				json.Unmarshal(data, &bodyJSON)
 				if err != nil {
 					rlog.WithError(err).Errorf("Error 4738: interceptor")
