@@ -1015,10 +1015,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var primaryID uuid.UUID
 		err = tx.QueryRow(query, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
+			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			tx.Rollback()
 			nillog.WithError(err).Errorf("Error 4728: cannot QueryRow query:`%s`", query)
 			http.Error(w, "Error 4728", http.StatusInternalServerError)
 			return
