@@ -1486,8 +1486,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
 		w.Write(jsonData)
 
 	}
@@ -1592,8 +1592,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if rec.Code == http.StatusCreated {
 				// all is good, we are done, we can rollback this transaction
 				tx.Rollback()
-				w.WriteHeader(http.StatusCreated)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusCreated)
 				w.Write(rec.Body.Bytes())
 				return
 			} else if rec.Code == http.StatusUnprocessableEntity && !retried {
