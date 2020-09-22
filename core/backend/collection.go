@@ -52,6 +52,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		owner = resources[len(resources)-2]
 		primary = owner
+		ownerIsSingleton, ok := b.collectionsAndSingletons[strings.TrimSuffix(rc.Resource, "/"+this)]
+		if !ok {
+			nillog.Errorf("owner of singleton resource %s does not exist: %s", this, owner)
+			panic("invalid configuration")
+		}
+		if ownerIsSingleton {
+			nillog.Errorf("owner of singleton resource %s must not be a singleton itself: %s", this, owner)
+			panic("invalid configuration")
+		}
 	}
 	dependencies := resources[:len(resources)-1]
 

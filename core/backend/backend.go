@@ -36,7 +36,7 @@ type Backend struct {
 	authorizationEnabled bool
 	updateSchema         bool
 
-	collectionsAndSingletons []string
+	collectionsAndSingletons map[string]bool
 	callbacks                map[string]jobHandler
 	interceptors             map[string]requestHandler
 
@@ -108,17 +108,18 @@ func New(bb *Builder) *Backend {
 	}
 
 	b := &Backend{
-		config:               config,
-		db:                   bb.DB,
-		router:               bb.Router,
-		collectionFunctions:  make(map[string]*collectionFunctions),
-		relations:            make(map[string]string),
-		Registry:             registry.New(bb.DB),
-		authorizationEnabled: bb.AuthorizationEnabled,
-		callbacks:            make(map[string]jobHandler),
-		interceptors:         make(map[string]requestHandler),
-		pipelineConcurrency:  pipelineConcurrency,
-		pipelineMaxAttempts:  pipelineMaxAttempts,
+		config:                   config,
+		db:                       bb.DB,
+		router:                   bb.Router,
+		collectionFunctions:      make(map[string]*collectionFunctions),
+		relations:                make(map[string]string),
+		Registry:                 registry.New(bb.DB),
+		authorizationEnabled:     bb.AuthorizationEnabled,
+		callbacks:                make(map[string]jobHandler),
+		interceptors:             make(map[string]requestHandler),
+		collectionsAndSingletons: make(map[string]bool),
+		pipelineConcurrency:      pipelineConcurrency,
+		pipelineMaxAttempts:      pipelineMaxAttempts,
 	}
 
 	var logLevel logrus.Level
@@ -229,13 +230,13 @@ func (b *Backend) handleResourceRoutes() {
 	for i := range b.config.Collections {
 		rc := &b.config.Collections[i]
 		allResources = append(allResources, anyResourceConfiguration{collection: rc})
-		b.collectionsAndSingletons = append(b.collectionsAndSingletons, rc.Resource)
+		b.collectionsAndSingletons[rc.Resource] = false
 	}
 
 	for i := range b.config.Singletons {
 		rc := &b.config.Singletons[i]
 		allResources = append(allResources, anyResourceConfiguration{singleton: rc})
-		b.collectionsAndSingletons = append(b.collectionsAndSingletons, rc.Resource)
+		b.collectionsAndSingletons[rc.Resource] = true
 	}
 
 	for i := range b.config.Blobs {
@@ -356,12 +357,8 @@ func patchObject(object map[string]interface{}, patch map[string]interface{}) {
 }
 
 func (b *Backend) hasCollectionOrSingleton(resource string) bool {
-	for _, r := range b.collectionsAndSingletons {
-		if r == resource {
-			return true
-		}
-	}
-	return false
+	_, ok := b.collectionsAndSingletons[resource]
+	return ok
 }
 
 func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {
