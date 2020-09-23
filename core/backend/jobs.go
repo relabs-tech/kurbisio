@@ -114,7 +114,7 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
-scheduled_at = CASE WHEN attempts_left>=3 then $2 WHEN attempts_left=2 THEN $3 ELSE $4 END::TIMESTAMP
+scheduled_at = CASE WHEN attempts_left>3 then $2 WHEN attempts_left=3 THEN $3 ELSE $4 END::TIMESTAMP
 WHERE serial = (
 SELECT serial
  FROM ` + b.db.Schema + `."_job_"

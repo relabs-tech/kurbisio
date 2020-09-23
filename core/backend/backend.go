@@ -67,7 +67,7 @@ type Builder struct {
 
 	// Number of concurrent pipeline executors. Default is 5.
 	PipelineConcurrency int
-	// Maximum number of attemts for pipeline execution. Default is 3.
+	// Maximum number of attemts for pipeline execution. Default is 4.
 	PipelineMaxAttempts int
 
 	// JSONSchemas is a list of top level JSON Schemas as strings.
@@ -102,7 +102,7 @@ func New(bb *Builder) *Backend {
 	if bb.PipelineConcurrency > 0 {
 		pipelineConcurrency = bb.PipelineConcurrency
 	}
-	pipelineMaxAttempts := 3
+	pipelineMaxAttempts := 4
 	if bb.PipelineMaxAttempts > 0 {
 		pipelineMaxAttempts = bb.PipelineMaxAttempts
 	}
