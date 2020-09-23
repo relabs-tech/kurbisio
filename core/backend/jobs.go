@@ -568,6 +568,10 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	contextData = logger.SerializeLoggerContext(ctx)
 	var scheduleAtUTC *time.Time
 	if scheduleAt != nil {
+		if !scheduleAt.After(time.Now()) {
+			return http.StatusBadRequest, fmt.Errorf("the event is scheduled for the past %s", scheduleAt.Format(time.RFC1123Z))
+		}
+
 		tmp := scheduleAt.UTC()
 		scheduleAtUTC = &tmp
 	}
