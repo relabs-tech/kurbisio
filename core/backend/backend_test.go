@@ -1430,3 +1430,34 @@ func TestInvalidPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleEvents(t *testing.T) {
+	backend := testService.backend
+	backend.HandleEvent("my-event", func(ctx context.Context, event Event) error { return nil })
+	ctx := context.Background()
+	illegalEvent := Event{
+		Type:       "my-unhandled-event",
+		Key:        "lala",
+		Resource:   "something",
+		ResourceID: uuid.New(),
+	}
+
+	err := backend.ScheduleEvent(ctx, illegalEvent, time.Now().Add(time.Hour))
+	assert.NotNil(t, err, "scheduled unhandled event, expected error")
+	ok, err := backend.UnscheduleEvent(ctx, illegalEvent)
+	assert.Nil(t, err, "unscheduled unhandled event")
+	assert.Equal(t, false, ok, "unscheduled unhandled event")
+
+	event := Event{
+		Type:       "my-event",
+		Key:        "lala",
+		Resource:   "something",
+		ResourceID: uuid.New(),
+	}
+	err = backend.ScheduleEvent(ctx, event, time.Now().Add(time.Hour))
+	assert.Nil(t, err, "scheduled handled event")
+	ok, err = backend.UnscheduleEvent(ctx, event)
+	assert.Nil(t, err, "unscheduled handled event")
+	assert.Equal(t, true, ok, "unscheduled handled event")
+
+}

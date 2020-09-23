@@ -131,6 +131,9 @@ WHERE serial = $1 RETURNING serial;`
 	b.jobsRescheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
 
+	b.jobsUnscheduleQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
+WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 RETURNING serial;`
+
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
 
@@ -515,10 +518,33 @@ func (b *Backend) QueueEvent(ctx context.Context, event Event) error {
 // Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
 // i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use a unique key
 //
-// Use RaiseEvent if you want to raise the event immediately.
+// Use RaiseEvent if you want to raise the event immediately. Use UnscheduleEvent to cancel a scheduled event.
 func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt time.Time) error {
 	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt)
 	return err
+}
+
+// UnscheduleEvent cancels a scheduled event of the same kind (event plus key) to the very
+// same resource (resource + resourceID).
+//
+// The payload of the passed event object is ignored.
+//
+// The function true if an event was unscheduled, otherwise it returns false.
+func (b *Backend) UnscheduleEvent(ctx context.Context, event Event) (bool, error) {
+	job := "event"
+	var serial int
+	err := b.db.QueryRow(b.jobsUnscheduleQuery,
+		job,
+		event.Type,
+		event.Key,
+		event.Resource,
+		event.ResourceID,
+	).Scan(&serial)
+
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
