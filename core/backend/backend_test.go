@@ -215,8 +215,7 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u := uuid.UUID{}
-	if a.AID == u {
+	if a.AID == uuid.Nil {
 		t.Fatal("no id")
 	}
 
