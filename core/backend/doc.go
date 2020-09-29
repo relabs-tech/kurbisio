@@ -418,3 +418,5 @@ at compile time with the following parameter:
 }
 */
 package backend
+
+//go:generate go run ../../tools/embed/main.go -type json -package backend

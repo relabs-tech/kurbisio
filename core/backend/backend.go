@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +106,16 @@ func New(bb *Builder) *Backend {
 	pipelineMaxAttempts := 4
 	if bb.PipelineMaxAttempts > 0 {
 		pipelineMaxAttempts = bb.PipelineMaxAttempts
+	}
+
+	jsonValidator, err := schema.NewValidator([]string{ConfigSchemaJSON}, nil)
+	if err != nil {
+		log.Fatalf("Cannot created json Validator %v", err)
+	}
+
+	err = jsonValidator.ValidateString(bb.Config, "https://kurbis.io/schemas/config.json")
+	if err != nil {
+		log.Fatalf("Invalid json %v", err)
 	}
 
 	b := &Backend{

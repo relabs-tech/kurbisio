@@ -21,6 +21,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	out.Write([]byte("// Package " + *packageName + " ...\n"))
 	out.Write([]byte("// This file was generated from JSON using the embed tool, do not modify it directly.\n"))
 	out.Write([]byte(fmt.Sprintf("package %s \n", *packageName)))
 	out.Write([]byte("\nconst (\n"))

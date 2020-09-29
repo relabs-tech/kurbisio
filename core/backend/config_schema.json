@@ -1,0 +1,244 @@
+{
+    "$id": "https://kurbis.io/schemas/config.json",
+    "$schema": "http://json-schema.org/draft-06/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "collections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "resource"
+                ],
+                "properties": {
+                    "default": {
+                        "type": "object"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "external_index": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "resource": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "permits": {
+                        "$ref": "#/definitions/permits"
+                    },
+                    "schema_id": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "searchable_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "static_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "with_log": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        },
+        "singletons": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "resource"
+                ],
+                "properties": {
+                    "default": {
+                        "type": "object"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "external_index": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "permits": {
+                        "$ref": "#/definitions/permits"
+                    },
+                    "resource": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "schema_id": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "searchable_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "static_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "with_log": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        },
+        "blobs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "resource"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "external_index": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "mutable": {
+                        "type": "boolean"
+                    },
+                    "permits": {
+                        "$ref": "#/definitions/permits"
+                    },
+                    "resource": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "searchable_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "static_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        },
+        "relations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "left",
+                    "right"
+                ],
+                "properties": {
+                    "left": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "right": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "right_permits": {
+                        "$ref": "#/definitions/permits"
+                    },
+                    "leftt_permits": {
+                        "$ref": "#/definitions/permits"
+                    }
+                }
+            }
+        },
+        "shortcuts": {
+            "type": "array",
+            "items": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "shortcut",
+                    "target"
+                ],
+                "properties": {
+                    "shortcut": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "target": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "roles": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "permits": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "role": {
+                        "type": "string"
+                    },
+                    "operations": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "enum": [
+                                "create",
+                                "read",
+                                "delete",
+                                "list",
+                                "update"
+                            ]
+                        }
+                    },
+                    "selectors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
