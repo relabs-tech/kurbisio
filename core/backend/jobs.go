@@ -131,6 +131,9 @@ WHERE serial = $1 RETURNING serial;`
 	b.jobsRescheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
 
+	b.jobsUpdatePayloadQuery = `UPDATE ` + b.db.Schema + `."_job_"
+SET payload = $2 WHERE serial = $1 RETURNING serial;`
+
 	b.jobsUnscheduleQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 RETURNING serial;`
 
@@ -305,11 +308,21 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 		}()
 
 		if err != nil {
-			if needRescheduleError, ok := err.(NeedRescheduleError); ok {
+			if rescheduleEventError, ok := err.(RescheduleEventError); ok {
 				var serial int
+				// update payload if requested
+				if len(rescheduleEventError.Payload) > 0 {
+					err = tx.QueryRow(b.jobsUpdatePayloadQuery, &job.Serial, &rescheduleEventError.Payload).Scan(&serial)
+					if err != nil {
+						rlog.WithError(err).Errorf("failed to update job payload")
+					}
+				}
 				// reschedule in UTC
-				scheduleAt := needRescheduleError.ScheduleAt.UTC()
+				scheduleAt := rescheduleEventError.ScheduleAt.UTC()
 				err = tx.QueryRow(b.jobsRescheduleQuery, &job.Serial, &scheduleAt, &b.pipelineMaxAttempts).Scan(&serial)
+				if err != nil {
+					rlog.WithError(err).Errorf("failed to update job schedule")
+				}
 			} else {
 				rlog.Errorln("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
 			}
@@ -470,19 +483,31 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
-// NeedRescheduleError is a custom error for HandleEvent
-type NeedRescheduleError struct {
+// RescheduleEventError is a custom error for HandleEvent
+type RescheduleEventError struct {
 	ScheduleAt time.Time
+	Payload    []byte
 }
 
-func (err NeedRescheduleError) Error() string {
+// WithPayload adds a payload to a RescheduleEventError. Payload can be an object or a []byte
+func (err RescheduleEventError) WithPayload(payload interface{}) RescheduleEventError {
+	data, ok := payload.([]byte)
+	if !ok {
+		data, _ = json.Marshal(payload)
+	}
+	err.Payload = data
+	return err
+}
+
+func (err RescheduleEventError) Error() string {
 	return "need to reschedule"
 }
 
 // HandleEvent installs a callback handler the specified event. Handlers are executed
 // out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
-// a few times with increasing timeout. If the handler fails with a NeedRescheduleError,
-// the event will be rescheduled at the requested time.
+// a few times with increasing timeout. If the handler fails with a RescheduleEventError,
+// the event will be rescheduled at the requested time, and optionally with an updated
+// payload (see RescheduleEventError.WithPayload()).
 func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; ok {
@@ -518,19 +543,19 @@ func (b *Backend) QueueEvent(ctx context.Context, event Event) error {
 // Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
 // i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use a unique key
 //
-// Use RaiseEvent if you want to raise the event immediately. Use UnscheduleEvent to cancel a scheduled event.
+// Use RaiseEvent if you want to raise the event immediately. Use CancelEvent() to cancel a scheduled event.
 func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt time.Time) error {
 	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt)
 	return err
 }
 
-// UnscheduleEvent cancels a scheduled event of the same kind (event plus key) to the very
+// CancelEvent cancels a scheduled event of the same kind (event plus key) to the very
 // same resource (resource + resourceID).
 //
 // The payload of the passed event object is ignored.
 //
 // The function true if an event was unscheduled, otherwise it returns false.
-func (b *Backend) UnscheduleEvent(ctx context.Context, event Event) (bool, error) {
+func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	job := "event"
 	var serial int
 	err := b.db.QueryRow(b.jobsUnscheduleQuery,

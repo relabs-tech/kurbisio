@@ -1443,7 +1443,7 @@ func TestScheduleEvents(t *testing.T) {
 
 	err := backend.ScheduleEvent(ctx, illegalEvent, time.Now().Add(time.Hour))
 	assert.NotNil(t, err, "scheduled unhandled event, expected error")
-	ok, err := backend.UnscheduleEvent(ctx, illegalEvent)
+	ok, err := backend.CancelEvent(ctx, illegalEvent)
 	assert.Nil(t, err, "unscheduled unhandled event")
 	assert.Equal(t, false, ok, "unscheduled unhandled event")
 
@@ -1455,7 +1455,7 @@ func TestScheduleEvents(t *testing.T) {
 	}
 	err = backend.ScheduleEvent(ctx, event, time.Now().Add(time.Hour))
 	assert.Nil(t, err, "scheduled handled event")
-	ok, err = backend.UnscheduleEvent(ctx, event)
+	ok, err = backend.CancelEvent(ctx, event)
 	assert.Nil(t, err, "unscheduled handled event")
 	assert.Equal(t, true, ok, "unscheduled handled event")
 
