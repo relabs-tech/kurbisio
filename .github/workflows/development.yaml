@@ -72,6 +72,7 @@ jobs:
       - name: deploy to prod
         if: startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/direct_deploy'
         run: |
+          echo ::set-env name=task::'deployment to prod'
           cd services/fitness/deployment_config
           ./sam-deploy-lambdas.sh \
             --template fitness-pub.yaml \
@@ -89,6 +90,7 @@ jobs:
       - name: deploy to staging
         if: github.ref == 'refs/heads/master'
         run: |
+          echo ::set-env name=task::'deployment to staging'
           cd services/fitness/deployment_config
           ./sam-deploy-lambdas.sh \
             --template fitness-pub.yaml \
@@ -102,3 +104,19 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: eu-central-1
+
+      - uses: 8398a7/action-slack@v3
+        if: ( startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/master' ) && failure()
+        with:
+          status: custom
+          fields: workflow,message
+          custom_payload: |
+            {
+              attachments: [{
+                color: '${{ job.status }}' === 'success' ? 'good' : '${{ job.status }}' === 'failure' ? 'danger' : 'warning',
+                text: `${process.env.AS_WORKFLOW} - ${process.env.task} of '${process.env.AS_MESSAGE}' was a ${{ job.status }}`,
+              }]
+            }
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
