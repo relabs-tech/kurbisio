@@ -1625,6 +1625,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if revision != 0 && revision != currentRevision {
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
+			mergeProperties(object)
 			jsonData, _ := json.Marshal(object)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusConflict)
