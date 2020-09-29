@@ -81,6 +81,19 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("created at is off")
 	}
 
+	// test that we can delete
+	testRegistry.Delete("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp, err = testRegistry.Read("test", something)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !timestamp.IsZero() {
+		t.Fatal("Deleted key still exists")
+	}
+
 }
 
 func asJSON(object interface{}) string {

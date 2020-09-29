@@ -116,7 +116,7 @@ func (r Accessor) Delete(key string) error {
 		key = r.Prefix + ":" + key
 	}
 	_, err := r.Registry.db.Exec(
-		`DELETE FROM `+r.Registry.db.Schema+`."_registry_ WHERE key=$1;`,
+		`DELETE FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
 		key)
 
 	if err != nil {
