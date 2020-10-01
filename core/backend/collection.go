@@ -1588,8 +1588,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		if err == csql.ErrNoRows {
 			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
-			// we are forced to return 404 Not Found
-			if b.authorizationEnabled {
+			// we are forced to return 404 Not Found.
+			// We must not check this for singletons, as singletons exist always (at least conceptually)
+			if b.authorizationEnabled && !singleton {
 				auth := access.AuthorizationFromContext(r.Context())
 				if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
 					tx.Rollback()
