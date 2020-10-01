@@ -103,6 +103,9 @@ jobs:
           cd ../data/conversation_templates/
           go run upload.go --url https://staging.api.loyalty2you.com
           cd -
+          cd ../data/help_texts/
+          go run upsert.go --url https://staging.loyalty2you.com
+          cd -
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
