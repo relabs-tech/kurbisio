@@ -368,6 +368,9 @@ You can easily check the authorization state of any token, by doing a GET reques
 
 which will return the authorization state for the authenticated requester as JSON object.
 
+Singletons conceptually always exist, i.e. they can be updated and patched with a permission for
+"update", even if there is no object in the database yet.
+
 
 If-None-Match and Etag
 
