@@ -35,7 +35,7 @@ var configurationJSON string = `{
 		"resource": "a",
 		"external_index": "external_id",
 		"static_properties": ["static_prop"],
-		"searchable_properties": ["searchable_prop"]
+		"searchable_properties": ["searchable_prop", "other_searchable_prop"]
 	  },
 	  {
 		"resource": "b"
@@ -190,22 +190,24 @@ func TestMain(m *testing.M) {
 }
 
 type A struct {
-	AID            uuid.UUID `json:"a_id"`
-	ExternalID     string    `json:"external_id"`
-	StaticProp     string    `json:"static_prop"`
-	SearchableProp string    `json:"searchable_prop"`
-	Timestamp      time.Time `json:"timestamp"`
-	Foo            string    `json:"foo"`
+	AID                 uuid.UUID `json:"a_id"`
+	ExternalID          string    `json:"external_id"`
+	StaticProp          string    `json:"static_prop"`
+	SearchableProp      string    `json:"searchable_prop"`
+	OtherSearchableProp string    `json:"other_searchable_prop"`
+	Timestamp           time.Time `json:"timestamp"`
+	Foo                 string    `json:"foo"`
 }
 
 func TestCollectionA(t *testing.T) {
 
 	aNew := A{
-		Foo:            "bar",
-		ExternalID:     "external",
-		StaticProp:     "static",
-		SearchableProp: "searchable",
-		Timestamp:      time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+		Foo:                 "bar",
+		ExternalID:          "external",
+		StaticProp:          "static",
+		SearchableProp:      "searchable",
+		OtherSearchableProp: "other",
+		Timestamp:           time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	a := A{}
@@ -296,6 +298,27 @@ func TestCollectionA(t *testing.T) {
 
 	// we now search for the searachable property and should only find our single item a
 	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected only 1:", asJSON(collectionResult))
+	}
+	if collectionResult[0].AID != a.AID {
+		t.Fatal("wrong item in collection:", asJSON(collectionResult))
+	}
+
+	// we now search for the searachable property with secondary filter and should find nothing
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=other_searchable_prop=fail", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatal("unexpected number of items in collection, expected only 0:", asJSON(collectionResult))
+	}
+
+	// we now search for the searachable property with correct secondary filter and should only find our single item a
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=other_searchable_prop=other", &collectionResult)
 	if err != nil {
 		t.Fatal(err)
 	}

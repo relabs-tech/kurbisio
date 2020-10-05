@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -352,8 +353,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			page            int = 1
 			until           time.Time
 			from            time.Time
-			externalColumn  string
-			externalValue   string
+			externalColumns []string
+			externalValues  []string
 			ascendingOrder  bool
 			metaonly        bool
 		)
@@ -361,7 +362,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		parameters := map[string]string{}
 		for key, array := range urlQuery {
 			var err error
-			if len(array) > 1 {
+			if key != "filter" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
@@ -384,24 +385,27 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				from, err = time.Parse(time.RFC3339, value)
 
 			case "filter":
-				i := strings.IndexRune(value, '=')
-				if i < 0 {
-					err = fmt.Errorf("cannot parse filter, must be of type property=value")
-					break
-				}
-				filterKey := value[:i]
-				filterValue := value[i+1:]
-
-				found := false
-				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-					if filterKey == columns[i] {
-						externalValue = filterValue
-						externalColumn = columns[i]
-						found = true
+				for _, value := range array {
+					i := strings.IndexRune(value, '=')
+					if i < 0 {
+						err = fmt.Errorf("cannot parse filter, must be of type property=value")
+						break
 					}
-				}
-				if !found {
-					err = fmt.Errorf("unknown filter property '%s'", filterKey)
+					filterKey := value[:i]
+					filterValue := value[i+1:]
+
+					found := false
+					for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+						if filterKey == columns[i] {
+							externalValues = append(externalValues, filterValue)
+							externalColumns = append(externalColumns, columns[i])
+							found = true
+						}
+					}
+					if !found {
+						err = fmt.Errorf("unknown filter property '%s'", filterKey)
+						break
+					}
 				}
 			case "order":
 				if value != "asc" && value != "desc" {
@@ -439,21 +443,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			sqlQuery = readQueryWithTotal
 		}
 		sqlQuery += sqlWhereAll
-		if externalValue == "" { // get entire collection
+		if len(externalValues) == 0 { // no filter(s), get entire collection
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
 		} else {
-			sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
-			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
+			queryParameters = make([]interface{}, propertiesIndex-1+6+len(externalValues))
+			for i := range externalValues {
+				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex+6+i)
+				queryParameters[propertiesIndex-1+6+i] = externalValues[i]
 			}
-			queryParameters[propertiesIndex-1+6] = externalValue
 		}
 
-		// add before and after and pagination
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
 		queryParameters[propertiesIndex-1+0] = until.IsZero()
 		queryParameters[propertiesIndex-1+1] = until.UTC()
 		queryParameters[propertiesIndex-1+2] = from.IsZero()
@@ -592,8 +594,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			page            int = 1
 			until           time.Time
 			from            time.Time
-			externalColumn  string
-			externalValue   string
+			externalColumns []string
+			externalValues  []string
 			ascendingOrder  bool
 			metaonly        bool
 		)
@@ -601,7 +603,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		parameters := map[string]string{}
 		for key, array := range urlQuery {
 			var err error
-			if len(array) > 1 {
+			if key != "filter" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
@@ -624,24 +626,27 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				from, err = time.Parse(time.RFC3339, value)
 
 			case "filter":
-				i := strings.IndexRune(value, '=')
-				if i < 0 {
-					err = fmt.Errorf("cannot parse filter, must be of type property=value")
-					break
-				}
-				filterKey := value[:i]
-				filterValue := value[i+1:]
-
-				found := false
-				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-					if filterKey == columns[i] {
-						externalValue = filterValue
-						externalColumn = columns[i]
-						found = true
+				for _, value := range array {
+					i := strings.IndexRune(value, '=')
+					if i < 0 {
+						err = fmt.Errorf("cannot parse filter, must be of type property=value")
+						break
 					}
-				}
-				if !found {
-					err = fmt.Errorf("unknown filter property '%s'", filterKey)
+					filterKey := value[:i]
+					filterValue := value[i+1:]
+
+					found := false
+					for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
+						if filterKey == columns[i] {
+							externalValues = append(externalValues, filterValue)
+							externalColumns = append(externalColumns, columns[i])
+							found = true
+						}
+					}
+					if !found {
+						err = fmt.Errorf("unknown filter property '%s'", filterKey)
+						break
+					}
 				}
 			case "order":
 				if value != "asc" && value != "desc" {
@@ -675,21 +680,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			sqlQuery = readQueryWithTotalLog
 		}
 		sqlQuery += sqlWhereAll
-		if externalValue == "" { // get entire collection
+		if len(externalValues) == 0 { // no filter(s), get entire collection
 			queryParameters = make([]interface{}, propertiesIndex-1+6)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
 		} else {
-			sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumn, propertiesIndex+6)
-			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
+			queryParameters = make([]interface{}, propertiesIndex-1+6+len(externalValues))
+			for i := range externalValues {
+				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex+6+i)
+				queryParameters[propertiesIndex-1+6+i] = externalValues[i]
 			}
-			queryParameters[propertiesIndex-1+6] = externalValue
 		}
 
-		// add before and after and pagination
+		for i := 1; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-1] = params[columns[i]]
+		}
 		queryParameters[propertiesIndex-1+0] = until.IsZero()
 		queryParameters[propertiesIndex-1+1] = until.UTC()
 		queryParameters[propertiesIndex-1+2] = from.IsZero()
@@ -1284,7 +1287,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		if bodyJSON == nil {
-			err := json.NewDecoder(r.Body).Decode(&bodyJSON)
+			body := r.Body
+			if r.Header.Get("Content-Encoding") == "gzip" {
+				body, err = gzip.NewReader(r.Body)
+				if err != nil {
+					http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+
+			err := json.NewDecoder(body).Decode(&bodyJSON)
 			if err != nil {
 				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 				return
@@ -1534,8 +1546,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		for i := 0; i < propertiesIndex; i++ {
 			selectors[columns[i]] = params[columns[i]]
 		}
+
+		body := r.Body
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			body, err = gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
 		var bodyJSON map[string]interface{}
-		err = json.NewDecoder(r.Body).Decode(&bodyJSON)
+		err = json.NewDecoder(body).Decode(&bodyJSON)
 		if err != nil {
 			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 			return

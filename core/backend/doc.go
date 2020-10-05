@@ -208,6 +208,7 @@ or
 The GET request on collections can be customized with any of the searchable properties or an external index as a filter.
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?filter=identity=test@test.com
+If you specify multiple filters, they filter on top of each other (i.e. with logical AND).
 
 The system supports pagination and filtering of responses by creation time:
 	  ?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
