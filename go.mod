@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-lambda-go v1.19.1
 	github.com/aws/aws-sdk-go v1.34.16
 	github.com/awslabs/aws-lambda-go-api-proxy v0.8.0
+	github.com/dchest/stemmer v0.0.0-20161207102402-66719a20c4b5
 	github.com/dghubble/oauth1 v0.6.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/google/uuid v1.1.2

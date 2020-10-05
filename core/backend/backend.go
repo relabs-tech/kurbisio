@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,6 +85,7 @@ type Builder struct {
 // New realizes the actual backend. It creates the sql relations (if they
 // do not exist) and adds actual routes to router
 func New(bb *Builder) *Backend {
+	rand.Seed(time.Now().UTC().UnixNano())
 
 	var config backendConfiguration
 	err := json.Unmarshal([]byte(bb.Config), &config)
