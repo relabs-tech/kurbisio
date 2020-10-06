@@ -39,18 +39,11 @@ jobs:
           go get -u golang.org/x/lint/golint 
           golint -set_exit_status $(go list ./... | grep -v generated)
 
-      - name: go test
+      - name: go test race
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           go generate ./...
-          go test ./...
-        env:
-          POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
-          POSTGRES_PASSWORD: "docker"
-
-      - name: go test race
-        run: |
-          go test ./... -race
+          go test ./... -race -count 1
         env:
           POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
           POSTGRES_PASSWORD: "docker"
