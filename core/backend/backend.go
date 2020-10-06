@@ -178,7 +178,6 @@ func New(bb *Builder) *Backend {
 
 	logger.AddRequestID(b.router)
 	b.handleCORS()
-	b.handleCompression()
 	access.HandleAuthorizationRoute(b.router)
 	b.handleResourceRoutes()
 	b.handleStatistics(b.router)

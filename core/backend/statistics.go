@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/logger"
@@ -30,10 +31,10 @@ type statisticsDetails struct {
 func (b *Backend) handleStatistics(router *mux.Router) {
 	logger.Default().Debugln("statistics")
 	logger.Default().Debugln("  handle statistics route: /kuribisio/statistics GET")
-	router.HandleFunc("/kurbisio/statistics", func(w http.ResponseWriter, r *http.Request) {
+	router.Handle("/kurbisio/statistics", handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		b.statisticsWithAuth(w, r)
-	}).Methods(http.MethodOptions, http.MethodGet)
+	}))).Methods(http.MethodOptions, http.MethodGet)
 }
 
 func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
