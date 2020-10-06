@@ -348,7 +348,7 @@ func (r Item) Upsert(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPut(r.Path(), body, result)
 }
 
-// UpdateProperty updates a single static property in the fastes possible
+// UpdateProperty updates a single static property in the fastest possible
 // way. Note: this method does trigger an update resource notificatino, but
 // not with the entire object, only with the updated property.
 func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
