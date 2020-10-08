@@ -1289,7 +1289,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if bodyJSON == nil {
 			body := r.Body
-			if r.Header.Get("Content-Encoding") == "gzip" {
+			if r.Header.Get("Content-Encoding") == "gzip" || r.Header.Get("Kurbisio-Content-Encoding") == "gzip" {
 				body, err = gzip.NewReader(r.Body)
 				if err != nil {
 					http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
@@ -1549,7 +1549,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		body := r.Body
-		if r.Header.Get("Content-Encoding") == "gzip" {
+		if r.Header.Get("Content-Encoding") == "gzip" || r.Header.Get("Kurbisio-Content-Encoding") == "gzip" {
 			body, err = gzip.NewReader(r.Body)
 			if err != nil {
 				http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
