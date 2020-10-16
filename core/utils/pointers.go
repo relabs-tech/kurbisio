@@ -23,3 +23,8 @@ func SafeFloat64(ptr *float64) float64 {
 	}
 	return 0
 }
+
+// String returns a pointer to the string passed as parameter
+func String(str string) *string {
+	return &str
+}
