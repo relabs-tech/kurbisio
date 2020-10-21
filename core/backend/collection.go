@@ -1392,8 +1392,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if data != nil {
 				json.Unmarshal(data, &bodyJSON)
 				if err != nil {
-					rlog.WithError(err).Error("Error 4733: interceptor")
-					http.Error(w, "Error 4733", http.StatusInternalServerError)
+					rlog.WithError(err).Error("Error 2733: interceptor")
+					http.Error(w, "Error 2733", http.StatusInternalServerError)
 					return
 				}
 			}
