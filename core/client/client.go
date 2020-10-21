@@ -600,7 +600,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 		resBody, _ = ioutil.ReadAll(res.Body)
 	}
 	status := res.StatusCode
-	if status != http.StatusCreated {
+	if status != http.StatusCreated && status != http.StatusOK {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
 			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
 	}
