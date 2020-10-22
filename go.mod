@@ -18,6 +18,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/joeshaw/envdecode v0.0.0-20200121155833-099f1fc765bd
+	github.com/knieriem/odf v0.1.0
 	github.com/lib/pq v1.8.0
 	github.com/onsi/ginkgo v0.0.0-20180119174237-747514b53ddd // indirect
 	github.com/onsi/gomega v1.3.0 // indirect
