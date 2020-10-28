@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,8 +184,7 @@ func TestMain(m *testing.M) {
 	})
 	testService.client = client.NewWithRouter(router)
 
-	code := m.Run()
-	os.Exit(code)
+	m.Run()
 }
 
 type A struct {

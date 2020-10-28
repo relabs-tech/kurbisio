@@ -178,10 +178,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	var err error
 	if b.updateSchema {
-		_, err = b.db.Query(createQuery)
+		_, err = b.db.Exec(createQuery)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error while updating schema when running: %s", createQuery)
-			panic("invalid configuration")
+			panic(fmt.Sprintf("invalid configuration updating: err: %v", err))
 		}
 	}
 
@@ -191,7 +191,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		err := json.Unmarshal(rc.Default, &defaultJSON)
 		if err != nil {
 			nillog.WithError(err).Errorf("parse error in backend configuration - default for %s: %s", this, err)
-			panic("invalid configuration")
+			panic("invalid configuration parse error")
 		}
 		// add dummy core identifiers
 		var id uuid.UUID
@@ -202,7 +202,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 			nillog.WithError(err).Errorf("validating default for %s: field does not follow schemaID %s",
 				resource, rc.SchemaID)
-			panic("invalid configuration")
+			panic("invalid configuration default")
 		}
 	}
 

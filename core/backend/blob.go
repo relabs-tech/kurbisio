@@ -115,7 +115,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	var err error
 	if b.updateSchema {
-		_, err = b.db.Query(createQuery)
+		_, err = b.db.Exec(createQuery)
 		if err != nil {
 			panic(err)
 		}
@@ -801,7 +801,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		_, err = tx.Query(clearQuery, queryParameters...)
+		_, err = tx.Exec(clearQuery, queryParameters...)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)

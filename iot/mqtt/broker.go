@@ -240,7 +240,7 @@ func (p *plugin) OnMsgArrivedWrapper(arrived gmqtt.OnMsgArrived) gmqtt.OnMsgArri
 				log.Println("write twin report for", deviceID, key)
 				now := time.Now().UTC()
 				never := time.Time{}
-				_, err := p.db.Query(
+				_, err := p.db.Exec(
 					`INSERT INTO `+p.db.Schema+`."_twin_"(device_id,key,request,report,requested_at,reported_at)
 					VALUES($1,$2,$3,$4,$5,$6)
 					ON CONFLICT (device_id, key) DO UPDATE SET report=$4,reported_at=$6 WHERE "_twin_".report::jsonb<>$4::jsonb;

@@ -115,7 +115,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
 
 	if b.updateSchema {
-		_, err := b.db.Query(createQuery)
+		_, err := b.db.Exec(createQuery)
 		if err != nil {
 			panic(err)
 		}
