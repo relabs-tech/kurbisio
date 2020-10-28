@@ -1048,7 +1048,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4744", http.StatusInternalServerError)
 			return
 		}
-
 		w.WriteHeader(http.StatusNoContent)
 	}
 
