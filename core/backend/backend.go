@@ -135,7 +135,7 @@ func New(bb *Builder) *Backend {
 		pipelineMaxAttempts:      pipelineMaxAttempts,
 	}
 
-	var logLevel logrus.Level
+	logLevel := logrus.InfoLevel
 
 	if bb.LogLevel != "" {
 		switch strings.ToLower(bb.LogLevel) {
@@ -154,7 +154,6 @@ func New(bb *Builder) *Backend {
 			break
 		default:
 			fmt.Println("Unkown loglevel, using INFO")
-			logLevel = logrus.InfoLevel
 			break
 		}
 	}
