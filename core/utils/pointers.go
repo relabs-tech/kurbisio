@@ -28,3 +28,13 @@ func SafeFloat64(ptr *float64) float64 {
 func StringPtr(str string) *string {
 	return &str
 }
+
+// IntPtr returns a pointer to the int passed as parameter
+func IntPtr(b int) *int {
+	return &b
+}
+
+// Float64Ptr returns a pointer to the int passed as parameter
+func Float64Ptr(f float64) *float64 {
+	return &f
+}
