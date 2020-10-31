@@ -576,7 +576,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 	if !ok {
 		j, err = json.Marshal(body)
 		if err != nil {
-			return http.StatusBadRequest, err
+			return http.StatusBadRequest, fmt.Errorf("POST to %s: %w", path, err)
 		}
 	}
 
@@ -670,7 +670,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 	if !ok {
 		j, err = json.Marshal(body)
 		if err != nil {
-			return http.StatusBadRequest, err
+			return http.StatusBadRequest, fmt.Errorf("PUT to %s: %w", path, err)
 		}
 	}
 
