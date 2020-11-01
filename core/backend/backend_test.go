@@ -1462,7 +1462,9 @@ func TestScheduleEvents(t *testing.T) {
 		ResourceID: uuid.New(),
 	}
 
-	err := backend.ScheduleEvent(ctx, illegalEvent, time.Now().Add(time.Hour))
+	schedule := time.Now().Add(time.Hour).UTC()
+
+	err := backend.ScheduleEvent(ctx, illegalEvent, schedule)
 	assert.NotNil(t, err, "scheduled unhandled event, expected error")
 	ok, err := backend.CancelEvent(ctx, illegalEvent)
 	assert.Nil(t, err, "unscheduled unhandled event")
@@ -1474,10 +1476,31 @@ func TestScheduleEvents(t *testing.T) {
 		Resource:   "something",
 		ResourceID: uuid.New(),
 	}
-	err = backend.ScheduleEvent(ctx, event, time.Now().Add(time.Hour))
-	assert.Nil(t, err, "scheduled handled event")
-	ok, err = backend.CancelEvent(ctx, event)
-	assert.Nil(t, err, "unscheduled handled event")
-	assert.Equal(t, true, ok, "unscheduled handled event")
+	_, _ = backend.CancelEvent(ctx, event)
+	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
+	assert.Nil(t, err, "scheduled handled event if not exist")
 
+	retrievedSchedule, err := backend.retrieveEventSchedule(ctx, event)
+	assert.Nil(t, err, "retrieve event schedule")
+	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
+
+	newSchedule := time.Now().Add(2 * time.Hour).UTC()
+
+	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
+	assert.Nil(t, err, "scheduled handled event if not exist")
+
+	retrievedSchedule, err = backend.retrieveEventSchedule(ctx, event)
+	assert.Nil(t, err, "retrieve event schedule")
+	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
+
+	err = backend.ScheduleEvent(ctx, event, newSchedule)
+	assert.Nil(t, err, "scheduled handled event")
+
+	retrievedSchedule, err = backend.retrieveEventSchedule(ctx, event)
+	assert.Nil(t, err, "retrieve event schedule")
+	assert.Equal(t, newSchedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
+
+	ok, err = backend.CancelEvent(ctx, event)
+	assert.Nil(t, err, "cancel handled event")
+	assert.Equal(t, true, ok, "cancel handled event")
 }

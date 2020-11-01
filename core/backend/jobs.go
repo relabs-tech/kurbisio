@@ -112,6 +112,11 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 	scheduled_at=CASE WHEN $10=null THEN _job_.scheduled_at ELSE $10 END::TIMESTAMP 
 	RETURNING serial;`
 
+	b.jobsInsertIfNotExistQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
+	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' 
+	DO UPDATE SET attempts_left=$8 RETURNING serial;`
+
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
 scheduled_at = CASE WHEN attempts_left>3 then $2 WHEN attempts_left=3 THEN $3 ELSE $4 END::TIMESTAMP
@@ -135,7 +140,7 @@ SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
 SET payload = $2 WHERE serial = $1 RETURNING serial;`
 
 	b.jobsUnscheduleQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
-WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 RETURNING serial;`
+WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
@@ -256,7 +261,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		payload = []byte("{}")
 	}
 	event := Event{Type: eventType, Key: key, Resource: resource, ResourceID: resourceID}.WithPayload(payload)
-	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, nil)
+	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, nil, false)
 
 	if err != nil {
 		http.Error(w, err.Error(), status)
@@ -524,7 +529,7 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 //
 // Use ScheduleEvent if you want to schedule an event at a specific time.
 func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, nil)
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, nil, false)
 	return err
 }
 
@@ -533,7 +538,7 @@ func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
 //
 // Queued events are always going to be delievered, there is no compression happening.
 func (b *Backend) QueueEvent(ctx context.Context, event Event) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, "queued-event", event, nil)
+	_, err := b.raiseEventWithResourceInternal(ctx, "queued-event", event, nil, false)
 	return err
 }
 
@@ -545,7 +550,19 @@ func (b *Backend) QueueEvent(ctx context.Context, event Event) error {
 //
 // Use RaiseEvent if you want to raise the event immediately. Use CancelEvent() to cancel a scheduled event.
 func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt time.Time) error {
-	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt)
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt, false)
+	return err
+}
+
+// ScheduleEventIfNotExist schedules the requested event at a specific point in time. Payload can be nil, an object or a []byte.
+// Callbacks registered with HandleEvent() will be called.
+//
+// If an event of the same kind(event plus key) to the very same resource (resource + resourceID) has already been scheduled,
+// then the new event will be ignored completely.
+//
+// Use RaiseEvent if you want to raise the event immediately. Use CancelEvent() to cancel a scheduled event.
+func (b *Backend) ScheduleEventIfNotExist(ctx context.Context, event Event, scheduleAt time.Time) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt, true)
 	return err
 }
 
@@ -572,8 +589,29 @@ func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	return err == nil, err
 }
 
+// retrieveEventSchedule exists for unit testing purposes only
+func (b *Backend) retrieveEventSchedule(ctx context.Context, event Event) (time.Time, error) {
+	var schedule sql.NullTime
+	query := `SELECT scheduled_at FROM ` + b.db.Schema + `."_job_"
+ WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0  
+ ORDER BY serial LIMIT 1;`
+	job := "event"
+	err := b.db.QueryRow(query,
+		job,
+		event.Type,
+		event.Key,
+		event.Resource,
+		event.ResourceID,
+	).Scan(&schedule)
+
+	if err == sql.ErrNoRows {
+		return schedule.Time, nil
+	}
+	return schedule.Time, err
+}
+
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time) (int, error) {
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
 	key := eventJobKey(event.Type)
 	if _, ok := b.callbacks[key]; !ok {
 		return http.StatusBadRequest, fmt.Errorf("no callback handler installed for %s", key)
@@ -598,7 +636,11 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	}
 
 	var serial int
-	err = b.db.QueryRow(b.jobsInsertQuery,
+	query := b.jobsInsertQuery
+	if ifNotExist {
+		query = b.jobsInsertIfNotExistQuery
+	}
+	err = b.db.QueryRow(query,
 		job,
 		event.Type,
 		event.Key,

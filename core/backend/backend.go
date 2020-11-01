@@ -45,7 +45,7 @@ type Backend struct {
 	pipelineConcurrency int
 	pipelineMaxAttempts int
 
-	jobsInsertQuery, jobsUnscheduleQuery, jobsRescheduleQuery, jobsUpdatePayloadQuery, jobsUpdateQuery, jobsDeleteQuery string
+	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsUnscheduleQuery, jobsRescheduleQuery, jobsUpdatePayloadQuery, jobsUpdateQuery, jobsDeleteQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
