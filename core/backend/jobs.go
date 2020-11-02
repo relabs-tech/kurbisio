@@ -96,7 +96,7 @@ context JSON NOT NULL DEFAULT'{}'::jsonb,
 scheduled_at TIMESTAMP,
 PRIMARY KEY(serial)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS jobs_event_compression ON ` + b.db.Schema + `._job_(type,key,resource,resource_id) WHERE job = 'event';
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_event_compression ON ` + b.db.Schema + `._job_(type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0;
 CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(scheduled_at);
 `)
 
@@ -107,14 +107,14 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 
 	b.jobsInsertQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0 
 	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=$8,context=$9, 
 	scheduled_at=CASE WHEN $10=null THEN _job_.scheduled_at ELSE $10 END::TIMESTAMP 
 	RETURNING serial;`
 
 	b.jobsInsertIfNotExistQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
 	DO UPDATE SET attempts_left=$8 RETURNING serial;`
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
@@ -139,7 +139,7 @@ SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
 	b.jobsUpdatePayloadQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET payload = $2 WHERE serial = $1 RETURNING serial;`
 
-	b.jobsUnscheduleQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
+	b.jobsCancelQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`
 
 	logger.Default().Debugln("job processing pipelines")
@@ -152,23 +152,46 @@ WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5
 
 	router.HandleFunc("/kurbisio/health", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
-		b.health(w, r)
+		b.health(w, r, false)
 	}).Methods(http.MethodOptions, http.MethodGet)
+	router.HandleFunc("/kurbisio/health/purge", func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		b.purgeHealth(w, r)
+	}).Methods(http.MethodOptions, http.MethodPut)
+	router.HandleFunc("/kurbisio/health/details", func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		b.health(w, r, true)
+	}).Methods(http.MethodOptions, http.MethodGet)
+}
+
+// JobDetail is detail on a job for the health endpoint
+type JobDetail struct {
+	Serial       int64      `json:"serial"`
+	Job          string     `json:"job"`
+	Type         string     `json:"type"`
+	Key          string     `json:"key"`
+	Resource     string     `json:"resource"`
+	ResourceID   string     `json:"resource_id"`
+	AttemptsLeft int64      `json:"attempts_left"`
+	Timestamp    time.Time  `json:"timestamp"`
+	ScheduledAt  *time.Time `json:"scheduled_at"`
 }
 
 // Health contains the backend's health status
 type Health struct {
 	Jobs struct {
-		Failed  int64 `json:"failed"`
-		Failing int64 `json:"failing"`
-		Overdue int64 `json:"overdue"`
+		Failed  int64       `json:"failed"`
+		Failing int64       `json:"failing"`
+		Overdue int64       `json:"overdue"`
+		Details []JobDetail `json:"details,omitempty"`
 	} `json:"jobs"`
 }
 
 // Health returns the backend's health status
-func (b *Backend) Health() (Health, error) {
+func (b *Backend) Health(includeDetails bool) (Health, error) {
 	health := Health{}
 	jobs := &health.Jobs
+
 	// get the number of failed jobs
 	failedJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left = 0 limit 1;`
 	err := b.db.QueryRow(failedJobsQuery).Scan(&jobs.Failed)
@@ -183,20 +206,63 @@ func (b *Backend) Health() (Health, error) {
 		return health, err
 	}
 
+	now := time.Now().UTC()
+	tenMinutesAgo := now.Add(-10 * time.Minute)
+
 	// get the number of jobs who should have been executed at least ten minutes ago
 	overdueJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND
 	((scheduled_at IS NULL AND $1 > timestamp) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)) limit 1;`
-	tenMinutesAgo := time.Now().UTC().Add(-10 * time.Minute)
 	err = b.db.QueryRow(overdueJobsQuery, tenMinutesAgo).Scan(&jobs.Overdue)
 	if err != nil && err != csql.ErrNoRows {
 		return health, err
 	}
+
+	if includeDetails {
+		jobsDetailsQuery := `SELECT serial, job, type, key, resource, resource_id, timestamp, attempts_left, scheduled_at from ` + b.db.Schema + `._job_ WHERE 
+	attempts_left = 0 OR (attempts_left > 0 AND	((scheduled_at IS NULL AND $1 > timestamp) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)));`
+		rows, err := b.db.Query(jobsDetailsQuery, tenMinutesAgo)
+		if err != nil {
+			if err == csql.ErrNoRows {
+				return health, nil
+			}
+			return health, err
+		}
+
+		defer rows.Close()
+		var jobDetails []JobDetail
+		for rows.Next() {
+			var detail JobDetail
+			err := rows.Scan(
+				&detail.Serial,
+				&detail.Job,
+				&detail.Type,
+				&detail.Key,
+				&detail.Resource,
+				&detail.ResourceID,
+				&detail.Timestamp,
+				&detail.AttemptsLeft,
+				&detail.ScheduledAt,
+			)
+			if err != nil {
+				return health, err
+			}
+			jobDetails = append(jobDetails, detail)
+		}
+		health.Jobs.Details = jobDetails
+	}
 	return health, nil
 }
 
-func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
+// HealthPurge deletes old health data. Currently this is only failed jobs
+func (b *Backend) HealthPurge() error {
+	deleteFailedJobsQuery := `DELETE from ` + b.db.Schema + `._job_ WHERE attempts_left = 0;`
+	_, err := b.db.Exec(deleteFailedJobsQuery)
+	return err
+}
+
+func (b *Backend) health(w http.ResponseWriter, r *http.Request, includeDetails bool) {
 	rlog := logger.FromContext(r.Context())
-	health, err := b.Health()
+	health, err := b.Health(includeDetails)
 	if err != nil {
 		rlog.WithError(err).Errorln("Error 4222: cannot query database")
 		http.Error(w, "Error 4222: ", http.StatusInternalServerError)
@@ -206,6 +272,17 @@ func (b *Backend) health(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(jsonData)
+}
+
+func (b *Backend) purgeHealth(w http.ResponseWriter, r *http.Request) {
+	rlog := logger.FromContext(r.Context())
+	err := b.HealthPurge()
+	if err != nil {
+		rlog.WithError(err).Errorln("Error 4223: cannot query database")
+		http.Error(w, "Error 4223: ", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
@@ -575,7 +652,7 @@ func (b *Backend) ScheduleEventIfNotExist(ctx context.Context, event Event, sche
 func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	job := "event"
 	var serial int
-	err := b.db.QueryRow(b.jobsUnscheduleQuery,
+	err := b.db.QueryRow(b.jobsCancelQuery,
 		job,
 		event.Type,
 		event.Key,
@@ -590,8 +667,8 @@ func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 }
 
 // retrieveEventSchedule exists for unit testing purposes only
-func (b *Backend) retrieveEventSchedule(ctx context.Context, event Event) (time.Time, error) {
-	var schedule sql.NullTime
+func (b *Backend) retrieveEventSchedule(ctx context.Context, event Event) (*time.Time, error) {
+	var schedule *time.Time
 	query := `SELECT scheduled_at FROM ` + b.db.Schema + `."_job_"
  WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0  
  ORDER BY serial LIMIT 1;`
@@ -605,9 +682,9 @@ func (b *Backend) retrieveEventSchedule(ctx context.Context, event Event) (time.
 	).Scan(&schedule)
 
 	if err == sql.ErrNoRows {
-		return schedule.Time, nil
+		return schedule, nil
 	}
-	return schedule.Time, err
+	return schedule, err
 }
 
 // raiseEventWithResourceInternal returns the http status code as well

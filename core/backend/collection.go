@@ -536,11 +536,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[propertiesIndex-1+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
-				if err != nil {
-					nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-					http.Error(w, "Error 4724", http.StatusInternalServerError)
-					return
-				}
+				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+				http.Error(w, "Error 4724", http.StatusInternalServerError)
+				return
 			}
 			defer rows.Close()
 			for rows.Next() {
@@ -717,11 +715,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
-			if err != nil {
-				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-				http.Error(w, "Error 4724", http.StatusInternalServerError)
-				return
-			}
+			nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+			http.Error(w, "Error 4724", http.StatusInternalServerError)
+			return
 		}
 
 		response := []interface{}{}
@@ -755,11 +751,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[propertiesIndex-1+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
-				if err != nil {
-					nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-					http.Error(w, "Error 4724", http.StatusInternalServerError)
-					return
-				}
+				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+				http.Error(w, "Error 4724", http.StatusInternalServerError)
+				return
 			}
 			defer rows.Close()
 			for rows.Next() {

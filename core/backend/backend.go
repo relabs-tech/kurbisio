@@ -26,6 +26,10 @@ import (
 	"github.com/relabs-tech/backends/core/schema"
 )
 
+// InternalDatabaseSchemaVersion is a sequential versioning number of the database schema.
+// If it increases, the backend will try to update the schema.
+const InternalDatabaseSchemaVersion = 2
+
 // Backend is the generic rest backend
 type Backend struct {
 	config              backendConfiguration
@@ -45,7 +49,7 @@ type Backend struct {
 	pipelineConcurrency int
 	pipelineMaxAttempts int
 
-	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsUnscheduleQuery, jobsRescheduleQuery, jobsUpdatePayloadQuery, jobsUpdateQuery, jobsDeleteQuery string
+	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery, jobsRescheduleQuery, jobsUpdatePayloadQuery, jobsUpdateQuery, jobsDeleteQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
@@ -166,7 +170,7 @@ func New(bb *Builder) *Backend {
 
 	registry := b.Registry.Accessor("_backend_")
 	var currentVersion string
-	newVersion := fmt.Sprintf("%x", sha1.Sum([]byte(bb.Config)))
+	newVersion := fmt.Sprintf("%d/%x", InternalDatabaseSchemaVersion, sha1.Sum([]byte(bb.Config)))
 
 	registry.Read("schema_version", &currentVersion)
 	b.updateSchema = newVersion != currentVersion
