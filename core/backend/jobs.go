@@ -156,10 +156,24 @@ WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5
 	}).Methods(http.MethodOptions, http.MethodGet)
 	router.HandleFunc("/kurbisio/health/purge", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		b.purgeHealth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 	router.HandleFunc("/kurbisio/health/details", func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.HasRole("admin") {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		b.health(w, r, true)
 	}).Methods(http.MethodOptions, http.MethodGet)
 }
