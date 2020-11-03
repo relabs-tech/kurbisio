@@ -73,7 +73,7 @@ jobs:
             --version ${GITHUB_REF##*/} \
             --env prod
           cd ../data/conversation_templates/
-          go run upload.go --url https://api.loyalty2you.com
+          go run upload/main.go --url https://api.loyalty2you.com --folder templates
           cd -
           cd ../data/help_texts/
           go run upsert.go --url https://api.loyalty2you.com --resource help_text
