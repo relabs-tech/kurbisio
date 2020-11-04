@@ -39,11 +39,14 @@ type BackdoorMiddlewareBuilder struct {
 // final authorization from the account collection in the backend.
 func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 
-	if len(bmb.VIPs) == 0 && bmb.DB == nil {
+	if len(bmb.VIPs) > 0 && bmb.DB == nil {
 		panic("backdoor middleware requires DB for VIP tickets")
 	}
 
-	authQuery := fmt.Sprintf("SELECT account_id, properties FROM %s.account WHERE identity=$1;", bmb.DB.Schema)
+	var authQuery string
+	if bmb.DB != nil {
+		authQuery = fmt.Sprintf("SELECT account_id, properties FROM %s.account WHERE identity=$1;", bmb.DB.Schema)
+	}
 
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

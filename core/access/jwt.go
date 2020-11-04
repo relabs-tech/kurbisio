@@ -132,17 +132,8 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			}{}
 			token, err := jwt.ParseWithClaims(tokenString, &claims, jwksLookup)
 
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-				return
-			}
-			if !token.Valid {
-				http.Error(w, "invalid bearer token", http.StatusUnauthorized)
-				return
-			}
-
-			if claims.Issuer != jmb.Issuer {
-				http.Error(w, "bearer token issuer not accepted", http.StatusUnauthorized)
+			if err != nil || !token.Valid || claims.Issuer != jmb.Issuer {
+				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
 
