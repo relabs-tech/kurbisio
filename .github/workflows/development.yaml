@@ -4,6 +4,7 @@ on:
       - master
       - refs/tags/*
       - direct_deploy
+      - test_deploy/*
     tags:
       - "[0-9].[0-9]+.[0-9]+-[0-9]+"
   pull_request:
@@ -60,55 +61,64 @@ jobs:
           go generate ./...
           cd services/fitness
           GOOS=linux GOARCH=amd64 go build
-      - name: deploy to prod
+
+      - name: prep deploy to prod
         if: startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/direct_deploy'
         run: |
-          echo ::set-env name=task::'deployment to prod'
-          cd services/fitness/deployment_config
-          ./sam-deploy-lambdas.sh \
-            --template fitness-pub.yaml \
-            --gitSHA ${GITHUB_SHA::7} \
-            --version ${GITHUB_REF##*/} \
-            --env prod
-          TOKEN=$(go run main.go -email loyalty.ci.bot@dalarub.com -password $LOYALTY_CI_BOT_PASSWORD)
-          cd ../data/conversation_templates/templates/
-          ./go run upload/main.go -url https://api.loyalty2you.com -token $TOKEN -folder templates
-          cd -
-          cd ../data/help_texts/
-          go run upsert.go -url https://api.loyalty2you.com -token $TOKEN
-          cd -
-          cd ../data/chat/
-          go run upsert.go -url https://api.loyalty2you.com -token $TOKEN
-          cd -
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: eu-central-1
+          echo "task='deployment to prod'" >> $GITHUB_ENV
+          echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://api.loyalty2you.com" >> $GITHUB_ENV
 
-      - name: deploy to staging
+      - name: prep deploy to staging
         if: github.ref == 'refs/heads/master'
         run: |
-          echo ::set-env name=task::'deployment to staging'
-          cd services/fitness/deployment_config
+          echo "task='deployment to staging'" >> $GITHUB_ENV
+          echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://staging.api.loyalty2you.com" >> $GITHUB_ENV
+
+      - name: prep deploy to test
+        if: startsWith(github.ref, 'refs/heads/test_deploy')
+        run: |
+          echo "task='deployment to test'" >> $GITHUB_ENV
+          echo "DEPLOY_ENV=test" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://test.api.loyalty2you.com" >> $GITHUB_ENV
+
+      - name: deploy
+        run: |
+          if [ -z "${DEPLOY_ENV}" ]; then
+            echo "no environment to deploy to specified, hence skipping deployment"
+            exit 0
+          fi
+
+          echo "deploy lambdas"
+          FITNESS_DIR=$GITHUB_WORKSPACE/services/fitness
+          cd $FITNESS_DIR/deployment_config
           ./sam-deploy-lambdas.sh \
             --template fitness-pub.yaml \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
-            --env staging
-          TOKEN=$(go run main.go -email loyalty.ci.bot@dalarub.com -password $LOYALTY_CI_BOT_PASSWORD)
-          cd ../data/conversation_templates/templates/
-          go run upload/main.go -url https://staging.api.loyalty2you.com -token $TOKEN -folder templates
-          cd -
-          cd ../data/help_texts/
-          go run upsert.go -url https://staging.api.loyalty2you.com -token $TOKEN
-          cd -
-          cd ../data/chat/
-          go run upsert.go --url https://staging.api.loyalty2you.com -token $TOKEN
-          cd -
+            --env ${DEPLOY_ENV}
+
+          echo "get login token"
+          TOKEN=$(go run $FITNESS_DIR/tools/login/main.go -email loyalty.ci.bot@dalarub.com -password $LOYALTY_CI_BOT_PASSWORD)
+
+          echo "upload conversation templates"
+          cd $FITNESS_DIR/data/conversation_templates
+          go run upload/main.go -url ${DEPLOY_URL} -token $TOKEN -folder templates
+
+          echo "upload help texts"
+          cd $FITNESS_DIR/data/help_texts
+          go run upsert.go -url ${DEPLOY_URL} -token $TOKEN
+
+          echo "upload chats"
+          cd $FITNESS_DIR/data/chat
+          go run upsert.go -url ${DEPLOY_URL} -token $TOKEN
+
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: eu-central-1
+          LOYALTY_CI_BOT_PASSWORD: ${{ secrets.LOYALTY_CI_BOT_PASSWORD }}
 
       - uses: 8398a7/action-slack@v3
         if: ( startsWith(github.ref, 'refs/tags') || github.ref == 'refs/heads/master' ) && failure()
