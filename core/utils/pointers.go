@@ -24,17 +24,37 @@ func SafeFloat64(ptr *float64) float64 {
 	return 0
 }
 
+// SafeString returns the value from ptr or "" if the pointer is nil
+func SafeString(ptr *string) string {
+	if ptr != nil {
+		return *ptr
+	}
+	return ""
+}
+
 // StringPtr returns a pointer to the string passed as parameter
 func StringPtr(str string) *string {
 	return &str
 }
 
 // IntPtr returns a pointer to the int passed as parameter
-func IntPtr(b int) *int {
-	return &b
+func IntPtr(d int) *int {
+	return &d
 }
 
 // Float64Ptr returns a pointer to the int passed as parameter
 func Float64Ptr(f float64) *float64 {
 	return &f
 }
+
+// BoolPtr returns a pointer to the bool passed as parameter
+func BoolPtr(b bool) *bool {
+	return &b
+}
+
+var (
+	// True is true
+	True bool = true
+	// False is true
+	False bool = false
+)
