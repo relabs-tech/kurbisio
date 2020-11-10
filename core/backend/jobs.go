@@ -208,7 +208,7 @@ func (b *Backend) Health(includeDetails bool) (Health, error) {
 	}
 
 	// get the number of jobs who failed at least once but are still scheduled for a retry
-	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 2 limit 1;`
+	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 3 limit 1;`
 	err = b.db.QueryRow(failingJobsQuery).Scan(&jobs.Failing)
 	if err != nil && err != csql.ErrNoRows {
 		return health, err
