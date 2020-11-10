@@ -107,15 +107,15 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 
 	b.jobsInsertQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0 
-	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=$8,context=$9, 
-	scheduled_at=CASE WHEN $10=null THEN _job_.scheduled_at ELSE $10 END::TIMESTAMP 
+	VALUES($1,$2,$3,$4,$5,$6,$7,4,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0 
+	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=4,context=$8, 
+	scheduled_at=CASE WHEN $9=null THEN _job_.scheduled_at ELSE $9 END::TIMESTAMP 
 	RETURNING serial;`
 
 	b.jobsInsertIfNotExistQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
-	DO UPDATE SET attempts_left=$8 RETURNING serial;`
+	VALUES($1,$2,$3,$4,$5,$6,$7,4,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	DO UPDATE SET attempts_left=4 RETURNING serial;`
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
@@ -131,13 +131,7 @@ SELECT serial
 RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
-WHERE serial = $1 RETURNING serial;`
-
-	b.jobsRescheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
-SET scheduled_at = $2, attempts_left = $3 WHERE serial = $1 RETURNING serial;`
-
-	b.jobsUpdatePayloadQuery = `UPDATE ` + b.db.Schema + `."_job_"
-SET payload = $2 WHERE serial = $1 RETURNING serial;`
+WHERE serial = $1 AND attempts_left < 4 RETURNING serial;`
 
 	b.jobsCancelQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`
@@ -214,7 +208,7 @@ func (b *Backend) Health(includeDetails bool) (Health, error) {
 	}
 
 	// get the number of jobs who failed at least once but are still scheduled for a retry
-	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 3 limit 1;`
+	failingJobsQuery := `SELECT count(*) OVER()  from ` + b.db.Schema + `._job_ WHERE attempts_left > 0 AND attempts_left < 2 limit 1;`
 	err = b.db.QueryRow(failingJobsQuery).Scan(&jobs.Failing)
 	if err != nil && err != csql.ErrNoRows {
 		return health, err
@@ -370,8 +364,13 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 		var key string
 		rlog := logger.Default()
 
+		err := tx.Commit()
+		if err != nil {
+			rlog.Errorf("error committing %s#%d: %s", key, job.Serial, err.Error())
+		}
+
 		// call the registered handler in a panic/recover envelope
-		err := func() (err error) {
+		err = func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
 					err = fmt.Errorf("recovered from panic: %s", r)
@@ -404,36 +403,17 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 		}()
 
 		if err != nil {
-			if rescheduleEventError, ok := err.(RescheduleEventError); ok {
-				var serial int
-				// update payload if requested
-				if len(rescheduleEventError.Payload) > 0 {
-					err = tx.QueryRow(b.jobsUpdatePayloadQuery, &job.Serial, &rescheduleEventError.Payload).Scan(&serial)
-					if err != nil {
-						rlog.WithError(err).Errorf("failed to update job payload")
-					}
-				}
-				// reschedule in UTC
-				scheduleAt := rescheduleEventError.ScheduleAt.UTC()
-				err = tx.QueryRow(b.jobsRescheduleQuery, &job.Serial, &scheduleAt, &b.pipelineMaxAttempts).Scan(&serial)
-				if err != nil {
-					rlog.WithError(err).Errorf("failed to update job schedule")
-				}
-			} else {
-				rlog.Errorln("error processing "+key+"#"+strconv.Itoa(job.Serial)+":", err.Error())
-			}
+			rlog.WithError(err).Error("error processing " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
 		} else {
-			// job handled sucessfully, delete form queue
+			rlog.Info("successfully processed " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
+			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 4)
 			var serial int
-			err = tx.QueryRow(b.jobsDeleteQuery, &job.Serial).Scan(&serial)
+			err = b.db.QueryRow(b.jobsDeleteQuery, &job.Serial).Scan(&serial)
+			if err != nil && err != sql.ErrNoRows {
+				rlog.WithError(err).Error("could not delete processed job " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
+			}
 		}
 
-		err = tx.Commit()
-		if err != nil {
-			rlog.Errorf("error committing %s#%d: %s", key, job.Serial, err.Error())
-		} else {
-			rlog.Debugf("successfully handled %s#%d", key, job.Serial)
-		}
 	}
 }
 
@@ -579,31 +559,9 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
-// RescheduleEventError is a custom error for HandleEvent
-type RescheduleEventError struct {
-	ScheduleAt time.Time
-	Payload    []byte
-}
-
-// WithPayload adds a payload to a RescheduleEventError. Payload can be an object or a []byte
-func (err RescheduleEventError) WithPayload(payload interface{}) RescheduleEventError {
-	data, ok := payload.([]byte)
-	if !ok {
-		data, _ = json.Marshal(payload)
-	}
-	err.Payload = data
-	return err
-}
-
-func (err RescheduleEventError) Error() string {
-	return "need to reschedule"
-}
-
 // HandleEvent installs a callback handler the specified event. Handlers are executed
 // out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
-// a few times with increasing timeout. If the handler fails with a RescheduleEventError,
-// the event will be rescheduled at the requested time, and optionally with an updated
-// payload (see RescheduleEventError.WithPayload()).
+// a few times with increasing timeout.
 func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
 	key := eventJobKey(event)
 	if _, ok := b.callbacks[key]; ok {
@@ -739,7 +697,6 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 		event.ResourceID,
 		data,
 		time.Now().UTC(),
-		b.pipelineMaxAttempts,
 		contextData,
 		scheduleAtUTC,
 	).Scan(&serial)
@@ -823,13 +780,12 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	var serial int
 	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
 		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,$6,$7) RETURNING serial;",
+		"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
 		operation,
 		resource,
 		resourceID,
 		payload,
 		time.Now().UTC(),
-		b.pipelineMaxAttempts,
 		contextData,
 	).Scan(&serial)
 

@@ -47,9 +47,8 @@ type Backend struct {
 	interceptors             map[string]requestHandler
 
 	pipelineConcurrency int
-	pipelineMaxAttempts int
 
-	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery, jobsRescheduleQuery, jobsUpdatePayloadQuery, jobsUpdateQuery, jobsDeleteQuery string
+	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery, jobsUpdateQuery, jobsDeleteQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
@@ -73,8 +72,6 @@ type Builder struct {
 
 	// Number of concurrent pipeline executors. Default is 5.
 	PipelineConcurrency int
-	// Maximum number of attemts for pipeline execution. Default is 4.
-	PipelineMaxAttempts int
 
 	// JSONSchemas is a list of top level JSON Schemas as strings.
 	JSONSchemas []string
@@ -109,10 +106,6 @@ func New(bb *Builder) *Backend {
 	if bb.PipelineConcurrency > 0 {
 		pipelineConcurrency = bb.PipelineConcurrency
 	}
-	pipelineMaxAttempts := 4
-	if bb.PipelineMaxAttempts > 0 {
-		pipelineMaxAttempts = bb.PipelineMaxAttempts
-	}
 
 	jsonValidator, err := schema.NewValidator([]string{ConfigSchemaJSON}, nil)
 	if err != nil {
@@ -136,7 +129,6 @@ func New(bb *Builder) *Backend {
 		interceptors:             make(map[string]requestHandler),
 		collectionsAndSingletons: make(map[string]bool),
 		pipelineConcurrency:      pipelineConcurrency,
-		pipelineMaxAttempts:      pipelineMaxAttempts,
 	}
 
 	logLevel := logrus.InfoLevel
