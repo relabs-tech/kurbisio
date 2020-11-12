@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -356,8 +355,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	rlog.Infof("raised event %s on resource \"%s\"", event, resource)
 }
 
-func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
-	defer wg.Done()
+func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 
 	for job := range jobs {
 		tx := job.tx
@@ -413,6 +411,7 @@ func (b *Backend) pipelineWorker(n int, wg *sync.WaitGroup, jobs chan txJob) {
 				rlog.WithError(err).Error("could not delete processed job " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
 			}
 		}
+		ready <- true
 
 	}
 }
@@ -465,12 +464,10 @@ func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 	}
 
 	go func() {
-		b.ProcessJobsSync(0) // process left over events
+		b.ProcessJobsSync(5 * time.Minute)
 		for {
 			<-b.processJobsAsyncTrigger
-			if b.HasJobsToProcess() {
-				b.ProcessJobsSync(0)
-			}
+			b.ProcessJobsSync(5 * time.Minute)
 		}
 	}()
 
@@ -481,69 +478,77 @@ func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 // It you pass 0, it will process all pending jobs.
 func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 	rlog := logger.FromContext(nil)
-	jobCount := 0
 	startTime := time.Now()
 
-process:
-	b.HasJobsToProcess() // reset flag
-
-	jobs := make(chan txJob, b.pipelineConcurrency)
-	var wg sync.WaitGroup
-	wg.Add(b.pipelineConcurrency)
-	for i := 0; i < b.pipelineConcurrency; i++ {
-		go b.pipelineWorker(i, &wg, jobs)
-	}
-
-	var maxedOut bool
-
-	for {
+	getJob := func() (txj txJob, err error) {
+		txj.tx, err = b.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			rlog.WithError(err).Error("failed to begin transaction")
+			return
+		}
 		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
 			rlog.Error("This is taking a long time...")
 		})
-		tx, err := b.db.BeginTx(context.Background(), nil)
-		if err != nil {
-			rlog.Errorln("failed to begin transaction:", err.Error())
-			break
-		}
-
-		var j job
 		now := time.Now().UTC()
-		err = tx.QueryRow(b.jobsUpdateQuery,
+		err = txj.tx.QueryRow(b.jobsUpdateQuery,
 			now,
 			now.Add(5*time.Minute),  // first retry timeout
 			now.Add(15*time.Minute), // second retry timeout
 			now.Add(45*time.Minute), // third retry timeout before we give up
 		).Scan(
-			&j.Serial,
-			&j.Job,
-			&j.Type,
-			&j.Key,
-			&j.Resource,
-			&j.ResourceID,
-			&j.Payload,
-			&j.Timestamp,
-			&j.AttemptsLeft,
-			&j.ContextData,
+			&txj.Serial,
+			&txj.Job,
+			&txj.Type,
+			&txj.Key,
+			&txj.Resource,
+			&txj.ResourceID,
+			&txj.Payload,
+			&txj.Timestamp,
+			&txj.AttemptsLeft,
+			&txj.ContextData,
 		)
 		timeout.Stop()
 		if err != nil {
 			if err != sql.ErrNoRows {
 				rlog.Errorln("failed to retrieve job:", err.Error())
 			}
-			tx.Rollback()
-			break
+			txj.tx.Rollback()
+			txj.tx = nil
 		}
-		jobs <- txJob{j, tx}
-		jobCount++
-		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; maxedOut {
-			break
-		}
+		return
 	}
-	close(jobs)
-	wg.Wait()
 
-	if !maxedOut && b.HasJobsToProcess() {
-		goto process // goto considered useful
+	jobs := make(chan txJob, b.pipelineConcurrency)
+	ready := make(chan bool, b.pipelineConcurrency)
+	for i := 0; i < b.pipelineConcurrency; i++ {
+		go b.pipelineWorker(i, jobs, ready)
+	}
+
+	var maxedOut bool
+
+	var jobCount, readyCount int
+	for i := 0; i < b.pipelineConcurrency; i++ {
+		txj, err := getJob()
+		if err != nil {
+			break
+		}
+		jobCount++
+		jobs <- txj
+	}
+
+	for readyCount < jobCount {
+		<-ready
+		readyCount++
+
+		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; !maxedOut {
+			// we have time for more jobs, check if there are any in the database
+			txj, err := getJob()
+			if err != nil {
+				break
+			}
+			jobCount++
+			jobs <- txj
+		}
 	}
 
 	maxedOutString := ""
