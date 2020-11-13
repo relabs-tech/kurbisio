@@ -42,6 +42,11 @@ func IntPtr(d int) *int {
 	return &d
 }
 
+// Int64Ptr returns a pointer to the int passed as parameter
+func Int64Ptr(d int64) *int64 {
+	return &d
+}
+
 // Float64Ptr returns a pointer to the int passed as parameter
 func Float64Ptr(f float64) *float64 {
 	return &f
