@@ -31,13 +31,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2-beta
+      - uses: actions/setup-go@v2
         with:
           go-version: ^1.15
 
       - name: go lint
         run: |
-          go get -u golang.org/x/lint/golint 
+          go get -u golang.org/x/lint/golint
           golint -set_exit_status $(go list ./... | grep -v generated)
 
       - name: go test race
