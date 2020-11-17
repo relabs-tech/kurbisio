@@ -471,3 +471,8 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 	router.HandleFunc(prefix+"/{rest:.+}", replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)
 }
+
+// Router returns the mux.Router for this backend
+func (b *Backend) Router() *mux.Router {
+	return b.router
+}

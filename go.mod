@@ -21,7 +21,8 @@ require (
 	github.com/joeshaw/envdecode v0.0.0-20200121155833-099f1fc765bd
 	github.com/knieriem/odf v0.1.0
 	github.com/lib/pq v1.8.0
-	github.com/securego/gosec/v2 v2.5.0 // indirect
+	github.com/onsi/ginkgo v1.14.1 // indirect
+	github.com/onsi/gomega v1.10.2 // indirect
 	github.com/sirupsen/logrus v1.6.0
 	github.com/snabb/isoweek v1.0.0
 	github.com/stretchr/testify v1.6.1
@@ -31,6 +32,7 @@ require (
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 	golang.org/x/sys v0.0.0-20200831180312-196b9ba8737a // indirect
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
+	golang.org/x/tools v0.0.0-20201007032633-0806396f153e // indirect
 	gonum.org/v1/plot v0.8.0
 	google.golang.org/api v0.31.0
 	google.golang.org/genproto v0.0.0-20200901141002-b3bf27a9dbd1 // indirect
