@@ -104,15 +104,15 @@ jobs:
 
           echo "upload conversation templates"
           cd $FITNESS_DIR/data/conversation_templates
-          go run upload/main.go -url ${DEPLOY_URL} -token $TOKEN -folder templates
+          go run upload/main.go -prune -url ${DEPLOY_URL} -token $TOKEN -folder templates
 
           echo "upload help texts"
           cd $FITNESS_DIR/data/help_texts
-          go run upsert.go -url ${DEPLOY_URL} -token $TOKEN
+          go run upsert.go -prune -url ${DEPLOY_URL} -token $TOKEN
 
           echo "upload chats"
           cd $FITNESS_DIR/data/chat
-          go run upsert.go -url ${DEPLOY_URL} -token $TOKEN
+          go run upsert.go -prune -url ${DEPLOY_URL} -token $TOKEN
 
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
