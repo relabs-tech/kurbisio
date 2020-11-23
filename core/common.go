@@ -28,7 +28,7 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 	}
 	*o = Operation(s)
 	switch *o {
-	case OperationCreate, OperationRead, OperationUpdate, OperationDelete, OperationList:
+	case OperationCreate, OperationRead, OperationUpdate, OperationDelete, OperationList, OperationClear:
 		return nil
 	default:
 		return fmt.Errorf("%s is not valid Operation", s)

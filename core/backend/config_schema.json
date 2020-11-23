@@ -226,7 +226,8 @@
                                 "read",
                                 "delete",
                                 "list",
-                                "update"
+                                "update",
+                                "clear"
                             ]
                         }
                     },

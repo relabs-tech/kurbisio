@@ -317,7 +317,7 @@ Authorization
 If AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
 By default, only the "admin" role has a permit to access resources. A permit object for each resource
 authorizes specific roles to execute specific operations. The different operations are: "create", "read", "update",
-"delete" and "list". The "list"-operation is the retrieval of the entire collection.
+"delete", "list" and "clear". The "list"-operation is the retrieval of the entire collection.
 
 For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
 give each user permission to create, read and delete their own pictures, but only their own pictures. You
