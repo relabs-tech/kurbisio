@@ -375,6 +375,9 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 					debug.PrintStack()
 				}
 			}()
+			timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
+				logger.Default().Error("This is taking a long time...")
+			})
 			switch job.Job {
 			case "notification":
 				notification, ctx := job.notification()
@@ -397,6 +400,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 			default:
 				err = fmt.Errorf("unknown job type %s", job.Job)
 			}
+			timeout.Stop()
 			return
 		}()
 
@@ -486,9 +490,6 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 			rlog.WithError(err).Error("failed to begin transaction")
 			return
 		}
-		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
-			rlog.Error("This is taking a long time...")
-		})
 		now := time.Now().UTC()
 		err = txj.tx.QueryRow(b.jobsUpdateQuery,
 			now,
@@ -507,7 +508,6 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 			&txj.AttemptsLeft,
 			&txj.ContextData,
 		)
-		timeout.Stop()
 		if err != nil {
 			if err != sql.ErrNoRows {
 				rlog.Errorln("failed to retrieve job:", err.Error())
@@ -584,6 +584,18 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 // Use ScheduleEvent if you want to schedule an event at a specific time.
 func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
 	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, nil, false)
+	return err
+}
+
+// RaiseEventIfNotExist raises the requested event. Payload can be nil, an object or a []byte.
+// Callbacks registered with HandleEvent() will be called.
+//
+// If an event of the same kind(event plus key) to the very same resource (resource + resourceID) has already been raised,
+// then the new event will be ignored completely.
+//
+// Use RaiseEvent if you want to raise the event immediately. Use CancelEvent() to cancel a scheduled event.
+func (b *Backend) RaiseEventIfNotExist(ctx context.Context, event Event) error {
+	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, nil, true)
 	return err
 }
 
