@@ -317,7 +317,8 @@ Authorization
 If AuthorizationEnabled is set to true, the backend supports role based access control to its resources.
 By default, only the "admin" role has a permit to access resources. A permit object for each resource
 authorizes specific roles to execute specific operations. The different operations are: "create", "read", "update",
-"delete", "list" and "clear". The "list"-operation is the retrieval of the entire collection.
+"delete", "list" and "clear". The "list"-operation is the retrieval of the entire collection, "clear" deletes the entire
+collection.
 
 For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
 give each user permission to create, read and delete their own pictures, but only their own pictures. You
@@ -333,7 +334,8 @@ delare a role for a user  - in this case "userrole" - and specify the resource l
 						"read",
 						"update",
 						"delete",
-						"list"
+						"list",
+						"clear"
 					],
 					"selectors": [
 						"user"

@@ -3,16 +3,18 @@ module github.com/relabs-tech/backends
 go 1.13
 
 require (
+	cloud.google.com/go v0.72.0 // indirect
 	cloud.google.com/go/firestore v1.3.0 // indirect
-	cloud.google.com/go/storage v1.11.0 // indirect
+	cloud.google.com/go/storage v1.12.0 // indirect
 	firebase.google.com/go v3.13.0+incompatible
 	github.com/DrmagicE/gmqtt v0.1.2
-	github.com/aws/aws-lambda-go v1.19.1
-	github.com/aws/aws-sdk-go v1.34.16
-	github.com/awslabs/aws-lambda-go-api-proxy v0.8.0
+	github.com/aws/aws-lambda-go v1.20.0
+	github.com/aws/aws-sdk-go v1.35.33
+	github.com/awslabs/aws-lambda-go-api-proxy v0.8.1
 	github.com/dchest/stemmer v0.0.0-20161207102402-66719a20c4b5
 	github.com/dghubble/oauth1 v0.6.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
+	github.com/google/go-cmp v0.5.3 // indirect
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/handlers v1.5.1
 	github.com/gorilla/mux v1.8.0
@@ -32,10 +34,11 @@ require (
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b // indirect
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
-	golang.org/x/tools v0.0.0-20201007032633-0806396f153e // indirect
+	golang.org/x/tools v0.0.0-20201121010211-780cb80bd7fb // indirect
 	gonum.org/v1/plot v0.8.0
-	google.golang.org/api v0.31.0
-	google.golang.org/genproto v0.0.0-20200901141002-b3bf27a9dbd1 // indirect
-	googlemaps.github.io/maps v1.2.2
+	google.golang.org/api v0.35.0
+	google.golang.org/appengine v1.6.7 // indirect
+	google.golang.org/genproto v0.0.0-20201119123407-9b1e624d6bc4 // indirect
+	googlemaps.github.io/maps v1.3.1
 	honnef.co/go/tools v0.0.1-2020.1.5 // indirect
 )
