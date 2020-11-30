@@ -637,7 +637,7 @@ func (b *Backend) ScheduleEventIfNotExist(ctx context.Context, event Event, sche
 //
 // The payload of the passed event object is ignored.
 //
-// The function true if an event was unscheduled, otherwise it returns false.
+// The function returns true if an event was unscheduled, otherwise it returns false.
 func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	job := "event"
 	var serial int
@@ -655,8 +655,8 @@ func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	return err == nil, err
 }
 
-// retrieveEventSchedule exists for unit testing purposes only
-func (b *Backend) retrieveEventSchedule(ctx context.Context, event Event) (*time.Time, error) {
+// RetrieveEventSchedule exists for unit testing purposes only
+func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time.Time, error) {
 	var schedule *time.Time
 	query := `SELECT scheduled_at FROM ` + b.db.Schema + `."_job_"
  WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0  

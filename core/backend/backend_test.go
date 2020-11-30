@@ -1480,7 +1480,7 @@ func TestScheduleEvents(t *testing.T) {
 	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
 	assert.Nil(t, err, "scheduled handled event if not exist")
 
-	retrievedSchedule, err := backend.retrieveEventSchedule(ctx, event)
+	retrievedSchedule, err := backend.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
@@ -1489,14 +1489,14 @@ func TestScheduleEvents(t *testing.T) {
 	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
 	assert.Nil(t, err, "scheduled handled event if not exist")
 
-	retrievedSchedule, err = backend.retrieveEventSchedule(ctx, event)
+	retrievedSchedule, err = backend.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
 	err = backend.ScheduleEvent(ctx, event, newSchedule)
 	assert.Nil(t, err, "scheduled handled event")
 
-	retrievedSchedule, err = backend.retrieveEventSchedule(ctx, event)
+	retrievedSchedule, err = backend.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, newSchedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
