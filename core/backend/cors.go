@@ -1,8 +1,9 @@
 package backend
 
 import (
-	"log"
 	"net/http"
+
+	"github.com/relabs-tech/backends/core/logger"
 )
 
 func (b *Backend) handleCORS() {
@@ -15,7 +16,7 @@ func (b *Backend) handleCORS() {
 			w.Header().Set("Access-Control-Expose-Headers", "*")
 
 			if r.Method == http.MethodOptions {
-				log.Println("called route for", r.URL, r.Method, " (handled by CORS middleware)")
+				logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method, " (handled by CORS middleware)")
 				w.WriteHeader(http.StatusOK)
 				return
 			}
