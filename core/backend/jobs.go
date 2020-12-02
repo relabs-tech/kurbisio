@@ -375,14 +375,16 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 					debug.PrintStack()
 				}
 			}()
+			errorMessage := ""
 			timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
-				logger.Default().Error("This is taking a long time...")
+				logger.Default().Errorf("This (%s) is taking a long time...", errorMessage)
 			})
 			switch job.Job {
 			case "notification":
 				notification, ctx := job.notification()
 				rlog = logger.FromContext(ctx)
 				key = notificationJobKey(notification.Resource, notification.Operation)
+				errorMessage = fmt.Sprintf("Notification %s %v", key, notification.ResourceID)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(ctx, notification)
 				} else {
@@ -392,6 +394,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 				event, ctx := job.event()
 				rlog = logger.FromContext(ctx)
 				key = eventJobKey(event.Type)
+				errorMessage = fmt.Sprintf("Event %v %v %v", event.Type, event.Resource, event.ResourceID)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.event(ctx, event)
 				} else {
