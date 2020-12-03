@@ -67,21 +67,21 @@ jobs:
         run: |
           echo "task='deployment to prod'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
-          echo "DEPLOY_URL=https://api.loyalty2you.com" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://api.twaiv.app" >> $GITHUB_ENV
 
       - name: prep deploy to staging
         if: github.ref == 'refs/heads/master'
         run: |
           echo "task='deployment to staging'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
-          echo "DEPLOY_URL=https://staging.api.loyalty2you.com" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://staging.api.twaiv.app" >> $GITHUB_ENV
 
       - name: prep deploy to test
         if: startsWith(github.ref, 'refs/heads/test_deploy')
         run: |
           echo "task='deployment to test'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=test" >> $GITHUB_ENV
-          echo "DEPLOY_URL=https://test.api.loyalty2you.com" >> $GITHUB_ENV
+          echo "DEPLOY_URL=https://test.api.twaiv.app" >> $GITHUB_ENV
 
       - name: deploy
         run: |
@@ -94,7 +94,7 @@ jobs:
           FITNESS_DIR=$GITHUB_WORKSPACE/services/fitness
           cd $FITNESS_DIR/deployment_config
           ./sam-deploy-lambdas.sh \
-            --template fitness-pub.yaml \
+            --template fitness-pub-twaiv.yaml \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
             --env ${DEPLOY_ENV}
