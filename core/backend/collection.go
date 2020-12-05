@@ -852,7 +852,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					jsonData, _ = json.Marshal(bodyJSON)
 				}
-				data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)
+				primaryID, _ := uuid.Parse(params[owner+"_id"])
+				data, err := b.intercept(r.Context(), resource, core.OperationRead, primaryID, selectors, nil, jsonData)
 				if err != nil {
 					nillog.WithError(err).Errorf("Error 4751: interceptor")
 					http.Error(w, "Error 4751", http.StatusInternalServerError)
