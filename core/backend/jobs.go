@@ -368,6 +368,10 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 		}
 
 		// call the registered handler in a panic/recover envelope
+		errorMessage := ""
+		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
+			logger.Default().Errorf("This (%s) is taking a long time...", errorMessage)
+		})
 		err = func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -375,10 +379,6 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 					debug.PrintStack()
 				}
 			}()
-			errorMessage := ""
-			timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
-				logger.Default().Errorf("This (%s) is taking a long time...", errorMessage)
-			})
 			switch job.Job {
 			case "notification":
 				notification, ctx := job.notification()
@@ -403,9 +403,9 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 			default:
 				err = fmt.Errorf("unknown job type %s", job.Job)
 			}
-			timeout.Stop()
 			return
 		}()
+		timeout.Stop()
 
 		if err != nil {
 			rlog.WithError(err).Error("error processing " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
