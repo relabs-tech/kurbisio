@@ -369,8 +369,9 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 
 		// call the registered handler in a panic/recover envelope
 		errorMessage := ""
+		jobSerial := job.Serial
 		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
-			rlog.Errorf("This (%s) is taking a long time...", errorMessage)
+			rlog.Errorf("This (%s) is taking a long time...  #%d", errorMessage, jobSerial)
 		})
 		err = func() (err error) {
 			defer func() {
