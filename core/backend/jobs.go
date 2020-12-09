@@ -370,7 +370,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 		// call the registered handler in a panic/recover envelope
 		errorMessage := ""
 		timeout := time.AfterFunc(time.Duration(20*time.Second), func() {
-			logger.Default().Errorf("This (%s) is taking a long time...", errorMessage)
+			rlog.Errorf("This (%s) is taking a long time...", errorMessage)
 		})
 		err = func() (err error) {
 			defer func() {
