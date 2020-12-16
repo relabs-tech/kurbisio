@@ -114,7 +114,7 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 	b.jobsInsertIfNotExistQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
 	VALUES($1,$2,$3,$4,$5,$6,$7,4,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
-	DO UPDATE SET attempts_left=4 RETURNING serial;`
+	DO NOTHING RETURNING serial;`
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
@@ -630,6 +630,9 @@ func (b *Backend) ScheduleEvent(ctx context.Context, event Event, scheduleAt tim
 // If an event of the same kind(event plus key) to the very same resource (resource + resourceID) has already been scheduled,
 // then the new event will be ignored completely.
 //
+// Note that this is always case in an event handler reacting to the event, because the event exists until the handler terminated
+// successfully.
+//
 // Use RaiseEvent if you want to raise the event immediately. Use CancelEvent() to cancel a scheduled event.
 func (b *Backend) ScheduleEventIfNotExist(ctx context.Context, event Event, scheduleAt time.Time) error {
 	_, err := b.raiseEventWithResourceInternal(ctx, "event", event, &scheduleAt, true)
@@ -721,6 +724,10 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 		contextData,
 		scheduleAtUTC,
 	).Scan(&serial)
+
+	if err == csql.ErrNoRows {
+		return http.StatusConflict, nil
+	}
 
 	if err != nil {
 		return http.StatusInternalServerError, err
