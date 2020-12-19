@@ -376,8 +376,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 		err = func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					err = fmt.Errorf("recovered from panic: %s", r)
-					debug.PrintStack()
+					err = fmt.Errorf("recovered from panic: %s. stacktrace:\n%s", r, string(debug.Stack()))
 				}
 			}()
 			switch job.Job {
