@@ -14,6 +14,7 @@ require (
 	github.com/dchest/stemmer v0.0.0-20161207102402-66719a20c4b5
 	github.com/dghubble/oauth1 v0.6.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
+	github.com/fatih/color v1.10.0 // indirect
 	github.com/google/go-cmp v0.5.3 // indirect
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/handlers v1.5.1
@@ -25,6 +26,7 @@ require (
 	github.com/onsi/ginkgo v1.14.1 // indirect
 	github.com/onsi/gomega v1.10.2 // indirect
 	github.com/pkg/errors v0.9.1
+	github.com/rakyll/gotest v0.0.5 // indirect
 	github.com/sirupsen/logrus v1.6.0
 	github.com/snabb/isoweek v1.0.0
 	github.com/stretchr/testify v1.6.1
@@ -32,6 +34,7 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.uber.org/zap v1.16.0 // indirect
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/sys v0.0.0-20201221093633-bc327ba9c2f0 // indirect
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e // indirect
 	golang.org/x/tools v0.0.0-20201121010211-780cb80bd7fb // indirect
 	gonum.org/v1/plot v0.8.0
