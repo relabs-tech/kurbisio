@@ -844,6 +844,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if singleton {
 				var jsonData []byte
 				// apply defaults if applicable
+
+				// TODO: validate that the parent does exist!
+
 				if rc.Default != nil {
 					var bodyJSON map[string]interface{}
 					json.Unmarshal(rc.Default, &bodyJSON)
