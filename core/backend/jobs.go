@@ -546,14 +546,15 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; !maxedOut {
 			// we have time for more jobs, check if there are any in the database
 			txj, err := getJob()
-			if err != nil {
-				break
+			if err == nil {
+				jobCount++
+				jobs <- txj
 			}
-			jobCount++
-			jobs <- txj
 		}
 	}
 
+	close(ready)
+	close(jobs)
 	maxedOutString := ""
 	if maxedOut {
 		maxedOutString = " (maxed out)"
