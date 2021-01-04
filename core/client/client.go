@@ -362,9 +362,10 @@ func (r Item) Patch(body interface{}, result interface{}) (int, error) {
 
 // Page is a requester for one page in a collection
 type Page struct {
-	r         Collection
-	page      int
-	pageCount int
+	r          Collection
+	page       int
+	pageCount  int
+	totalCount int
 }
 
 // FirstPage returns a requester for the first page of a collection
@@ -376,9 +377,14 @@ func (r Collection) FirstPage() Page {
 	return Page{page: 1, r: r}
 }
 
-// HasData returns true if the page has data
+// HasData returns true if the page has data (by definition true for the first page)
 func (p Page) HasData() bool {
 	return p.page == 1 || p.page <= p.pageCount
+}
+
+// TotalCount returns the total number of elements (only available after you have called Get on the page)
+func (p Page) TotalCount() int {
+	return p.totalCount
 }
 
 // Get gets one page of the collection
@@ -391,6 +397,10 @@ func (p *Page) Get(result interface{}) (int, error) {
 	pageCount, err := strconv.Atoi(header.Get("Pagination-Page-Count"))
 	if err == nil {
 		p.pageCount = pageCount
+	}
+	totalCount, err := strconv.Atoi(header.Get("Pagination-Total-Count"))
+	if err == nil {
+		p.totalCount = totalCount
 	}
 	found := false
 	for i := 0; i < len(p.r.parameters) && !found; i++ {

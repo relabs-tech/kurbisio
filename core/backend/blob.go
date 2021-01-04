@@ -356,7 +356,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
 		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
 		if !from.IsZero() {
-			w.Header().Set("Pagination-Until", from.Format(time.RFC3339))
+			w.Header().Set("Pagination-Until", from.Format(time.RFC3339Nano))
 		}
 		w.Write(jsonData)
 
