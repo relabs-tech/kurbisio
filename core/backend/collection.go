@@ -1465,9 +1465,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502") {
 				status = http.StatusUnprocessableEntity
 				msg = "constraint violation"
+				rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
+			} else {
+				rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
 			}
 			tx.Rollback()
-			rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
 			http.Error(w, msg, status)
 			return
 		}
