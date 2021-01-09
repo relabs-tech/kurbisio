@@ -1,5 +1,13 @@
 package utils
 
+import "time"
+
+// BeginningOfDay return a timestamp at the beginnig of the day in the timestamp's timezone
+func BeginningOfDay(t time.Time) time.Time {
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
+}
+
 // SafeInt64 returns the value from ptr or 0 if the pointer is nil
 func SafeInt64(ptr *int64) int64 {
 	if ptr != nil {
