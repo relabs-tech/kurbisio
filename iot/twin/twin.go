@@ -3,11 +3,12 @@ package twin
 import (
 	"database/sql"
 	"encoding/json"
-	"github.com/relabs-tech/backends/core/logger"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/relabs-tech/backends/core/logger"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -77,6 +78,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
@@ -120,6 +122,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
@@ -155,6 +158,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
@@ -190,6 +194,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
@@ -225,6 +230,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 	router.HandleFunc("/devices/{device_id}/twin/{key}/request", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
@@ -279,6 +285,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 	router.HandleFunc("/devices/{device_id}/twin/{key}/report", func(w http.ResponseWriter, r *http.Request) {
 		if s.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
+			// TODO: Potentially give access to admin viewer role
 			if !auth.HasRole("admin") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return

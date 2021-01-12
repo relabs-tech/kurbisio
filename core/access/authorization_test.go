@@ -26,6 +26,29 @@ func TestAuthorization_Admin(t *testing.T) {
 	}
 }
 
+func TestAuthorization_AdminViewer(t *testing.T) {
+	auth := &Authorization{
+		Roles: []string{"admin viewer"},
+	}
+	resources := []string{"fleet", "user"}
+
+	if auth.IsAuthorized(resources, core.OperationCreate, nil, nil) {
+		t.Fatal("admin viewer authorized to create")
+	}
+	if auth.IsAuthorized(resources, core.OperationDelete, nil, nil) {
+		t.Fatal("admin viewer authorized to create")
+	}
+	if auth.IsAuthorized(resources, core.OperationUpdate, nil, nil) {
+		t.Fatal("admin viewer authorized to create")
+	}
+	if !auth.IsAuthorized(resources, core.OperationList, nil, nil) {
+		t.Fatal("admin viewer not authorized to create")
+	}
+	if !auth.IsAuthorized(resources, core.OperationRead, nil, nil) {
+		t.Fatal("admin viewer not authorized to create")
+	}
+}
+
 func TestAuthorization_Public(t *testing.T) {
 
 	auth := &Authorization{

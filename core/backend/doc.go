@@ -320,6 +320,8 @@ authorizes specific roles to execute specific operations. The different operatio
 "delete", "list" and "clear". The "list"-operation is the retrieval of the entire collection, "clear" deletes the entire
 collection.
 
+"admin viewer" also has right to access all resources in read only mode. Only read and list operatinos are permitted.
+
 For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
 give each user permission to create, read and delete their own pictures, but only their own pictures. You
 delare a role for a user  - in this case "userrole" - and specify the resource like this:
@@ -362,6 +364,7 @@ You can achieve this by issueing another permit for the "public" role:
 			]
 
 There are three special roles in the system: The "admin" role who has permission to do everything.
+The "admin viewer" role has permission to read and list everything, but not modify or create.
 The "public" role, which is assumed by every non-authorized request. And finally the "everybody" role,
 which is a placeholder for any other role in the system but "public".
 

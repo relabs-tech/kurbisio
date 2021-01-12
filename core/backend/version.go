@@ -25,7 +25,7 @@ func (b *Backend) handleVersion(router *mux.Router) {
 func (b *Backend) versionWithAuth(w http.ResponseWriter, r *http.Request) {
 	if b.authorizationEnabled {
 		auth := access.AuthorizationFromContext(r.Context())
-		if !auth.HasRole("admin") {
+		if !auth.HasRole("admin") && !auth.HasRole("admin viewer") {
 			http.Error(w, "not authorized", http.StatusUnauthorized)
 			return
 		}
