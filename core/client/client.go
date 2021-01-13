@@ -705,8 +705,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 	}
 	status := res.StatusCode
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v, %v or %v. Error: %s",
-			status, http.StatusOK, http.StatusCreated, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -752,8 +751,7 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 	status := res.StatusCode
 
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v, %v or %v. Error: %s",
-			status, http.StatusOK, http.StatusCreated, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		err = json.Unmarshal(resBody, result)
@@ -799,8 +797,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 	}
 	status := res.StatusCode
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v, %v or %v. Error: %s",
-			status, http.StatusOK, http.StatusCreated, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -841,8 +838,7 @@ func (c Client) RawDelete(path string) (int, error) {
 	}
 	status := res.StatusCode
 	if status != http.StatusNoContent {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusNoContent, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	return status, nil
 }
