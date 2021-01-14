@@ -480,6 +480,25 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// check singleton for os, should exist but have no content
+	var sCheck S
+	status, err := testService.client.RawGet("/os/"+o.OID.String()+"/s", &sCheck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusNoContent {
+		t.Fatalf("expected no content, got %d", status)
+	}
+
+	// check singleton for a non-existing o, should be not found
+	status, err = testService.client.RawGet("/os/ad311bca-df3c-4011-a3c6-090faf944a18/s", &sCheck)
+	if status != http.StatusNotFound {
+		t.Fatalf("expected not found, got %d", status)
+	}
+	if err == nil {
+		t.Fatal("expected error, but did not get any")
+	}
+
 	// create single s with initial name
 	s := S{
 		Name: "initial",
@@ -500,7 +519,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 	sUpdateResult := S{}
 
-	status, err := testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,13 +611,12 @@ func TestSingletonOS(t *testing.T) {
 
 	// cross check that the cascade worked: deleting o has also deleted s
 	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
-	if status != http.StatusNoContent {
-		t.Fatal("cascade delete failed")
+	if status != http.StatusNotFound {
+		t.Fatalf("cascade delete failed")
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-
 }
 
 func TestTimestampAndNullID(t *testing.T) {

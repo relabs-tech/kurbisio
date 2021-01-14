@@ -47,12 +47,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	this := resources[len(resources)-1]
 	primary := this
 	owner := ""
+	ownerResource := ""
 	if singleton {
 		if len(resource) < 2 {
 			nillog.Errorf("singleton resource %s lacks owner", this)
 			panic("invalid configuration")
 		}
 		owner = resources[len(resources)-2]
+		ownerResource = strings.Join(resources[:len(resources)-1], "/")
 		primary = owner
 		ownerIsSingleton, ok := b.collectionsAndSingletons[strings.TrimSuffix(rc.Resource, "/"+this)]
 		if !ok {
@@ -278,6 +280,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	updatePropertyQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	updatePropertyQuery += " %s = $" + strconv.Itoa(propertiesIndex+1)
 	updatePropertyQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + primary + "_id;"
+
+	var singletonParentExistsQuery string
+	if singleton {
+		singletonParentExistsQuery = fmt.Sprintf("SELECT %s_id FROM %s.\"%s\" WHERE %s_id = $1;", owner, schema, ownerResource, owner)
+	}
 
 	createScanValuesAndObject := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
 		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
@@ -844,8 +851,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			if singleton {
 				var jsonData []byte
 				// apply defaults if applicable
+				primaryID, _ := uuid.Parse(params[owner+"_id"])
 
-				// TODO: validate that the parent does exist!
+				// validate that the parent exists, and if not return not found
+				var parentID uuid.UUID
+				err = b.db.QueryRow(singletonParentExistsQuery, &primaryID).Scan(&parentID)
+				if err == csql.ErrNoRows {
+					http.Error(w, "no such "+this, http.StatusNotFound)
+					return
+				} else if err != nil {
+					nillog.WithError(err).Errorf("Error 4788: cannot check parent of singleton")
+					http.Error(w, "Error 4788", http.StatusInternalServerError)
+					return
+				}
 
 				if rc.Default != nil {
 					var bodyJSON map[string]interface{}
@@ -855,7 +873,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					jsonData, _ = json.Marshal(bodyJSON)
 				}
-				primaryID, _ := uuid.Parse(params[owner+"_id"])
 				data, err := b.intercept(r.Context(), resource, core.OperationRead, primaryID, selectors, nil, jsonData)
 				if err != nil {
 					nillog.WithError(err).Errorf("Error 4751: interceptor")
