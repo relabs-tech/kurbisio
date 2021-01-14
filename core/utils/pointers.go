@@ -45,6 +45,30 @@ func StringPtr(str string) *string {
 	return &str
 }
 
+// StringPtrOrEmpty returns the passed pointer or a pointer to the empty string if str is nil
+func StringPtrOrEmpty(str *string) *string {
+	if str == nil {
+		return StringPtr("")
+	}
+	return str
+}
+
+// TimePtrOrEmpty returns the passed pointer or a pointer to time.Time{} if t is nil
+func TimePtrOrEmpty(t *time.Time) *time.Time {
+	if t == nil {
+		return &time.Time{}
+	}
+	return t
+}
+
+// SafeTime returns the value from t or time.Time{} if the pointer is nil
+func SafeTime(t *time.Time) time.Time {
+	if t != nil {
+		return *t
+	}
+	return time.Time{}
+}
+
 // IntPtr returns a pointer to the int passed as parameter
 func IntPtr(d int) *int {
 	return &d
