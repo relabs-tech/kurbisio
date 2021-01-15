@@ -220,6 +220,12 @@ func (r Collection) SingletonPath() string {
 // Create always creates a new item.
 //
 // The operation corresponds to a POST request.
+//
+// Expects http.StatusCreated as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (r Collection) Create(body interface{}, result interface{}) (int, error) {
 	return r.client.RawPost(r.CollectionPath(), body, result)
 }
@@ -227,6 +233,10 @@ func (r Collection) Create(body interface{}, result interface{}) (int, error) {
 // CreateBlob always creates a new blob item.
 //
 // The operation corresponds to a POST request.
+//
+// Expects http.StatusCreated as response, otherwise it will
+// flag an error. Returns the actual http status code.
+// result can be nil.
 func (r Collection) CreateBlob(blob []byte, meta interface{}, result interface{}) (int, error) {
 	var err error
 	j, ok := meta.([]byte)
@@ -247,6 +257,14 @@ func (r Collection) CreateBlob(blob []byte, meta interface{}, result interface{}
 // body itself or as selectors.
 //
 // The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+//
+// In case of http.StatusConflict, the conflicting version of the object has been returned as result.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (r Collection) Upsert(body interface{}, result interface{}) (int, error) {
 	return r.client.RawPut(r.CollectionPath(), body, result)
 }
@@ -256,6 +274,10 @@ func (r Collection) Upsert(body interface{}, result interface{}) (int, error) {
 // meta body itself or as selectors.
 //
 // The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+// result can be nil.
 func (r Collection) UpsertBlob(blob []byte, meta interface{}, result interface{}) (int, error) {
 	var err error
 	j, ok := meta.([]byte)
@@ -278,6 +300,9 @@ func (r Collection) UpsertBlob(blob []byte, meta interface{}, result interface{}
 // and delete them one by one.
 //
 // The operation corresponds to a DELETE request.
+//
+// Expects http.StatusNoContent as response, otherwise it will
+// flag an error.
 func (r Collection) Clear() (int, error) {
 	return r.client.RawDelete(r.CollectionPath())
 }
@@ -288,6 +313,11 @@ func (r Collection) Clear() (int, error) {
 //
 //
 // The operation corresponds to a GET request.
+//
+// Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// result can be map[string]interface{} or a raw *[]byte.
 func (r Collection) List(result interface{}) (int, error) {
 	return r.client.RawGet(r.CollectionPath(), result)
 }
@@ -328,6 +358,11 @@ func (r Item) Subcollection(resource string) Collection {
 // Read reads an item from a collection
 //
 // The operation corresponds to a GET request.
+//
+// Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// result can also be map[string]interface{} or a raw *[]byte.
 func (r Item) Read(result interface{}) (int, error) {
 	return r.col.client.RawGet(r.Path(), result)
 }
@@ -335,6 +370,11 @@ func (r Item) Read(result interface{}) (int, error) {
 // Delete deletes an item from a collection
 //
 // The operation corresponds to a DELETE request.
+//
+// Expects http.StatusNoContent as response, otherwise it will
+// flag an error.
+//
+// Returns the actual http status code.
 func (r Item) Delete() (int, error) {
 	return r.col.client.RawDelete(r.Path())
 }
@@ -344,6 +384,14 @@ func (r Item) Delete() (int, error) {
 // body itself or as selectors.
 //
 // The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+//
+// In case of http.StatusConflict, the conflicting version of the object has been returned as result.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (r Item) Upsert(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPut(r.Path(), body, result)
 }
@@ -351,11 +399,22 @@ func (r Item) Upsert(body interface{}, result interface{}) (int, error) {
 // UpdateProperty updates a single static property in the fastest possible
 // way. Note: this method does trigger an update resource notificatino, but
 // not with the entire object, only with the updated property.
+//
+// The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
 func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
 	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
 }
 
 // Patch updates selected fields of an item
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (r Item) Patch(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPatch(r.Path(), body, result)
 }
@@ -429,7 +488,8 @@ func (p Page) Next() Page {
 //
 // The path can be extend with query strings.
 //
-// result can be map[string]interface{} or a raw *[]byte
+// result can be map[string]interface{} or a raw *[]byte.
+// result can be nil.
 func (c Client) RawGet(path string, result interface{}) (int, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 
@@ -477,7 +537,8 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 //
 // The path can be extend with query strings.
 //
-// result can be map[string]interface{} or a raw *[]byte
+// result can be map[string]interface{} or a raw *[]byte.
+// result can be nil.
 func (c *Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 	for key, value := range header {
@@ -578,7 +639,8 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 //
 // The path can be extend with query strings.
 //
-// body can also be a []byte, result can also be raw *[]byte
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
 
 	var err error
@@ -667,12 +729,15 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 	return status, err
 }
 
-// RawPut puts a resource to path. Expects http.StatusOK, http.StatusCreated, http.StatusNoContent or http.StatusConflict as valid responses,
+// RawPut puts a resource to path. Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
 // otherwise it will flag an error. Returns the actual http status code.
+//
+// In case of http.StatusConflict, the conflicting version of the object has been returned as result.
 //
 // The path can be extend with query strings.
 //
-// body can also be a []byte, result can also be raw *[]byte
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (c Client) RawPut(path string, body interface{}, result interface{}) (int, error) {
 
 	var err error
@@ -704,7 +769,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		resBody, _ = ioutil.ReadAll(res.Body)
 	}
 	status := res.StatusCode
-	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
+	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
 		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
@@ -717,12 +782,13 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 	return status, err
 }
 
-// RawPutBlob puts a binary resource to path. Expects http.StatusOK, http.StatusCreated,  or http.StatusNoContent as valid responses,
+// RawPutBlob puts a binary resource to path. Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
 // otherwise it will flag an error.
 //
 // The path can be extend with query strings.
 //
 // Returns the actual http status code.
+// result can be nil.
 func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
@@ -764,7 +830,8 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 //
 // The path can be extend with query strings.
 //
-// body can also be a []byte, result can also be raw *[]byte
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
 func (c Client) RawPatch(path string, body interface{}, result interface{}) (int, error) {
 
 	var err error
