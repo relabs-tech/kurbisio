@@ -69,6 +69,11 @@ func SafeTime(t *time.Time) time.Time {
 	return time.Time{}
 }
 
+// TimePtr returns a pointer to a t
+func TimePtr(t time.Time) *time.Time {
+	return &t
+}
+
 // IntPtr returns a pointer to the int passed as parameter
 func IntPtr(d int) *int {
 	return &d
