@@ -1707,7 +1707,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// validate core identifiers
 		// Rationale: we have authorized the resource based on the parameters
-		// in the URL, so we have to ensure that that the object to update
+		// in the URL, so we have to ensure that the object to update
 		// is that very object, and that the update does not try to
 		// change its identity
 		for i = 0; i < propertiesIndex; i++ {
