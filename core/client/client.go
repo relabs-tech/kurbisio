@@ -769,8 +769,10 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		resBody, _ = ioutil.ReadAll(res.Body)
 	}
 	status := res.StatusCode
-	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
+
+	// we do not return just yet in case of http.StatusConflict to be able to return the conflicting object
+	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
+		return status, fmt.Errorf("put got status=%d body=%s", status, strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -778,6 +780,9 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		} else {
 			err = json.Unmarshal(resBody, result)
 		}
+	}
+	if status == http.StatusConflict {
+		return status, fmt.Errorf("conflict while writing to path:'%s', wanted to write %+v, conflict: %+v", path, body, result)
 	}
 	return status, err
 }
