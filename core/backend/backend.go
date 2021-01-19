@@ -180,21 +180,23 @@ func New(bb *Builder) *Backend {
 			logger.Default().Fatalf("Cannot obtain schema update advisory lock %v", err)
 		}
 		logger.Default().Infoln("new configuration - will update database schema")
+	} else {
+		logger.Default().Debugln("use previous schema version")
+	}
 
-		logger.AddRequestID(b.router)
-		b.handleCORS()
-		access.HandleAuthorizationRoute(b.router)
-		b.handleResourceRoutes()
-		b.handleStatistics(b.router)
-		b.handleVersion(b.router)
-		b.handleJobs(b.router)
+	logger.AddRequestID(b.router)
+	b.handleCORS()
+	access.HandleAuthorizationRoute(b.router)
+	b.handleResourceRoutes()
+	b.handleStatistics(b.router)
+	b.handleVersion(b.router)
+	b.handleJobs(b.router)
+	if b.updateSchema {
 		registry.Write("schema_version", newVersion)
 		_, err = b.db.Exec(fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
 		if err != nil {
 			logger.Default().Fatalf("Cannot release schema update advisory lock %v", err)
 		}
-	} else {
-		logger.Default().Debugln("use previous schema version")
 	}
 
 	return b
