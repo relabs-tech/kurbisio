@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"testing"
 
@@ -47,13 +48,13 @@ func TestCient(t *testing.T) {
 	}
 
 	collection = client.Collection("parent/child").WithFilter("email", "maybe@yes.no").WithParameter("something", "else")
-	if p := collection.CollectionPath(); p != "/parents/all/children?filter=email=maybe@yes.no&something=else" {
+	if p := collection.CollectionPath(); p != "/parents/all/children?filter="+url.QueryEscape("email=maybe@yes.no")+"&something=else" {
 		t.Fatal("unexpected collection path:", p)
 	}
 
 	// filter really is a only a shortcut for WithParameter
 	collection = client.Collection("parent/child").WithParameter("filter", "email=maybe@yes.no").WithParameter("something", "else")
-	if p := collection.CollectionPath(); p != "/parents/all/children?filter=email=maybe@yes.no&something=else" {
+	if p := collection.CollectionPath(); p != "/parents/all/children?filter="+url.QueryEscape("email=maybe@yes.no")+"&something=else" {
 		t.Fatal("unexpected collection path:", p)
 	}
 
@@ -79,7 +80,7 @@ func TestUpsert(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_core_unit_test_")
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -93,9 +94,10 @@ func TestUpsert(t *testing.T) {
 	`
 	router := mux.NewRouter()
 	testService.backend = backend.New(&backend.Builder{
-		Config: configurationJSON,
-		DB:     db,
-		Router: router,
+		Config:       configurationJSON,
+		DB:           db,
+		Router:       router,
+		UpdateSchema: true,
 	})
 	cl := client.NewWithRouter(router)
 

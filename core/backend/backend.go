@@ -81,6 +81,9 @@ type Builder struct {
 
 	// The loglevel to be used by the logger. Default is "info""
 	LogLevel string
+
+	// if true, always update the schema. Otherwise only update when the schema json has changed.
+	UpdateSchema bool
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -129,6 +132,7 @@ func New(bb *Builder) *Backend {
 		interceptors:             make(map[string]requestHandler),
 		collectionsAndSingletons: make(map[string]bool),
 		pipelineConcurrency:      pipelineConcurrency,
+		updateSchema:             bb.UpdateSchema,
 	}
 
 	logLevel := logrus.InfoLevel
@@ -164,8 +168,10 @@ func New(bb *Builder) *Backend {
 	var currentVersion string
 	newVersion := fmt.Sprintf("%d/%x", InternalDatabaseSchemaVersion, sha1.Sum([]byte(bb.Config)))
 
-	registry.Read("schema_version", &currentVersion)
-	b.updateSchema = newVersion != currentVersion
+	if !b.updateSchema {
+		registry.Read("schema_version", &currentVersion)
+		b.updateSchema = newVersion != currentVersion
+	}
 
 	advisoryLock := len(b.db.Schema) // lock number is the schema length, a bit primity as a check sum but does the job
 	if b.updateSchema {
@@ -173,37 +179,22 @@ func New(bb *Builder) *Backend {
 		if err != nil {
 			logger.Default().Fatalf("Cannot obtain schema update advisory lock %v", err)
 		}
-		// re-read schema version, somebody else might have updated it already
-		registry.Read("schema_version", &currentVersion)
-		b.updateSchema = newVersion != currentVersion
-
-		if !b.updateSchema {
-			_, err := b.db.Exec(fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
-			if err != nil {
-				logger.Default().Fatalf("Cannot release schema update advisory lock %v", err)
-			}
-		}
-	}
-
-	if b.updateSchema {
 		logger.Default().Infoln("new configuration - will update database schema")
-	} else {
-		logger.Default().Debugln("use previous schema version")
-	}
 
-	logger.AddRequestID(b.router)
-	b.handleCORS()
-	access.HandleAuthorizationRoute(b.router)
-	b.handleResourceRoutes()
-	b.handleStatistics(b.router)
-	b.handleVersion(b.router)
-	b.handleJobs(b.router)
-	if b.updateSchema {
+		logger.AddRequestID(b.router)
+		b.handleCORS()
+		access.HandleAuthorizationRoute(b.router)
+		b.handleResourceRoutes()
+		b.handleStatistics(b.router)
+		b.handleVersion(b.router)
+		b.handleJobs(b.router)
 		registry.Write("schema_version", newVersion)
-		_, err := b.db.Exec(fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
+		_, err = b.db.Exec(fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
 		if err != nil {
 			logger.Default().Fatalf("Cannot release schema update advisory lock %v", err)
 		}
+	} else {
+		logger.Default().Debugln("use previous schema version")
 	}
 
 	return b

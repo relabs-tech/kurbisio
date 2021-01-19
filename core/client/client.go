@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -156,7 +157,8 @@ func (r Collection) WithParent(parentID uuid.UUID) Collection {
 // WithParameter returns a new collection client with a URL parameter added.
 func (r Collection) WithParameter(key string, value string) Collection {
 
-	parameter := key + "=" + value
+	parameter := url.QueryEscape(key) + "=" + url.QueryEscape(value)
+
 	return Collection{
 		client:    r.client,
 		resources: r.resources,
@@ -170,7 +172,8 @@ func (r Collection) WithParameter(key string, value string) Collection {
 func (r Collection) WithParameters(keyValues map[string]string) Collection {
 	var parameters []string
 	for key, value := range keyValues {
-		parameters = append(parameters, key+"="+value)
+		parameter := url.QueryEscape(key) + "=" + url.QueryEscape(value)
+		parameters = append(parameters, parameter)
 	}
 	return Collection{
 		client:    r.client,

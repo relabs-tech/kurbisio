@@ -170,7 +170,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_core_unit_test_")
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -181,6 +181,7 @@ func TestMain(m *testing.M) {
 		Router:          router,
 		JSONSchemas:     []string{schemaWorkoutString},
 		JSONSchemasRefs: []string{schemaRefString},
+		UpdateSchema:    true,
 	})
 	testService.client = client.NewWithRouter(router)
 
