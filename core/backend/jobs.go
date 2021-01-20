@@ -162,7 +162,7 @@ WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5
 		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.HasRole("admin") {
+			if !auth.HasRole("admin") && !auth.HasRole("admin viewer") {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
