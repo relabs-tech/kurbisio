@@ -1136,7 +1136,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4730", http.StatusInternalServerError)
 			return
 		}
-
+		mergeProperties(object)
 		jsonData, _ := json.Marshal(object)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
 		if err != nil {
