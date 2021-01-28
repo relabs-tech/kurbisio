@@ -158,7 +158,6 @@ func TestEtagBlobRegenerated(t *testing.T) {
 	if _, err = testService.client.RawPutBlob("/blobs/"+b.BlobID.String(), header, blobData, &b); err != nil {
 		t.Fatal(err)
 	}
-
 	_, h2, err := testService.client.RawGetBlobWithHeader(
 		"/blobs/"+b.BlobID.String(), map[string]string{}, &[]byte{})
 	if err != nil {

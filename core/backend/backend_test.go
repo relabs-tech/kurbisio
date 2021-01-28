@@ -37,13 +37,45 @@ var configurationJSON string = `{
 		"searchable_properties": ["searchable_prop", "other_searchable_prop"]
 	  },
 	  {
-		"resource": "b"
+		"resource": "b",
+		"permits": [
+			{
+				"role": "beerole",
+				"operations": [
+					"read",
+					"delete"
+				],
+				"selectors": [
+					"b"
+				]
+			}
+		]
 	  },
 	  {
-		"resource": "b/c"
+		"resource": "b/c",
+		"permits": [
+			{
+				"role": "beerole",
+				"operations": [
+					"read",
+					"create",
+					"delete"
+				]
+			}
+		]
 	  },
 	  {
-		"resource": "b/c/d"
+		"resource": "b/c/d",
+		"permits": [
+			{
+				"role": "beerole",
+				"operations": [
+					"read",
+					"create",
+					"delete"
+				]
+			}
+		]
 	  },
 	  {
 		"resource": "o"
@@ -156,6 +188,7 @@ type TestService struct {
 	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
 	backend          *Backend
 	client           client.Client
+	clientNoAuth     client.Client
 }
 
 var testService TestService
@@ -176,14 +209,16 @@ func TestMain(m *testing.M) {
 
 	router := mux.NewRouter()
 	testService.backend = New(&Builder{
-		Config:          configurationJSON,
-		DB:              db,
-		Router:          router,
-		JSONSchemas:     []string{schemaWorkoutString},
-		JSONSchemasRefs: []string{schemaRefString},
-		UpdateSchema:    true,
+		AuthorizationEnabled: true,
+		Config:               configurationJSON,
+		DB:                   db,
+		Router:               router,
+		JSONSchemas:          []string{schemaWorkoutString},
+		JSONSchemasRefs:      []string{schemaRefString},
+		UpdateSchema:         true,
 	})
-	testService.client = client.NewWithRouter(router)
+	testService.client = client.NewWithRouter(router).WithAdminAuthorization()
+	testService.clientNoAuth = client.NewWithRouter(router)
 
 	m.Run()
 }
@@ -415,7 +450,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 		Selectors: map[string]string{"b_id": b.BID.String()},
 	}
 
-	authenticatedClient := testService.client.WithAuthorization(&auth)
+	authenticatedClient := testService.clientNoAuth.WithAuthorization(&auth)
 
 	bl := B{}
 	_, err = authenticatedClient.RawGet("/b", &bl)

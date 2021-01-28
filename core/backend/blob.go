@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -167,7 +168,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	insertUpdateQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
 	insertUpdateQuery += "VALUES(" + parameterString(len(columns)+2) + ") ON CONFLICT (" + this + "_id) DO UPDATE SET "
 	insertUpdateQuery += strings.Join(sets, ", ") + ", blob = $" + strconv.Itoa(len(columns)+1)
-	insertUpdateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " " + sqlWhereOne + " RETURNING " + this + "_id;"
+	insertUpdateQuery += ", timestamp = $" + strconv.Itoa(len(columns)+2) + " RETURNING " + this + "_id;"
 
 	maxAge := ""
 	if !rc.Mutable {
@@ -735,6 +736,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 			return
 		}
+		log.Printf("%v\n", values)
+		log.Printf(query)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusBadRequest)

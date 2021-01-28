@@ -12,19 +12,19 @@ func TestStatistics(t *testing.T) {
 	// Create resources to be sure that we have some valid statistics
 	numberOfElements := 14
 	for i := 1; i <= numberOfElements; i++ {
-		_, err := testService.client.RawPost("/as", A{ExternalID: t.Name() + strconv.Itoa(i)}, &A{})
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", A{ExternalID: t.Name() + strconv.Itoa(i)}, &A{})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err = testService.client.RawPostBlob("/blobs", map[string]string{}, []byte{0, 1, 2}, &Blob{})
+		_, err = testService.client.WithAdminAuthorization().RawPostBlob("/blobs", map[string]string{}, []byte{0, 1, 2}, &Blob{})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	var stats statisticsDetails
-	_, h, err := testService.client.RawGetWithHeader("/kurbisio/statistics", map[string]string{}, &stats)
+	_, h, err := testService.client.WithAdminAuthorization().RawGetWithHeader("/kurbisio/statistics", map[string]string{}, &stats)
 	if err != nil {
 		t.Fatal(err)
 	}

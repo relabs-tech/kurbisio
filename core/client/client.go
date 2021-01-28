@@ -542,7 +542,7 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 //
 // result can be map[string]interface{} or a raw *[]byte.
 // result can be nil.
-func (c *Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
+func (c Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
 	for key, value := range header {
 		r.Header.Add(key, value)
