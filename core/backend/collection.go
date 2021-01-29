@@ -365,11 +365,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			externalValues  []string
 			ascendingOrder  bool
 			metaonly        bool
+			err             error
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
 		for key, array := range urlQuery {
-			var err error
 			if key != "filter" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
@@ -808,6 +808,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		var err error
+
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
@@ -1149,6 +1151,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var err error
 
 		params := mux.Vars(r)
 		selectors := map[string]string{}
@@ -1280,6 +1283,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
+		var err error
 
 		rlog := logger.FromContext(r.Context())
 		calledFromUpsert := bodyJSON != nil
@@ -1546,6 +1550,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	upsertWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var err error
 
 		rlog := logger.FromContext(r.Context())
 
