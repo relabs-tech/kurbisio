@@ -35,6 +35,7 @@ type Backend struct {
 	config              backendConfiguration
 	db                  *csql.DB
 	router              *mux.Router
+	publicURL           string
 	collectionFunctions map[string]*collectionFunctions
 	relations           map[string]string
 	// Registry is the JSON object registry for this backend's schema
@@ -66,6 +67,8 @@ type Builder struct {
 	DB *csql.DB
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
+	// Optional public URL of the deployment
+	PublicURL string
 	// If AuthorizationEnabled is true, the backend requires auhorization for each route
 	// in the request context, as specified in the configuration.
 	AuthorizationEnabled bool
@@ -124,6 +127,7 @@ func New(bb *Builder) *Backend {
 		config:                   config,
 		db:                       bb.DB,
 		router:                   bb.Router,
+		publicURL:                bb.PublicURL,
 		collectionFunctions:      make(map[string]*collectionFunctions),
 		relations:                make(map[string]string),
 		Registry:                 registry.New(bb.DB),
@@ -468,4 +472,9 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 // Router returns the mux.Router for this backend
 func (b *Backend) Router() *mux.Router {
 	return b.router
+}
+
+// PublicURL returns this backend's deployments public URL
+func (b *Backend) PublicURL() string {
+	return b.publicURL
 }
