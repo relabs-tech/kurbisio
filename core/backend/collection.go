@@ -48,6 +48,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	primary := this
 	owner := ""
 	ownerResource := ""
+	ownerIndex := 1
 	if singleton {
 		if len(resource) < 2 {
 			nillog.Errorf("singleton resource %s lacks owner", this)
@@ -55,6 +56,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		owner = resources[len(resources)-2]
 		ownerResource = strings.Join(resources[:len(resources)-1], "/")
+		ownerIndex = 0
 		primary = owner
 		ownerIsSingleton, ok := b.collectionsAndSingletons[strings.TrimSuffix(rc.Resource, "/"+this)]
 		if !ok {
@@ -246,16 +248,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	readQueryMetaWithTotalLog := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s/log\" ", schema, resource)
 	sqlWhereAll := "WHERE "
-	if propertiesIndex > 1 {
-		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
+	if propertiesIndex > ownerIndex {
+		sqlWhereAll += compareIDsString(columns[ownerIndex:propertiesIndex]) + " AND "
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
-		propertiesIndex, propertiesIndex+1, propertiesIndex+2, propertiesIndex+3)
+		propertiesIndex-ownerIndex+1, propertiesIndex-ownerIndex+1+1, propertiesIndex-ownerIndex+1+2, propertiesIndex-ownerIndex+1+3)
 	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,revision DESC LIMIT $%d OFFSET $%d;",
-		columns[0], propertiesIndex+4, propertiesIndex+5)
+		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
 
 	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC,revision ASC LIMIT $%d OFFSET $%d;",
-		columns[0], propertiesIndex+4, propertiesIndex+5)
+		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
@@ -442,7 +444,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		params := mux.Vars(r)
 		selectors := map[string]string{}
-		for i := 1; i < propertiesIndex; i++ { // skip ID
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 			selectors[columns[i]] = params[columns[i]]
 		}
 		if metaonly {
@@ -452,24 +454,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		sqlQuery += sqlWhereAll
 		if len(externalValues) == 0 { // no filter(s), get entire collection
-			queryParameters = make([]interface{}, propertiesIndex-1+6)
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6)
 		} else {
-			queryParameters = make([]interface{}, propertiesIndex-1+6+len(externalValues))
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues))
 			for i := range externalValues {
-				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex+6+i)
-				queryParameters[propertiesIndex-1+6+i] = externalValues[i]
+				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex-ownerIndex+7+i)
+				queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
 			}
 		}
 
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			queryParameters[i-1] = params[columns[i]]
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-ownerIndex] = params[columns[i]]
 		}
-		queryParameters[propertiesIndex-1+0] = until.IsZero()
-		queryParameters[propertiesIndex-1+1] = until.UTC()
-		queryParameters[propertiesIndex-1+2] = from.IsZero()
-		queryParameters[propertiesIndex-1+3] = from.UTC()
-		queryParameters[propertiesIndex-1+4] = limit
-		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+		queryParameters[propertiesIndex-ownerIndex+0] = until.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+1] = until.UTC()
+		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
+		queryParameters[propertiesIndex-ownerIndex+4] = limit
+		queryParameters[propertiesIndex-ownerIndex+5] = (page - 1) * limit
 
 		if relation != nil {
 			// inject subquery for relation
@@ -485,6 +487,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			sqlQuery += sqlPaginationDesc
 		}
 
+		// fmt.Printf("\n\nQUERY %#v parameters: %#v\n\n", sqlQuery, queryParameters)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			if err != nil {
@@ -539,8 +542,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if page > 0 && totalCount == 0 {
 			// sql does not return total count if we ask beyond limits, hence
 			// we need a second query
-			queryParameters[propertiesIndex-1+4] = 1
-			queryParameters[propertiesIndex-1+5] = 0
+			queryParameters[propertiesIndex-ownerIndex+4] = 1
+			queryParameters[propertiesIndex-ownerIndex+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
@@ -687,24 +690,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		sqlQuery += sqlWhereAll
 		if len(externalValues) == 0 { // no filter(s), get entire collection
-			queryParameters = make([]interface{}, propertiesIndex-1+6)
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6)
 		} else {
-			queryParameters = make([]interface{}, propertiesIndex-1+6+len(externalValues))
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues))
 			for i := range externalValues {
-				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex+6+i)
-				queryParameters[propertiesIndex-1+6+i] = externalValues[i]
+				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex-ownerIndex+7+i)
+				queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
 			}
 		}
 
-		for i := 1; i < propertiesIndex; i++ { // skip ID
-			queryParameters[i-1] = params[columns[i]]
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-ownerIndex] = params[columns[i]]
 		}
-		queryParameters[propertiesIndex-1+0] = until.IsZero()
-		queryParameters[propertiesIndex-1+1] = until.UTC()
-		queryParameters[propertiesIndex-1+2] = from.IsZero()
-		queryParameters[propertiesIndex-1+3] = from.UTC()
-		queryParameters[propertiesIndex-1+4] = limit
-		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+		queryParameters[propertiesIndex-ownerIndex+0] = until.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+1] = until.UTC()
+		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
+		queryParameters[propertiesIndex-ownerIndex+4] = limit
+		queryParameters[propertiesIndex-ownerIndex+5] = (page - 1) * limit
 
 		if relation != nil {
 			// inject subquery for relation
@@ -754,8 +757,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if page > 0 && totalCount == 0 {
 			// sql does not return total count if we ask beyond limits, hence
 			// we need a second query
-			queryParameters[propertiesIndex-1+4] = 1
-			queryParameters[propertiesIndex-1+5] = 0
+			queryParameters[propertiesIndex-ownerIndex+4] = 1
+			queryParameters[propertiesIndex-ownerIndex+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
@@ -1155,7 +1158,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		params := mux.Vars(r)
 		selectors := map[string]string{}
-		for i := 1; i < propertiesIndex; i++ { // skip ID
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 			selectors[columns[i]] = params[columns[i]]
 		}
 
@@ -1238,23 +1241,23 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if externalValue == "" { // delete entire collection
 			sqlQuery = clearQuery + sqlWhereAll + ";"
 			queryParameters = make([]interface{}, propertiesIndex-1+4)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
+			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
 		} else {
 			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d);", externalColumn, propertiesIndex+4)
-			queryParameters = make([]interface{}, propertiesIndex-1+4+1)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+1)
+			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
-			queryParameters[propertiesIndex-1+4] = externalValue
+			queryParameters[propertiesIndex-ownerIndex+4] = externalValue
 		}
 
 		// add before and after and pagination
-		queryParameters[propertiesIndex-1+0] = until.IsZero()
-		queryParameters[propertiesIndex-1+1] = until.UTC()
-		queryParameters[propertiesIndex-1+2] = from.IsZero()
-		queryParameters[propertiesIndex-1+3] = from.UTC()
+		queryParameters[propertiesIndex-ownerIndex+0] = until.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+1] = until.UTC()
+		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
+		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
 
 		_, err = tx.Exec(sqlQuery, queryParameters...)
 		if err != nil {
@@ -1301,7 +1304,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		params := mux.Vars(r)
 		selectors := map[string]string{}
-		for i := 1; i < propertiesIndex; i++ { // skip ID
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 			selectors[columns[i]] = params[columns[i]]
 		}
 
