@@ -153,7 +153,12 @@ var configurationJSON string = `{
 		"searchable_properties":["content_type"],
 		"mutable": true,
 		"external_index": "external_id"
+	  },
+	  {
+		"resource": "a/blob",
+		"searchable_properties":["content_type"]
 	  }
+
 	],
 	"shortcuts": [
 		{

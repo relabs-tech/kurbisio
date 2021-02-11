@@ -298,6 +298,47 @@ func TestClearBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// We now create blobs for two separate owners and clear only all the blob of one owner
+	a1 := A{}
+	a2 := A{}
+	_, err = testService.client.RawPost("/as", &a1, &a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testService.client.RawPost("/as", &a2, &a2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := testService.client.RawPostBlob("/as/"+a1.AID.String()+"/blobs", header, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawPostBlob("/as/"+a2.AID.String()+"/blobs", header, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Then we clear a1's blobs
+	_, err = testService.client.RawDelete("/as/" + a1.AID.String() + "/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+	// All a1's blobs should be deleted
+	_, err = testService.client.RawGet("/as/"+a1.AID.String()+"/blobs", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatalf("Expecting blobs to be cleared but there is still %d items", len(collectionResult))
+	}
+	// a2's blobs should NOT be deleted
+	_, err = testService.client.RawGet("/as/"+a2.AID.String()+"/blobs", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatalf("Expecting a2's blobs to still be there but there are %d items", len(collectionResult))
+	}
+
 }
 
 func TestDeleteBlob(t *testing.T) {
