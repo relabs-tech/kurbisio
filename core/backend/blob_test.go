@@ -289,7 +289,7 @@ func TestClearBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(collectionResult) != 1 {
-		t.Fatalf("Expecting blobs2 to be still there but there is still %d items", len(collectionResult))
+		t.Fatalf("Expecting blobs2 to be still there but there is %d items", len(collectionResult))
 	}
 
 	// Then we clean up anyway

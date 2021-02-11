@@ -1477,6 +1477,10 @@ func TestPaginationBlob(t *testing.T) {
 
 		})
 	}
+	_, err = testService.client.RawDelete("/blob2s") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInvalidPaths(t *testing.T) {

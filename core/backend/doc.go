@@ -214,7 +214,7 @@ If you specify multiple filters, they filter on top of each other (i.e. with log
 Filters can be combined with the wildcard 'all' keyword. For instance, it is possible to get all the devices of a user by filtering
 on the user_id property
 	GET /users/all/devices?filter=user_id=f879572d-ac69-4020-b7f8-a9b3e628fd9d
-		This is equivalent to using the following, but may be more convenient in some cases.
+		This is equivalent to using the following, but may be more convenient to write in some cases.
 	GET users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
 
 
