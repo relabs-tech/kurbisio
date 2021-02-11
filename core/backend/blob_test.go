@@ -219,3 +219,123 @@ func TestBlobExternalID(t *testing.T) {
 	status, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
 	assert.Equal(t, http.StatusUnprocessableEntity, status, err)
 }
+
+func TestFiltersBlob(t *testing.T) {
+
+	blobData := []byte{0, 1}
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	blob := Blob{}
+	var err error
+	if _, err = testService.client.RawPostBlob("/blobs", header, blobData, &blob); err != nil {
+		t.Fatal(err)
+	}
+
+	var collectionResult []Blob
+	// we now search for the searachable property and should only find our single item a
+	_, err = testService.client.RawGet("/blobs?filter=blob_id="+blob.BlobID.String(), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected only 1:", asJSON(collectionResult))
+	}
+	if collectionResult[0].BlobID != blob.BlobID {
+		t.Fatal("wrong item in collection:", asJSON(collectionResult))
+	}
+
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClearBlob(t *testing.T) {
+	blobData := []byte{0, 1}
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	if _, err := testService.client.RawPostBlob("/blobs", header, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawPostBlob("/blobs", header, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawPostBlob("/blob2s", header, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var collectionResult []Blob
+	// All blobs should be deleted
+	_, err = testService.client.RawGet("/blobs", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatalf("Expecting blobs to be cleared but there is still %d items", len(collectionResult))
+	}
+
+	// blob2 should stay untouched
+	_, err = testService.client.RawGet("/blob2s", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatalf("Expecting blobs2 to be still there but there is still %d items", len(collectionResult))
+	}
+
+	// Then we clean up anyway
+	_, err = testService.client.RawDelete("/blob2s") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
+func TestDeleteBlob(t *testing.T) {
+	blobData := []byte{0, 1}
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	blob1 := Blob{}
+	if _, err := testService.client.RawPostBlob("/blobs", header, blobData, &blob1); err != nil {
+		t.Fatal(err)
+	}
+	blob2 := Blob{}
+	if _, err := testService.client.RawPostBlob("/blobs", header, blobData, &blob2); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := testService.client.RawDelete("/blobs/" + blob2.BlobID.String()) // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var collectionResult []Blob
+	// we now search for the searachable property and should only find our single item a
+	_, err = testService.client.RawGet("/blobs", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatalf("Expecting one blob but there is %d items", len(collectionResult))
+	}
+	if collectionResult[0].BlobID != blob1.BlobID {
+		t.Fatalf("Expecting the remaining ID to be %s, but was %s", blob1.BlobID, collectionResult[0].BlobID)
+	}
+
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}

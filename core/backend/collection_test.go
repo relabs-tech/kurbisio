@@ -258,3 +258,48 @@ func TestCollectionWithSchemaValidationPutInvalidSchema(t *testing.T) {
 		t.Fatalf("Expecting validation failure")
 	}
 }
+
+func TestFilters(t *testing.T) {
+
+	b := B{}
+	_, err := testService.client.RawPost("/bs", &b, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := C{B: b}
+	_, err = testService.client.RawPost("/bs/"+b.BID.String()+"/cs", &c, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var collectionResult []C
+	// we now search for the searachable property and should only find our single item a
+	_, err = testService.client.RawGet("/bs/all/cs?filter=b_id="+b.BID.String(), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected only 1:", asJSON(collectionResult))
+	}
+	if collectionResult[0].BID != b.BID {
+		t.Fatal("wrong item in collection:", asJSON(collectionResult))
+	}
+
+	// we now search for the searachable property and should only find our single item a
+	_, err = testService.client.RawGet("/bs/all/cs?filter=c_id="+c.CID.String(), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected only 1:", asJSON(collectionResult))
+	}
+	if collectionResult[0].BID != b.BID {
+		t.Fatal("wrong item in collection:", asJSON(collectionResult))
+	}
+
+	_, err = testService.client.RawDelete("/bs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+}

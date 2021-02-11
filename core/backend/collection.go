@@ -74,8 +74,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	createQueryLog := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s/log\"", schema, resource)
 	var createColumns, createColumnsLog []string
 	var columns []string
+	searchableColumns := []string{}
+
 	if !singleton {
 		columns = append(columns, this+"_id")
+		searchableColumns = append(searchableColumns, this+"_id")
 		createColumns = append(createColumns, this+"_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY")
 		createColumnsLog = append(createColumnsLog, this+"_id uuid NOT NULL")
 	}
@@ -92,6 +95,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createColumns = append(createColumns, createColumn)
 		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, that+"_id")
+		searchableColumns = append(searchableColumns, that+"_id")
 		foreignColumns = append(foreignColumns, that+"_id")
 	}
 
@@ -134,7 +138,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		columns = append(columns, property)
 	}
 
-	searchablePropertiesIndex := len(columns) // where searchable properties start
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
@@ -147,7 +150,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createColumns = append(createColumns, createColumn)
 		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, property)
-
+		searchableColumns = append(searchableColumns, property)
 	}
 
 	propertiesEndIndex := len(columns) // where properties end
@@ -166,6 +169,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createColumns = append(createColumns, createColumn)
 		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, name)
+		searchableColumns = append(searchableColumns, name)
 	}
 
 	// the "device" collection gets an additional UUID column for the web token
@@ -405,11 +409,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					filterValue := value[i+1:]
 
 					found := false
-					for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-						if filterKey == columns[i] {
+					for _, searchableColumn := range searchableColumns {
+						if filterKey == searchableColumn {
 							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, columns[i])
+							externalColumns = append(externalColumns, searchableColumn)
 							found = true
+							break
 						}
 					}
 					if !found {
@@ -645,11 +650,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					filterValue := value[i+1:]
 
 					found := false
-					for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-						if filterKey == columns[i] {
+					for _, searchableColumn := range searchableColumns {
+						if filterKey == searchableColumn {
 							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, columns[i])
+							externalColumns = append(externalColumns, searchableColumn)
 							found = true
+							break
 						}
 					}
 					if !found {
@@ -1202,10 +1208,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				filterValue := value[i+1:]
 
 				found := false
-				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-					if filterKey == columns[i] {
+				for _, searchableColumn := range searchableColumns {
+					if filterKey == searchableColumn {
 						externalValue = filterValue
-						externalColumn = columns[i]
+						externalColumn = searchableColumn
 						found = true
 					}
 				}

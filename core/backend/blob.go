@@ -41,12 +41,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	columns := []string{this + "_id"}
+	searchableColumns := []string{columns[0]}
 
 	for i := range dependencies {
 		that := dependencies[i]
 		createColumn := fmt.Sprintf("%s_id uuid NOT NULL", that)
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, that+"_id")
+		searchableColumns = append(searchableColumns, that+"_id")
 	}
 
 	if len(dependencies) > 0 {
@@ -82,7 +84,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
 	}
 
-	searchablePropertiesIndex := len(columns) // where searchable properties start
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
 		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
@@ -92,6 +93,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
 		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
+		searchableColumns = append(searchableColumns, property)
 	}
 
 	propertiesEndIndex := len(columns) // where properties end
@@ -106,6 +108,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		createColumns = append(createColumns, createColumn)
 		columns = append(columns, name)
 		jsonToHeader[name] = core.PropertyNameToCanonicalHeader(name)
+		searchableColumns = append(searchableColumns, name)
 	}
 
 	// the actual blob data as bytea
@@ -150,7 +153,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
-	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE ", schema, resource) + compareIDsString(columns[1:propertiesIndex]) + ";"
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
@@ -263,11 +266,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				filterValue := value[i+1:]
 
 				found := false
-				for i := searchablePropertiesIndex; i < len(columns) && !found; i++ {
-					if filterKey == columns[i] {
+				for _, searchableColumn := range searchableColumns {
+					if filterKey == searchableColumn {
 						externalIndex = filterValue
-						externalColumn = columns[i]
+						externalColumn = searchableColumn
 						found = true
+						break
 					}
 				}
 				if !found {

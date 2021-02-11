@@ -205,10 +205,18 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
-The GET request on collections can be customized with any of the searchable properties or an external index as a filter.
+The GET request on collections can be customized with any of the searchable properties, an external index or the ids of
+the resources as a filter.
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?filter=identity=test@test.com
 If you specify multiple filters, they filter on top of each other (i.e. with logical AND).
+
+Filters can be combined with the wildcard 'all' keyword. For instance, it is possible to get all the devices of a user by filtering
+on the user_id property
+	GET /users/all/devices?filter=user_id=f879572d-ac69-4020-b7f8-a9b3e628fd9d
+		This is equivalent to using the following, but may be more convenient in some cases.
+	GET users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
+
 
 The system supports pagination and filtering of responses by creation time:
 	  ?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
