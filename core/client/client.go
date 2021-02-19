@@ -11,7 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -513,7 +513,7 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 	if status == http.StatusNoContent {
@@ -565,7 +565,7 @@ func (c Client) RawGetWithHeader(path string, header map[string]string, result i
 			return http.StatusInternalServerError, nil, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 
@@ -617,7 +617,7 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 			return http.StatusInternalServerError, nil, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 
 	status := res.StatusCode
@@ -672,7 +672,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 	if status != http.StatusCreated && status != http.StatusOK {
@@ -718,7 +718,7 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 
@@ -769,7 +769,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 
@@ -820,7 +820,7 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 
@@ -868,7 +868,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
@@ -909,7 +909,7 @@ func (c Client) RawDelete(path string) (int, error) {
 			return http.StatusInternalServerError, err
 		}
 		defer res.Body.Close()
-		resBody, _ = ioutil.ReadAll(res.Body)
+		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
 	if status != http.StatusNoContent {

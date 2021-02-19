@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"strconv"
 	"strings"
@@ -489,7 +489,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 
-		blob, err := ioutil.ReadAll(r.Body)
+		blob, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -626,7 +626,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			authorizedForCreate = auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits)
 		}
 
-		blob, err := ioutil.ReadAll(r.Body)
+		blob, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

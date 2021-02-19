@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -80,7 +79,7 @@ func NewBroker(bb *Builder) *Broker {
 		panic(err)
 	}
 
-	caCert, _ := ioutil.ReadFile(caCertFile)
+	caCert, _ := os.ReadFile(caCertFile)
 	caCertPool := x509.NewCertPool()
 	ok := caCertPool.AppendCertsFromPEM(caCert)
 	log.Println("certs OK = ", ok)

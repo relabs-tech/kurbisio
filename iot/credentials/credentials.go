@@ -10,12 +10,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"github.com/relabs-tech/backends/core/logger"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/relabs-tech/backends/core/logger"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -137,11 +138,11 @@ func (a *API) addMiddleware(router *mux.Router) {
 func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 	log.Println("device credentials: handle route /credentials GET")
 
-	caCertData, err := ioutil.ReadFile(caCertFile)
+	caCertData, err := os.ReadFile(caCertFile)
 	if err != nil {
 		panic(err)
 	}
-	caKeyData, err := ioutil.ReadFile(caKeyFile)
+	caKeyData, err := os.ReadFile(caKeyFile)
 	if err != nil {
 		panic(err)
 	}

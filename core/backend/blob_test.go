@@ -1,15 +1,15 @@
 package backend
 
 import (
-	"io/ioutil"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestEtagGetBlob(t *testing.T) {
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -73,7 +73,7 @@ func TestEtagGetBlob(t *testing.T) {
 }
 
 func TestEtagGetBlobCollection(t *testing.T) {
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -136,7 +136,7 @@ func TestEtagGetBlobCollection(t *testing.T) {
 // TestEtagBlobRegenerated checks that if the binary data of a mutable blob is modified through a
 // PUT request, the ETag is modified
 func TestEtagBlobRegenerated(t *testing.T) {
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -172,7 +172,7 @@ func TestEtagBlobRegenerated(t *testing.T) {
 // TestEtagBlobCollectionRegenerated checks that if another element is added to a collection through
 // a POST request, then ETag is modified
 func TestEtagBlobCollectionRegenerated(t *testing.T) {
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -209,7 +209,7 @@ func TestBlobExternalID(t *testing.T) {
 		ExternalID string `json:"external_id"`
 	}
 
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,

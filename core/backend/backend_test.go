@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -786,7 +786,7 @@ type Blob struct {
 }
 
 func TestBlob(t *testing.T) {
-	data, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	data, err := os.ReadFile("./testdata/dalarubettrich.png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1432,7 +1432,7 @@ func TestPaginationCollection(t *testing.T) {
 func TestPaginationBlob(t *testing.T) {
 	numberOfElements := 10
 	beforeCreation := time.Now().UTC().Add(-time.Second)
-	blobData, err := ioutil.ReadFile("./testdata/dalarubettrich.png")
+	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,

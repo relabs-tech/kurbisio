@@ -3,7 +3,7 @@ package twin
 import (
 	"database/sql"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -244,7 +244,7 @@ func (s *API) handleRoutes(router *mux.Router) {
 			return
 		}
 		key := params["key"]
-		body, _ := ioutil.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
 
 		if !json.Valid(body) {
 			http.Error(w, "invalid json data", http.StatusBadRequest)
@@ -299,7 +299,7 @@ ON CONFLICT (device_id, key) DO UPDATE SET request=$3,requested_at=$5;`,
 			return
 		}
 		key := params["key"]
-		body, _ := ioutil.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
 		if !json.Valid(body) {
 			http.Error(w, "invalid json data", http.StatusBadRequest)
 			return

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"crypto/sha1"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +18,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	// To allow the use of go:embed
+	_ "embed"
+
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/client"
@@ -25,6 +29,10 @@ import (
 	"github.com/relabs-tech/backends/core/registry"
 	"github.com/relabs-tech/backends/core/schema"
 )
+
+// ConfigSchemaJSON contains the Json schemafor the backend's configuration file
+//go:embed config_schema.json
+var ConfigSchemaJSON string
 
 // InternalDatabaseSchemaVersion is a sequential versioning number of the database schema.
 // If it increases, the backend will try to update the schema.
@@ -76,10 +84,13 @@ type Builder struct {
 	// Number of concurrent pipeline executors. Default is 5.
 	PipelineConcurrency int
 
-	// JSONSchemas is a list of top level JSON Schemas as strings.
+	// JSONSchemasFS contains JSON schema files to be used by the json validator. It is exclusive with JSONSchemas and JSONSchemasRefs
+	JSONSchemasFS *embed.FS
+
+	// JSONSchemas is a list of top level JSON Schemas as strings. It is exclusive with the JSONSchemasFS
 	JSONSchemas []string
 
-	// JSONSchemasRefs is a list of references JSON Schemas as strings.
+	// JSONSchemasRefs is a list of references JSON Schemas as strings. It is exclusive with the JSONSchemasFS
 	JSONSchemasRefs []string
 
 	// The loglevel to be used by the logger. Default is "info""
@@ -163,9 +174,19 @@ func New(bb *Builder) *Backend {
 	}
 	logger.InitLogger(logLevel)
 
-	b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
-	if err != nil {
-		logger.Default().Fatalf("Cannot create json Validator %v", err)
+	if bb.JSONSchemasFS != nil {
+		if len(bb.JSONSchemas) > 0 || len(bb.JSONSchemasRefs) > 0 {
+			logger.Default().Fatal("Cannot use both JSONSchemas and JSONSchemasFS")
+		}
+		b.jsonValidator, err = schema.NewValidatorFromFS(*bb.JSONSchemasFS)
+		if err != nil {
+			logger.Default().Fatalf("Cannot create json Validator %v", err)
+		}
+	} else {
+		b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
+		if err != nil {
+			logger.Default().Fatalf("Cannot create json Validator %v", err)
+		}
 	}
 
 	registry := b.Registry.Accessor("_backend_")

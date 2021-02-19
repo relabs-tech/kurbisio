@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2
         with:
-          go-version: ^1.15
+          go-version: ^1.16
 
       - name: go lint
         run: |
@@ -43,7 +43,6 @@ jobs:
       - name: go test race
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
-          go generate ./...
           go test ./... -race -count 1
         env:
           POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
@@ -58,7 +57,6 @@ jobs:
       - name: build
         run: |
           go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
-          go generate ./...
           cd services/fitness
           GOOS=linux GOARCH=amd64 go build
 

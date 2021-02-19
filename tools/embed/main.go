@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 )
@@ -16,7 +15,7 @@ func main() {
 	flag.Parse()
 	suffix := "." + *fileType
 	goSuffix := strings.ToUpper(*fileType)
-	fs, _ := ioutil.ReadDir(".")
+	fs, _ := os.ReadDir(".")
 	out, err := os.Create("generated_embedded_" + *fileType + ".go")
 	if err != nil {
 		panic(err)

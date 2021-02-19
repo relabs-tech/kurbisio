@@ -1,14 +1,59 @@
 package schema
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/xeipuuv/gojsonschema"
 )
 
 // Validator is a utility to validate JSON object against a given schema
 type Validator struct {
 	schemaValidators map[string]*gojsonschema.Schema
+}
+
+// NewValidatorFromFS creates a new Validator using schemas from schemaFS. Json files
+// from / will be used as toplevel schemas, while json files in /refs/ will be used
+// as references
+func NewValidatorFromFS(schemaFS embed.FS) (*Validator, error) {
+
+	readDir := func(dir string) ([]string, error) {
+		var strs []string
+		files, err := schemaFS.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read dir %w", err)
+		}
+		for _, f := range files {
+			fmt.Printf("parent %s name %s\n", dir, f.Name())
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
+				continue
+			}
+			fullPath := f.Name()
+			if dir != "." {
+				fullPath = dir + "/" + f.Name()
+			}
+			str, err := schemaFS.ReadFile(fullPath)
+			if err != nil {
+				return nil, fmt.Errorf("cannot read file '%s' %w", f.Name(), err)
+			}
+			strs = append(strs, string(str))
+		}
+		return strs, nil
+	}
+
+	schemasString, err := readDir(".")
+	if err != nil {
+		return nil, err
+	}
+
+	refsString, err := readDir("refs")
+	if err != nil {
+		return nil, err
+	}
+
+	return NewValidator(schemasString, refsString)
 }
 
 // NewValidator creates a new Validator using schemas for the top level JSON schemas and refs
