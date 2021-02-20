@@ -26,7 +26,6 @@ func NewValidatorFromFS(schemaFS embed.FS) (*Validator, error) {
 			return nil, fmt.Errorf("cannot read dir %w", err)
 		}
 		for _, f := range files {
-			fmt.Printf("parent %s name %s\n", dir, f.Name())
 			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 				continue
 			}
