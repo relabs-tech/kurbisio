@@ -540,6 +540,15 @@ func TestSingletonOS(t *testing.T) {
 		t.Fatal("expected error, but did not get any")
 	}
 
+	// upsert singleton for a non-existing o, should be not found
+	status, err = testService.client.RawPut("/os/ad311bca-df3c-4011-a3c6-090faf944a18/s", &sCheck, &sCheck)
+	if status != http.StatusNotFound {
+		t.Fatalf("expected not found, got %d", status)
+	}
+	if err == nil {
+		t.Fatal("expected error, but did not get any")
+	}
+
 	// create single s with initial name
 	s := S{
 		Name: "initial",
