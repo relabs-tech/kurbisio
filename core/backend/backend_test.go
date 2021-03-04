@@ -597,11 +597,11 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// now update with direct property update, but flip the ids
-	status, err = testService.client.RawPut("/os/all/ss/"+o.OID.String()+"/name/third_update", nil, nil)
+	status, err = testService.client.RawPut("/os/all/ses/"+o.OID.String()+"/name/third_update", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = testService.client.RawGet("/os/all/ss/"+o.OID.String(), &sUpdateResult)
+	status, err = testService.client.RawGet("/os/all/ses/"+o.OID.String(), &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
