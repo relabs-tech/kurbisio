@@ -66,6 +66,7 @@ jobs:
           echo "task='deployment to prod'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
           echo "DEPLOY_URL=https://api.twaiv.app" >> $GITHUB_ENV
+          echo "CLOUDFORMATION_TEMPLATE=fitness-pub-twaiv.yaml">> $GITHUB_ENV
 
       - name: prep deploy to staging
         if: github.ref == 'refs/heads/master'
@@ -73,6 +74,7 @@ jobs:
           echo "task='deployment to staging'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
           echo "DEPLOY_URL=https://staging.api.twaiv.app" >> $GITHUB_ENV
+          echo "CLOUDFORMATION_TEMPLATE=fitness-pub-twaiv.yaml">> $GITHUB_ENV
 
       - name: prep deploy to test
         if: startsWith(github.ref, 'refs/heads/test_deploy')
@@ -80,6 +82,7 @@ jobs:
           echo "task='deployment to test'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=test" >> $GITHUB_ENV
           echo "DEPLOY_URL=https://test.api.twaiv.app" >> $GITHUB_ENV
+          echo "CLOUDFORMATION_TEMPLATE=fitness-vpc-twaiv.yaml">> $GITHUB_ENV
 
       - name: deploy
         run: |
@@ -92,13 +95,24 @@ jobs:
           FITNESS_DIR=$GITHUB_WORKSPACE/services/fitness
           cd $FITNESS_DIR/deployment_config
           ./sam-deploy-lambdas.sh \
-            --template fitness-pub-twaiv.yaml \
+            --template ${CLOUDFORMATION_TEMPLATE} \
             --gitSHA ${GITHUB_SHA::7} \
             --version ${GITHUB_REF##*/} \
             --env ${DEPLOY_ENV}
 
           echo "get login token"
           TOKEN=$(go run $FITNESS_DIR/tools/login/main.go -email loyalty.ci.bot@dalarub.com -password $LOYALTY_CI_BOT_PASSWORD)
+
+          echo "waiting for ${DEPLOY_URL} to come online"
+          SECONDS=0
+          while ! curl -i -s --header "Authorization: $TOKEN" --request GET "${DEPLOY_URL}/kurbisio/health" | grep "HTTP/2 200"; do
+            sleep 5
+            echo "waiting for BE $URL since $SECONDS sec"
+            if [ $SECONDS -gt 120 ];then
+              echo "giving up"
+              break
+            fi
+          done
 
           echo "upload help texts"
           cd $FITNESS_DIR/data/help_texts
