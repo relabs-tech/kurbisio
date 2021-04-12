@@ -100,10 +100,6 @@ jobs:
           echo "get login token"
           TOKEN=$(go run $FITNESS_DIR/tools/login/main.go -email loyalty.ci.bot@dalarub.com -password $LOYALTY_CI_BOT_PASSWORD)
 
-          echo "upload conversation templates"
-          cd $FITNESS_DIR/data/conversation_templates
-          go run upload/main.go -prune -url ${DEPLOY_URL} -token $TOKEN -folder templates
-
           echo "upload help texts"
           cd $FITNESS_DIR/data/help_texts
           go run upsert.go -prune -url ${DEPLOY_URL} -token $TOKEN
