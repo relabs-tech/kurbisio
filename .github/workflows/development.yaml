@@ -74,7 +74,7 @@ jobs:
           echo "task='deployment to staging'" >> $GITHUB_ENV
           echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
           echo "DEPLOY_URL=https://staging.api.twaiv.app" >> $GITHUB_ENV
-          echo "CLOUDFORMATION_TEMPLATE=fitness-pub-twaiv.yaml">> $GITHUB_ENV
+          echo "CLOUDFORMATION_TEMPLATE=fitness-vpc-twaiv.yaml">> $GITHUB_ENV
 
       - name: prep deploy to test
         if: startsWith(github.ref, 'refs/heads/test_deploy')
