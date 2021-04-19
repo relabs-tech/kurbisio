@@ -112,7 +112,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 			tokenString := ""
 			bearer := r.Header.Get("Authorization")
-			if len(bearer) > 0 {
+			if len(bearer) > 0 && bearer != "null" {
 				if len(bearer) >= 8 && strings.ToLower(bearer[:7]) == "bearer " {
 					tokenString = bearer[7:]
 				} else {
@@ -122,6 +122,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				tokenString = cookie.Value
 			}
 			if len(tokenString) == 0 {
+				fmt.Printf("--------- Bearer: '%s'\n", bearer)
 				h.ServeHTTP(w, r) // no token no auth, moving on
 				return
 			}
