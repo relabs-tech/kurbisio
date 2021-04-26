@@ -464,16 +464,6 @@ func (p *Page) Get(result interface{}) (int, error) {
 	if err == nil {
 		p.totalCount = totalCount
 	}
-	found := false
-	for i := 0; i < len(p.r.parameters) && !found; i++ {
-		found = strings.HasPrefix(p.r.parameters[i], "until=")
-	}
-	if !found {
-		until := header.Get("Pagination-Until")
-		if len(until) > 0 {
-			p.r = p.r.WithParameter("until", until)
-		}
-	}
 	return status, nil
 }
 
