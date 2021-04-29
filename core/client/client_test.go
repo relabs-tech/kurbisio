@@ -200,3 +200,59 @@ func TestUpsert(t *testing.T) {
 	}
 
 }
+
+func TestCient_limit(t *testing.T) {
+
+	if err := envdecode.Decode(&testService); err != nil {
+		panic(err)
+	}
+
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	defer db.Close()
+	db.ClearSchema()
+
+	var configurationJSON string = `{
+		"collections": [
+		  {
+			"resource": "aaa"
+		  }
+		]
+	  }
+	`
+	router := mux.NewRouter()
+	testService.backend = backend.New(&backend.Builder{
+		Config:       configurationJSON,
+		DB:           db,
+		Router:       router,
+		UpdateSchema: true,
+	})
+	cl := client.NewWithRouter(router)
+
+	type A struct {
+		AID       uuid.UUID `json:"aaa_id"`
+		Timestamp time.Time `json:"timestamp,omitempty"`
+	}
+	for i := 0; i < 200; i++ {
+		var a A
+		a.Timestamp = time.Now().AddDate(0, 0, 3+i)
+		_, err := cl.Collection("aaa").Create(&a, &a)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var as []A
+
+	for page := cl.Collection("aaa").WithParameter("limit", "1").FirstPage(); page.HasData(); page = page.Next() {
+		var onePage []A
+		_, err := page.Get(&onePage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		as = append(as, onePage...)
+	}
+	if len(as) != 200 {
+		t.Fatalf("Expecting 1 item, got %d", len(as))
+	}
+
+}
