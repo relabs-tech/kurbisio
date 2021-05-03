@@ -58,7 +58,9 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		// time to check for new keys
 		res, err := http.Get(jmb.PublicKeyDownloadURL)
 		if err != nil {
-			panic(err)
+			return func(h http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) })
+			}
 		}
 
 		defer res.Body.Close()
