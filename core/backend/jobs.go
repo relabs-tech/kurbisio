@@ -18,6 +18,7 @@ import (
 	"github.com/relabs-tech/backends/core/access"
 	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/backends/services/fitness/utils"
 )
 
 // Notification is a database notification. Receive them
@@ -31,11 +32,12 @@ type Notification struct {
 
 // Event is a higher level event. Receive them with HandleEvent(), raise them with RaiseEvent(), scehdule them with ScheduleEvent()
 type Event struct {
-	Type       string
-	Key        string
-	Resource   string
-	ResourceID uuid.UUID
-	Payload    []byte
+	Type        string
+	Key         string
+	Resource    string
+	ResourceID  uuid.UUID
+	Payload     []byte
+	ScheduledAt *time.Time // only used for reporting in the event handler
 }
 
 // WithPayload adds a payload to an event. Payload can be an object or a []byte
@@ -50,16 +52,18 @@ func (e Event) WithPayload(payload interface{}) Event {
 
 // job can be a database notification or a highl-level event
 type job struct {
-	Serial       int
-	Job          string
-	Type         string
-	Key          string
-	Resource     string
-	ResourceID   uuid.UUID
-	Payload      []byte
-	Timestamp    time.Time
-	AttemptsLeft int
-	ContextData  []byte
+	Serial           int
+	Job              string
+	Type             string
+	Key              string
+	Resource         string
+	ResourceID       uuid.UUID
+	Payload          []byte
+	Timestamp        time.Time
+	AttemptsLeft     int
+	ContextData      []byte
+	ScheduledAt      *time.Time
+	ImplicitSchedule *bool
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
@@ -71,12 +75,7 @@ func (j *job) notification() (Notification, context.Context) {
 // event returns the job as high-level event. Only makes sense if the job type is "event"
 func (j *job) event() (Event, context.Context) {
 	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
-	return Event{Type: j.Type, Key: j.Key, Resource: j.Resource, ResourceID: j.ResourceID, Payload: j.Payload}, ctx
-}
-
-type txJob struct {
-	job
-	tx *sql.Tx
+	return Event{Type: j.Type, Key: j.Key, Resource: j.Resource, ResourceID: j.ResourceID, Payload: j.Payload, ScheduledAt: j.ScheduledAt}, ctx
 }
 
 func (b *Backend) handleJobs(router *mux.Router) {
@@ -93,10 +92,25 @@ timestamp TIMESTAMP NOT NULL DEFAULT now(),
 attempts_left INTEGER NOT NULL,
 context JSON NOT NULL DEFAULT'{}'::jsonb,
 scheduled_at TIMESTAMP,
+last_scheduled_at TIMESTAMP,
+implicit_schedule BOOLEAN,
+last_implicit_schedule BOOLEAN,
 PRIMARY KEY(serial)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_event_compression ON ` + b.db.Schema + `._job_(type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0;
 CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(scheduled_at);
+`)
+
+		if err != nil {
+			panic(err)
+		}
+		_, err = b.db.Exec(`CREATE table IF NOT EXISTS ` + b.db.Schema + `."_schedule_" 
+(serial SERIAL,
+event VARCHAR NOT NULL DEFAULT '',
+scheduled_at TIMESTAMP,
+PRIMARY KEY(serial)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._schedule_(event);
 `)
 
 		if err != nil {
@@ -118,6 +132,9 @@ CREATE index IF NOT EXISTS jobs_scheduled_at_index ON ` + b.db.Schema + `._job_(
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET attempts_left = attempts_left - 1,
+last_implicit_schedule = implicit_schedule,
+implicit_schedule = TRUE,
+last_scheduled_at = scheduled_at,
 scheduled_at = CASE WHEN attempts_left>3 then $2 WHEN attempts_left=3 THEN $3 ELSE $4 END::TIMESTAMP
 WHERE serial = (
 SELECT serial
@@ -127,13 +144,25 @@ SELECT serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
 )
-RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context;
+RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context, last_scheduled_at, last_implicit_schedule;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE serial = $1 AND attempts_left < 4 RETURNING serial;`
 
 	b.jobsCancelQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`
+
+	b.rateLimitQuery = `INSERT INTO ` + b.db.Schema + `."_schedule_" (event,scheduled_at)VALUES($1,$2)
+ON CONFLICT(event)DO UPDATE SET scheduled_at=CASE WHEN _schedule_.scheduled_at + $3 > $2
+THEN _schedule_.scheduled_at + $3
+ELSE $2 END::TIMESTAMP
+RETURNING scheduled_at;
+`
+
+	b.jobsUpdateScheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
+SET scheduled_at = $2,
+implicit_schedule = FALSE
+WHERE serial = $1 RETURNING serial;`
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
@@ -355,33 +384,28 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	rlog.Infof("raised event %s on resource \"%s\"", event, resource)
 }
 
-func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
+func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 
-	for job := range jobs {
-		tx := job.tx
+	rescheduledError := fmt.Errorf("rescheduled rate limited event")
+	for jb := range jobs {
 		var key string
 		rlog := logger.Default()
 
-		err := tx.Commit()
-		if err != nil {
-			rlog.Errorf("error committing %s#%d: %s", key, job.Serial, err.Error())
-		}
-
 		// call the registered handler in a panic/recover envelope
 		errorMessage := ""
-		jobSerial := job.Serial
+		jobSerial := jb.Serial
 		timeout := time.AfterFunc(time.Duration(120*time.Second), func() {
 			rlog.Errorf("This (%s) is taking a long time...  #%d", errorMessage, jobSerial)
 		})
-		err = func() (err error) {
+		err := func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
 					err = fmt.Errorf("recovered from panic: %s. stacktrace:\n%s", r, string(debug.Stack()))
 				}
 			}()
-			switch job.Job {
+			switch jb.Job {
 			case "notification":
-				notification, ctx := job.notification()
+				notification, ctx := jb.notification()
 				rlog = logger.FromContext(ctx)
 				key = notificationJobKey(notification.Resource, notification.Operation)
 				errorMessage = fmt.Sprintf("Notification %s %v", key, notification.ResourceID)
@@ -391,9 +415,38 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
 			case "event", "queued-event":
-				event, ctx := job.event()
+				event, ctx := jb.event()
 				rlog = logger.FromContext(ctx)
 				key = eventJobKey(event.Type)
+
+				if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
+					// we have a rate limited event. We must reschedule if a) the event has an implicit
+					// schedule (happens at retry), or b) the event is too old
+					if utils.SafeBool(jb.ImplicitSchedule) ||
+						(rateLimit.maxAge > 0 && event.ScheduledAt != nil &&
+							time.Now().Sub(*event.ScheduledAt) > rateLimit.maxAge) {
+						var rateLimitedSchedule time.Time
+						deltaPG := rateLimit.delta.Seconds()
+						err = b.db.QueryRow(b.rateLimitQuery,
+							event.Type,
+							time.Now().UTC(),
+							deltaPG,
+						).Scan(&rateLimitedSchedule)
+						if err != nil {
+							err = fmt.Errorf("cannot get new time slot for rate limited event: %s #%d - %w", event.Type, jb.Serial, err)
+						} else {
+							var serial int
+							err = b.db.QueryRow(b.jobsUpdateScheduleQuery, &jb.Serial, &rateLimitedSchedule).Scan(&serial)
+							if err != nil {
+								err = fmt.Errorf("could not update schedule for rate limited event: %s #%d - %w", event.Type, jb.Serial, err)
+							} else {
+								err = rescheduledError
+							}
+						}
+						return
+					}
+				}
+
 				errorMessage = fmt.Sprintf("Event %v %v %v", event.Type, event.Resource, event.ResourceID)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.event(ctx, event)
@@ -401,25 +454,27 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan txJob, ready chan<- bool) {
 					err = fmt.Errorf("no handler for key %s", key)
 				}
 			default:
-				err = fmt.Errorf("unknown job type %s", job.Job)
+				err = fmt.Errorf("unknown job type %s", jb.Job)
 			}
 			return
 		}()
 		timeout.Stop()
 
-		if err != nil {
-			rlog.WithError(err).Error("error processing " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
+		if err == rescheduledError {
+			rlog.Info("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+
+		} else if err != nil {
+			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 		} else {
-			rlog.Info("successfully processed " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
+			rlog.Info("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 4)
 			var serial int
-			err = b.db.QueryRow(b.jobsDeleteQuery, &job.Serial).Scan(&serial)
+			err = b.db.QueryRow(b.jobsDeleteQuery, &jb.Serial).Scan(&serial)
 			if err != nil && err != sql.ErrNoRows {
-				rlog.WithError(err).Error("could not delete processed job " + key + "[" + job.Key + "] #" + strconv.Itoa(job.Serial))
+				rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 			}
 		}
 		ready <- true
-
 	}
 }
 
@@ -483,45 +538,49 @@ func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 // ProcessJobsSync commisions all pending jobs up to the specified maximum duration and then returns after the last commissioned job was
 // fully processed. It returns true if it has maxed out and there are more jobs to process, otherwise it returns false.
 // It you pass 0, it will process all pending jobs.
+//
+// The function uses a 5 minute timeout for the first retry, 15 minutes for the 2nd and 45 minutes for the last
 func (b *Backend) ProcessJobsSync(max time.Duration) bool {
+	return b.ProcessJobsSyncWithTimeouts(max, [3]time.Duration{5 * time.Minute, 15 * time.Minute, 45 * time.Minute})
+}
+
+// ProcessJobsSyncWithTimeouts commisions all pending jobs up to the specified maximum duration and then returns after the last commissioned job was
+// fully processed. It returns true if it has maxed out and there are more jobs to process, otherwise it returns false.
+// It you pass 0, it will process all pending jobs.
+//
+// Jobs will be tried up to 3 times according to the timeouts specified.
+func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]time.Duration) bool {
 	rlog := logger.FromContext(nil)
 	startTime := time.Now()
 
-	getJob := func() (txj txJob, err error) {
-		txj.tx, err = b.db.BeginTx(context.Background(), nil)
-		if err != nil {
-			rlog.WithError(err).Error("failed to begin transaction")
-			return
-		}
+	getJob := func() (j job, err error) {
 		now := time.Now().UTC()
-		err = txj.tx.QueryRow(b.jobsUpdateQuery,
+		err = b.db.QueryRow(b.jobsUpdateQuery,
 			now,
-			now.Add(5*time.Minute),  // first retry timeout
-			now.Add(15*time.Minute), // second retry timeout
-			now.Add(45*time.Minute), // third retry timeout before we give up
+			now.Add(timeouts[0]), // first retry timeout
+			now.Add(timeouts[1]), // second retry timeout
+			now.Add(timeouts[2]), // third retry timeout before we give up
 		).Scan(
-			&txj.Serial,
-			&txj.Job,
-			&txj.Type,
-			&txj.Key,
-			&txj.Resource,
-			&txj.ResourceID,
-			&txj.Payload,
-			&txj.Timestamp,
-			&txj.AttemptsLeft,
-			&txj.ContextData,
+			&j.Serial,
+			&j.Job,
+			&j.Type,
+			&j.Key,
+			&j.Resource,
+			&j.ResourceID,
+			&j.Payload,
+			&j.Timestamp,
+			&j.AttemptsLeft,
+			&j.ContextData,
+			&j.ScheduledAt,
+			&j.ImplicitSchedule,
 		)
-		if err != nil {
-			if err != sql.ErrNoRows {
-				rlog.Errorln("failed to retrieve job:", err.Error())
-			}
-			txj.tx.Rollback()
-			txj.tx = nil
+		if err != nil && err != sql.ErrNoRows {
+			rlog.Errorln("failed to retrieve job:", err.Error())
 		}
 		return
 	}
 
-	jobs := make(chan txJob, b.pipelineConcurrency)
+	jobs := make(chan job, b.pipelineConcurrency)
 	ready := make(chan bool, b.pipelineConcurrency)
 	for i := 0; i < b.pipelineConcurrency; i++ {
 		go b.pipelineWorker(i, jobs, ready)
@@ -579,11 +638,30 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 	b.callbacks[key] = jobHandler{event: handler}
 }
 
+type rateLimit struct {
+	delta  time.Duration
+	maxAge time.Duration
+}
+
+// DefineRateLimitForEvent defines a rate limit for the specified event. If the event is raised with RaiseEvent it will
+// be scheduled at the next available time slot, leaving a duration of delta between all events of the same
+// type. If at execution time the delta between the scheduled time and the actual time exceeds maxAge, then
+// the event will be rescheduled (and an error will be written to the logs)
+func (b *Backend) DefineRateLimitForEvent(event string, delta, maxAge time.Duration) {
+	if _, ok := b.rateLimits[event]; ok {
+		log.Fatalf("callback rate limit for %s already defined", event)
+	}
+	b.rateLimits[event] = rateLimit{delta: delta, maxAge: maxAge}
+}
+
 // RaiseEvent raises the requested event. Payload can be nil, an object or a []byte.
 // Callbacks registered with HandleEvent() will be called.
 //
 // Multiple events of the same kind (event plus key) to the very same resource (resource + resourceID) will be compressed,
 // i.e. the newest payload will overwrite the previous payload. If you do not want any compression, use QueueEvent() instead.
+//
+// If an event as a rate limit defined (see DefineRateLimitForEvent), then the event will be scheduled at the next
+// available time slot.
 //
 // Use ScheduleEvent if you want to schedule an event at a specific time.
 func (b *Backend) RaiseEvent(ctx context.Context, event Event) error {
@@ -706,6 +784,20 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	if scheduleAt != nil {
 		tmp := scheduleAt.UTC()
 		scheduleAtUTC = &tmp
+	} else if job == "event" || job == "queued-event" {
+		if rateLimit, ok := b.rateLimits[event.Type]; ok {
+			var rateLimitedSchedule time.Time
+			deltaPG := rateLimit.delta.Seconds()
+			err := b.db.QueryRow(b.rateLimitQuery,
+				event.Type,
+				time.Now().UTC(),
+				deltaPG,
+			).Scan(&rateLimitedSchedule)
+			if err != nil {
+				return http.StatusInternalServerError, fmt.Errorf("rate limiting event %s: %w", event.Type, err)
+			}
+			scheduleAtUTC = &rateLimitedSchedule
+		}
 	}
 
 	var serial int

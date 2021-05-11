@@ -53,11 +53,13 @@ type Backend struct {
 
 	collectionsAndSingletons map[string]bool
 	callbacks                map[string]jobHandler
+	rateLimits               map[string]rateLimit
 	interceptors             map[string]requestHandler
 
 	pipelineConcurrency int
 
-	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery, jobsUpdateQuery, jobsDeleteQuery string
+	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
+	jobsUpdateQuery, jobsDeleteQuery, jobsUpdateScheduleQuery, rateLimitQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
@@ -144,6 +146,7 @@ func New(bb *Builder) *Backend {
 		Registry:                 registry.New(bb.DB),
 		authorizationEnabled:     bb.AuthorizationEnabled,
 		callbacks:                make(map[string]jobHandler),
+		rateLimits:               make(map[string]rateLimit),
 		interceptors:             make(map[string]requestHandler),
 		collectionsAndSingletons: make(map[string]bool),
 		pipelineConcurrency:      pipelineConcurrency,
