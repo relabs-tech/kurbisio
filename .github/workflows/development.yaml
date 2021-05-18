@@ -53,7 +53,9 @@ jobs:
 
       - name: go test race
         run: |
-          go test ./... -race -count 1 -timeout 600s
+          go test ./core/... -race -count 1 -timeout 600s
+          go test ./iot/... -race -count 1 -timeout 600s
+          go test ./services/... -race -count 1 -timeout 600s
         env:
           POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
           POSTGRES_PASSWORD: "docker"
