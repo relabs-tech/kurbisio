@@ -311,14 +311,7 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	}
 
 	// we get 2 events with delta delay between them
-	for i := 0; i < 2; i++ {
-		t1 := *events[i].ScheduledAt
-		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d < 0 {
-			t.Fatalf("event #%d too early: %v", i, d)
-		}
-		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event #%d too late: %v", i, d)
-		}
+	if d := events[1].ScheduledAt.Sub(*events[0].ScheduledAt); d < delta {
+		t.Fatalf("events too close: %v", d)
 	}
-
 }
