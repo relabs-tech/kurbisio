@@ -42,7 +42,7 @@ jobs:
           go install golang.org/x/lint/golint@latest
           golint -set_exit_status $(go list ./... | grep -v generated)
 
-      - name: go test race
+      - name: go test
         run: |
           go test ./core/... -race -count 1 -timeout 600s 
           go test ./iot/... -race -count 1 -timeout 600s
