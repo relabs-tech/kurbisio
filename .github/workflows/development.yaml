@@ -44,7 +44,7 @@ jobs:
 
       - name: go test race
         run: |
-          go test ./core/... -race -count 1 -timeout 600s
+          go test ./core/... -race -count 1 -timeout 600s 
           go test ./iot/... -race -count 1 -timeout 600s
           go test ./services/... -race -count 1 -timeout 600s
         env:
