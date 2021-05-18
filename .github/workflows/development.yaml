@@ -124,6 +124,7 @@ jobs:
           echo "upload chats"
           cd $FITNESS_DIR/data/chat
           go run upsert.go -prune -url ${DEPLOY_URL} -token $TOKEN
+        shell: bash
 
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
