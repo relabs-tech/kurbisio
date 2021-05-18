@@ -13,9 +13,11 @@ name: Build & Test & Deploy
 
 jobs:
   test:
+    # Uncomment to run on the omen
     runs-on: [self-hosted, Linux, native]
     container: golang
-    name: test
+    # runs-on: ubuntu-18.04
+    name: test build deploy
 
     services:
       postgres:
@@ -35,28 +37,29 @@ jobs:
         with:
           go-version: ^1.16
 
+      - uses: actions/cache@v2
+        with:
+          path: |
+            /go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-backends-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-backends-
+
       - name: go lint
         run: |
-          go get -u golang.org/x/lint/golint
+          go install golang.org/x/lint/golint@latest
           golint -set_exit_status $(go list ./... | grep -v generated)
 
       - name: go test race
         run: |
-          go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           go test ./... -race -count 1 -timeout 600s
         env:
           POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
           POSTGRES_PASSWORD: "docker"
 
-  build:
-    runs-on: [self-hosted, docker, backend]
-    name: build & deploy
-    needs: test
-    steps:
-      - uses: actions/checkout@v2
       - name: build
         run: |
-          go get -u github.com/atombender/go-jsonschema/cmd/gojsonschema
           cd services/fitness
           GOOS=linux GOARCH=amd64 go build
 
