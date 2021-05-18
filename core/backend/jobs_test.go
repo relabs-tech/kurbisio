@@ -12,10 +12,9 @@ import (
 
 func TestPutEvent(t *testing.T) {
 	eventType := "some-event"
-	received := make(chan interface{}, 10)
+	received := make(chan Event, 10)
 	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
-		fmt.Printf("%v", event)
-		received <- nil
+		received <- event
 		return nil
 	})
 
@@ -30,9 +29,9 @@ func TestPutEvent(t *testing.T) {
 
 	testService.backend.ProcessJobsSync(-1)
 	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
 	case <-received:
+	default:
+		t.Fatal("Timeout waiting for event to be received")
 	}
 
 	// We now try with a non admin client
@@ -44,9 +43,9 @@ func TestPutEvent(t *testing.T) {
 
 	testService.backend.ProcessJobsSync(-1)
 	select {
-	case <-time.After(100 * time.Millisecond):
 	case <-received:
 		t.Fatal("Have received an event")
+	default:
 	}
 
 	// We now try with an admin and 'admin viewer' client
@@ -58,80 +57,65 @@ func TestPutEvent(t *testing.T) {
 
 	testService.backend.ProcessJobsSync(-1)
 	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Have not received an event")
 	case <-received:
+	default:
+		t.Fatal("Have not received an event")
 	}
 }
 
 func TestEventRetry(t *testing.T) {
 	eventType := "retry-event"
-	received := make(chan *time.Time, 10)
+	received := make(chan Event, 10)
 	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
-		received <- event.ScheduledAt
+		received <- event
 		return fmt.Errorf("this fails")
 	})
-	rec0 := time.Now().UTC()
+	t0 := time.Now()
 	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
 
+	var events []Event
+	numExpectedEvents := 4
 	timeouts := [3]time.Duration{time.Second, time.Second * 2, time.Second * 3}
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		if r != nil {
-			t.Fatal("raised event has scheduled_at, but should not")
+	timeout := 7 * time.Second
+
+	for {
+		if time.Now().Sub(t0) > timeout {
+			break
+		}
+		if len(events) == numExpectedEvents {
+			break
+		}
+		testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
+		select {
+		case e := <-received:
+			events = append(events, e)
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
-	time.Sleep(timeouts[0])
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(timeouts[0])); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(timeouts[0])); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
+	if len(events) != numExpectedEvents {
+		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
 	}
-	time.Sleep(timeouts[1])
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(timeouts[1])); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(timeouts[1])); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
+
+	if events[0].ScheduledAt != nil {
+		t.Fatal("raised event has scheduled_at, but should not")
 	}
-	time.Sleep(timeouts[2])
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(timeouts[2])); d < 0 {
-			t.Fatalf("event too early: %v", d)
+
+	// we get max 3 retry attempts
+	for i := 0; i < 3; i++ {
+		en := i + 1
+		t1 := *events[en].ScheduledAt
+		if d := t1.Sub(t0.Add(timeouts[i])); d < 0 {
+			t.Fatalf("event #%d too early: %v", en, d)
 		}
-		if d := rec.Sub(rec0.Add(timeouts[2])); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
+		if d := t1.Sub(t0.Add(timeouts[i])); d > 50*time.Millisecond {
+			t.Fatalf("event #%d too late: %v", en, d)
 		}
-		rec0 = rec
+		t0 = t1
 	}
 
 	// that's it, no more retries, we have failed
@@ -149,161 +133,144 @@ func TestEventRetry(t *testing.T) {
 
 func TestRateLimitEvent(t *testing.T) {
 	eventType := "rate-limited-event"
-	received := make(chan *time.Time, 10)
+	received := make(chan Event, 10)
 	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
-		received <- event.ScheduledAt
+		received <- event
 		return nil
-	})
-
-	delta := 1000 * time.Millisecond
-	testService.backend.DefineRateLimitForEvent(eventType, delta, time.Minute)
-	rec0 := time.Now().UTC()
-	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
-	if err != nil {
-		t.Fatalf("raise event error: %v", err)
-	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
-	if err != nil {
-		t.Fatalf("raise event error: %v", err)
-	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
-	if err != nil {
-		t.Fatalf("raise event error: %v", err)
-	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
-	if err != nil {
-		t.Fatalf("raise event error: %v", err)
-	}
-
-	testService.backend.ProcessJobsSync(-1)
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(0 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(0 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
-	}
-	time.Sleep(delta)
-	testService.backend.ProcessJobsSync(-1)
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(1 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(1 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
-	}
-	time.Sleep(delta)
-	testService.backend.ProcessJobsSync(-1)
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case <-received:
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(1 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(1 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
-	}
-	time.Sleep(delta)
-	testService.backend.ProcessJobsSync(-1)
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case <-received:
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(1 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(1 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-	}
-}
-
-func TestRateLimitEventRetry(t *testing.T) {
-	eventType := "rate-limited-event-retry"
-	received := make(chan *time.Time, 10)
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
-		received <- event.ScheduledAt
-		return fmt.Errorf("this fails")
 	})
 
 	delta := 500 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, time.Minute)
-	rec0 := time.Now().UTC()
+	t0 := time.Now().UTC()
+	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+
+	var events []Event
+	numExpectedEvents := 4
+	timeout := 4 * time.Second
+
+	for {
+		if time.Now().Sub(t0) > timeout {
+			break
+		}
+		if len(events) == numExpectedEvents {
+			break
+		}
+		testService.backend.ProcessJobsSync(-1)
+		select {
+		case e := <-received:
+			events = append(events, e)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if len(events) != numExpectedEvents {
+		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
+	}
+
+	// check that the first event has a schedule
+	t0 = *events[0].ScheduledAt
+
+	// we get 3 more events with delta delay between them
+	for i := 1; i < 3; i++ {
+		t1 := *events[i].ScheduledAt
+		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d < 0 {
+			t.Fatalf("event #%d too early: %v", i, d)
+		}
+		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d > 50*time.Millisecond {
+			t.Fatalf("event #%d too late: %v", i, d)
+		}
+	}
+
+}
+
+func TestRateLimitEventRetry(t *testing.T) {
+	eventType := "rate-limited-event-retry"
+
+	received := make(chan Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+		received <- event
+		return fmt.Errorf("this fails")
+	})
+
+	delta := 1000 * time.Millisecond
+	testService.backend.DefineRateLimitForEvent(eventType, delta, time.Minute)
+	t0 := time.Now().UTC()
 	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
 
+	var events []Event
+	numExpectedEvents := 2
 	timeouts := [3]time.Duration{200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond}
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(0 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(0 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
-		rec0 = rec
-	}
-	time.Sleep(200 * time.Millisecond)
-	// now the retry should fire (after 200ms), but since the event is rate limited, it should be put on the +200ms schedule from the original time.
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
+	timeout := 7 * time.Second
 
-	select {
-	case <-time.After(delta - 200*time.Millisecond):
-	case <-received:
-		t.Fatal("Have received an event")
+	for {
+		if time.Now().Sub(t0) > timeout {
+			break
+		}
+		if len(events) == numExpectedEvents {
+			break
+		}
+		testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
+		select {
+		case e := <-received:
+			events = append(events, e)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
-	// now the rescheduled event with rate limited schedule should fire
-	testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
-	select {
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(1 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
-		}
-		if d := rec.Sub(rec0.Add(1 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
-		}
+	if len(events) != numExpectedEvents {
+		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
+	}
+
+	// the first event came right away
+	t1 := *events[0].ScheduledAt
+	if d := t1.Sub(t0); d < 0 {
+		t.Fatalf("event #%d too early: %v", 0, d)
+	}
+	if d := t1.Sub(t0); d > 50*time.Millisecond {
+		t.Fatalf("event #%d too late: %v", 0, d)
+	}
+	t0 = t1
+
+	// the 2nd event came after a 200ms retry timeout but was put back onto the rate limit schedule, so delta (=1000ms)
+	t1 = *events[1].ScheduledAt
+	if d := t1.Sub(t0.Add(delta)); d < 0 {
+		t.Fatalf("event #%d too early: %v", 1, d)
+	}
+	if d := t1.Sub(t0.Add(delta)); d > 50*time.Millisecond {
+		t.Fatalf("event #%d too late: %v", 1, d)
 	}
 }
 
 func TestRateLimitEventMaxAge(t *testing.T) {
 	eventType := "rate-limited-event-maxage"
-	received := make(chan *time.Time, 10)
+	received := make(chan Event, 10)
 	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
-		received <- event.ScheduledAt
+		received <- event
 		return nil
 	})
 
 	delta := 200 * time.Millisecond
-	maxAge := 200 * time.Millisecond
+	maxAge := 400 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, maxAge)
 	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
@@ -313,50 +280,45 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
-	if err != nil {
-		t.Fatalf("raise event error: %v", err)
-	}
-
-	testService.backend.ProcessJobsSync(-1)
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case <-received:
-	}
 
 	// now we simulate the server not being responsive
-	time.Sleep(maxAge + 3*delta)
-	// and continue processing. The rate limited events is now older than max age and should be rescheduled by the system
-	rec0 := time.Now().UTC()
-	testService.backend.ProcessJobsSync(-1)
+	time.Sleep(2 * time.Second)
+	// and continue processing. The rate limited events are now older than max age and should be rescheduled by the system
+	t0 := time.Now().UTC()
 
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(0 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
+	var events []Event
+	numExpectedEvents := 2
+	timeout := 5 * time.Second
+
+	for {
+		if time.Now().Sub(t0) > timeout {
+			break
 		}
-		if d := rec.Sub(rec0.Add(0 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
+		if len(events) == numExpectedEvents {
+			break
+		}
+		testService.backend.ProcessJobsSync(-1)
+		select {
+		case e := <-received:
+			events = append(events, e)
+		default:
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
-	time.Sleep(delta)
-	testService.backend.ProcessJobsSync(-1)
+	if len(events) != numExpectedEvents {
+		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
+	}
 
-	select {
-	case <-time.After(delta):
-		t.Fatal("Timeout waiting for event to be received")
-	case r := <-received:
-		rec := *r
-		if d := rec.Sub(rec0.Add(1 * delta)); d < 0 {
-			t.Fatalf("event too early: %v", d)
+	// we get 2 events with delta delay between them
+	for i := 0; i < 2; i++ {
+		t1 := *events[i].ScheduledAt
+		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d < 0 {
+			t.Fatalf("event #%d too early: %v", i, d)
 		}
-		if d := rec.Sub(rec0.Add(1 * delta)); d > 50*time.Millisecond {
-			t.Fatalf("event too late: %v", d)
+		if d := t1.Sub(t0.Add(time.Duration(i) * delta)); d > 50*time.Millisecond {
+			t.Fatalf("event #%d too late: %v", i, d)
 		}
 	}
+
 }
