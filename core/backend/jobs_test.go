@@ -88,11 +88,11 @@ func TestEventRetry(t *testing.T) {
 		if len(events) == numExpectedEvents {
 			break
 		}
-		testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
 		select {
 		case e := <-received:
 			events = append(events, e)
 		default:
+			testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -170,11 +170,11 @@ func TestRateLimitEvent(t *testing.T) {
 		if len(events) == numExpectedEvents {
 			break
 		}
-		testService.backend.ProcessJobsSync(-1)
 		select {
 		case e := <-received:
 			events = append(events, e)
 		default:
+			testService.backend.ProcessJobsSync(-1)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -228,11 +228,11 @@ func TestRateLimitEventRetry(t *testing.T) {
 		if len(events) == numExpectedEvents {
 			break
 		}
-		testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
 		select {
 		case e := <-received:
 			events = append(events, e)
 		default:
+			testService.backend.ProcessJobsSyncWithTimeouts(-1, timeouts)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -297,11 +297,11 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 		if len(events) == numExpectedEvents {
 			break
 		}
-		testService.backend.ProcessJobsSync(-1)
 		select {
 		case e := <-received:
 			events = append(events, e)
 		default:
+			testService.backend.ProcessJobsSync(-1)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
