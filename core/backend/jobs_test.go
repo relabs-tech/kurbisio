@@ -203,9 +203,14 @@ func TestRateLimitEventRetry(t *testing.T) {
 	eventType := "rate-limited-event-retry"
 
 	received := make(chan Event, 10)
+	failedOnce := false
 	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
 		received <- event
-		return fmt.Errorf("this fails")
+		if !failedOnce {
+			failedOnce = true
+			return fmt.Errorf("this fails")
+		}
+		return nil
 	})
 
 	delta := 1000 * time.Millisecond
@@ -218,8 +223,8 @@ func TestRateLimitEventRetry(t *testing.T) {
 
 	var events []Event
 	numExpectedEvents := 2
-	timeouts := [3]time.Duration{200 * time.Millisecond, 200 * time.Millisecond, 200 * time.Millisecond}
-	timeout := 7 * time.Second
+	timeouts := [3]time.Duration{500 * time.Millisecond, 5 * time.Minute, 45 * time.Minute}
+	timeout := 2 * time.Second
 
 	for {
 		if time.Now().Sub(t0) > timeout {
@@ -251,7 +256,7 @@ func TestRateLimitEventRetry(t *testing.T) {
 	}
 	t0 = t1
 
-	// the 2nd event came after a 200ms retry timeout but was put back onto the rate limit schedule, so delta (=1000ms)
+	// the 2nd event came after a 500ms retry timeout but was put back onto the rate limit schedule, so delta (=1000ms)
 	t1 = *events[1].ScheduledAt
 	if d := t1.Sub(t0.Add(delta)); d < 0 {
 		t.Fatalf("event #%d too early: %v", 1, d)
