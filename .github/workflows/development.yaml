@@ -51,6 +51,12 @@ jobs:
           POSTGRES: "host=postgres port=5432 user=runner dbname=postgres sslmode=disable"
           POSTGRES_PASSWORD: "docker"
 
+  build:
+    runs-on: [self-hosted, docker, backend]
+    name: build & deploy
+    needs: test
+    steps:
+      - uses: actions/checkout@v2
       - name: build
         run: |
           cd services/fitness
