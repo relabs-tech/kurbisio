@@ -266,7 +266,7 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	})
 
 	delta := 200 * time.Millisecond
-	maxAge := 400 * time.Millisecond
+	maxAge := 1000 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, maxAge)
 	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {

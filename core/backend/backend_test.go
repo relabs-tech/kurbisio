@@ -221,6 +221,7 @@ func TestMain(m *testing.M) {
 		JSONSchemas:          []string{schemaWorkoutString},
 		JSONSchemasRefs:      []string{schemaRefString},
 		UpdateSchema:         true,
+		PipelineConcurrency:  1,
 	})
 	testService.client = client.NewWithRouter(router).WithAdminAuthorization()
 	testService.clientNoAuth = client.NewWithRouter(router)
