@@ -324,6 +324,10 @@ func (b *Backend) handleResourceRoutes() {
 		if rc.blob != nil {
 			b.createBlobResource(router, *rc.blob)
 		}
+	}
+
+	// Create relations after resources since a relation needs both members of the relation to be created
+	for _, rc := range allResources {
 		if rc.relation != nil {
 			b.createRelationResource(router, *rc.relation)
 		}

@@ -123,11 +123,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	leftCollection, ok := b.collectionFunctions[rc.Left]
 	if !ok {
-		panic("missing left resource")
+		panic(fmt.Sprintf("missing left resource `%s`", rc.Left))
 	}
 	rightCollection, ok := b.collectionFunctions[rc.Right]
 	if !ok {
-		panic("missing right resource")
+		panic(fmt.Sprintf("missing right resource `%s`", rc.Right))
 	}
 
 	// register this relation, so that other relations can relate to it

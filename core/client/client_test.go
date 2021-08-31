@@ -1,7 +1,6 @@
 package client_test
 
 import (
-	"encoding/json"
 	"net/url"
 	"os"
 	"testing"
@@ -138,11 +137,6 @@ type TestService struct {
 }
 
 var testService TestService
-
-func asJSON(object interface{}) string {
-	j, _ := json.Marshal(object)
-	return string(j)
-}
 
 func TestUpsert(t *testing.T) {
 	if err := envdecode.Decode(&testService); err != nil {
