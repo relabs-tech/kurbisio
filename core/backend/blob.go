@@ -580,7 +580,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			status := http.StatusBadRequest
 			// Non unique external keys are reported as code Code 23505
 			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
-				status = http.StatusUnprocessableEntity
+				status = http.StatusConflict
 			}
 			tx.Rollback()
 			http.Error(w, "cannot create "+this+": "+err.Error(), status)

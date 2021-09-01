@@ -1492,8 +1492,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			status := http.StatusInternalServerError
 			msg := "Error 4734"
 			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502" || err.Code == "23503") {
-				if err.Code == "23505" || err.Code == "23502" {
-					// Non unique external keys are reported as code Code 23505, not null constraints as COde 23502
+				if err.Code == "23505" {
+					// Non unique external keys are reported as code Code 23505
+					status = http.StatusConflict
+					msg = "constraint violation"
+					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
+				} else if err.Code == "23502" {
+					// Not null constraints are reported as Code 23502
 					status = http.StatusUnprocessableEntity
 					msg = "constraint violation"
 					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)

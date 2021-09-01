@@ -217,7 +217,7 @@ func TestBlobExternalID(t *testing.T) {
 	}
 	status, err := testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
 	status, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
-	assert.Equal(t, http.StatusUnprocessableEntity, status, err)
+	assert.Equal(t, http.StatusConflict, status, err)
 }
 
 func TestFiltersBlob(t *testing.T) {

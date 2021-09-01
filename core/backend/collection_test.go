@@ -196,7 +196,7 @@ func TestCollectionExternalID(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := testService.client.RawPost("/as", a, &a)
-	assert.Equal(t, http.StatusUnprocessableEntity, status, err)
+	assert.Equal(t, http.StatusConflict, status, err)
 }
 
 func TestCollectionWithSchemaValidation(t *testing.T) {
