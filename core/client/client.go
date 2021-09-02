@@ -67,8 +67,15 @@ func (c Client) WithToken(token string) Client {
 // (this works only directly against the mux router, for a normal client
 //  use WithToken()))
 func (c Client) WithAdminAuthorization() Client {
+	return c.WithRole("admin")
+}
+
+// WithRole returns a new client with role authorization
+// (this works only directly against the mux router, for a normal client
+//  use WithToken()))
+func (c Client) WithRole(role string) Client {
 	c.auth = &access.Authorization{
-		Roles: []string{"admin"},
+		Roles: []string{role},
 	}
 	return c
 }

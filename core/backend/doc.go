@@ -272,6 +272,19 @@ In this case you can also have a relation between "fleet/user" and "fleet/device
 resources "fleet/user/device" and "fleet/device/user".
 
 Relations support separate permits for the left and the right resource, called "left_permits" and "right_permits".
+"left_permits" applies to the left/right relations.
+"right_permits" applies to the right/left relations.
+
+Examples:
+  - to read left/{left_id}/right/{right_id}, one needs to have the "read" permission on the left_permit.
+  - to read right/{right_id}/left/{left_id}, one needs to have the "read" permission on the right_permit.
+  - to create left/{left_id}/right/{right_id}, one needs to have the "create" permission on the left_permit.
+  - to create right/{right_id}/left/{left_id}, one needs to have the "create" permission on the right_permit.
+  - to list left/{left_id}/rights, one needs to have the "list" permission on the left_permit.
+  - to list right/{right_id}/lefts, one needs to have the "list" permission on the right_permit.
+  - to delete left/{left_id}/right/{right_id}, one needs to have the "delete" permission on the left_permit.
+  - to delete right/{right_id}/left/{left_id}, one needs to have the "delete" permission on the right_permit.
+  - the update permission is not used
 
 For each relation, the number of related resources for one other resource is currently limited by 1000. In the above
 example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.

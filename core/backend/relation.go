@@ -483,7 +483,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationDelete, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(rightResources, core.OperationDelete, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
