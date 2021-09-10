@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joeshaw/envdecode"
 	_ "github.com/lib/pq"
+
 	"github.com/relabs-tech/backends/core/backend"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/csql"
@@ -118,11 +119,6 @@ func TestRelation(t *testing.T) {
 	status, _ := role2Client.RawPut(fmt.Sprintf("/bs/%s/as/%s", b.BID, a.AID), nil, nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("Expecting unauthorized access, got %v", status)
-	}
-
-	status, _ = role2Client.RawPut(fmt.Sprintf("/as/%s/bs/%s", a.AID, b.BID), nil, nil)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	// Then we create the relation a/b
