@@ -341,11 +341,11 @@ authorizes specific roles to execute specific operations. The different operatio
 "delete", "list" and "clear". The "list"-operation is the retrieval of the entire collection, "clear" deletes the entire
 collection.
 
-"admin viewer" also has right to access all resources in read only mode. Only read and list operatinos are permitted.
+"admin viewer" also has right to access all resources in read only mode. Only read and list operations are permitted.
 
 For example, you want to declare a resource "picture", which is a child-resource of "user". Now you want to
 give each user permission to create, read and delete their own pictures, but only their own pictures. You
-delare a role for a user  - in this case "userrole" - and specify the resource like this:
+declare a role for a user - in this case "userrole" - and specify the resource like this:
 
 		{
 			"resource": "user/picture",
