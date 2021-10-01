@@ -82,7 +82,10 @@ func TestStatistics(t *testing.T) {
 			t.Fatalf("AverageSizeB is expected larger than 0 for resource %v", *s)
 		}
 	}
-
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func getResourceByName(name string, stats statisticsDetails) *resourceStatistics {

@@ -70,6 +70,10 @@ func TestEtagGetBlob(t *testing.T) {
 			}
 		})
 	}
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEtagGetBlobCollection(t *testing.T) {
@@ -131,6 +135,10 @@ func TestEtagGetBlobCollection(t *testing.T) {
 			}
 		})
 	}
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestEtagBlobRegenerated checks that if the binary data of a mutable blob is modified through a
@@ -167,6 +175,11 @@ func TestEtagBlobRegenerated(t *testing.T) {
 	if h1.Get("ETag") == h2.Get("ETag") {
 		t.Fatal("ETag was not updated: ", h2.Get("ETag"))
 	}
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 // TestEtagBlobCollectionRegenerated checks that if another element is added to a collection through
@@ -201,6 +214,11 @@ func TestEtagBlobCollectionRegenerated(t *testing.T) {
 	if h1.Get("ETag") == h2.Get("ETag") {
 		t.Fatal("ETag was not updated: ", h2.Get("ETag"))
 	}
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func TestBlobExternalID(t *testing.T) {
@@ -233,9 +251,13 @@ func TestFiltersBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err = testService.client.RawPostBlob("/blobs", map[string]string{}, blobData, nil); err != nil {
+		t.Fatal(err)
+	}
+
 	var collectionResult []Blob
-	// we now search for the searachable property and should only find our single item a
-	_, err = testService.client.RawGet("/blobs?filter=blob_id="+blob.BlobID.String(), &collectionResult)
+	// we now search for the searchable property and should only find our single item a
+	_, err = testService.client.RawGet("/blobs?filter=content_type=image/png", &collectionResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,6 +359,10 @@ func TestClearBlob(t *testing.T) {
 	}
 	if len(collectionResult) != 1 {
 		t.Fatalf("Expecting a2's blobs to still be there but there are %d items", len(collectionResult))
+	}
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
 	}
 
 }

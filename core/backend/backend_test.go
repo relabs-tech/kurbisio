@@ -885,6 +885,11 @@ func TestBlob(t *testing.T) {
 		t.Fatal("returned binary data is not equal")
 	}
 
+	_, err = testService.client.RawDelete("/blobs") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func TestNotifications(t *testing.T) {
