@@ -37,7 +37,7 @@ Example:
 The example creates one resource "user" with an external unique index "identity".
 
 A user has a child resource "user/profile", which is declared as a singleton, i.e. every user can only have one single profile.
-Hance a profile does not have an id of its own, but uses the user_id as its primary identifier, and there
+Hence a profile does not have an id of its own, but uses the user_id as its primary identifier, and there
 is a convenient singular resource accessor for a user's profile.
 
 Finally there is a relation from device to user which creates two more virtuals child resources "user/device" and "device/user".
@@ -407,6 +407,55 @@ the received Etag of a request into the If-None-Match header of a subsequent req
 simply response to that subsequent with a 304 Not Modified in case the resource was not changed. In case
 the resource was changed, the request will be answered as usual.
 
+Externally stored data
+
+Collections allow to store a file with each individual collection item. Unlike blobs which should
+remain of reasonable size to preserve the performance of the database, a file associated to a collection
+item can be large since it is stored outside of the database.
+The storage backend can be either an AWS S3 bucket or a local file system. Selecting the storage backend is
+done at startup time using <TODO ADD DETAILS>
+
+Local storage is most likely to be used only for testing purpose to avoid the need for an internet connection
+and an S3 bucket. Using local filesystem implementation is not intended to be used at scale since it has not been
+implemented with performance and scalability as requirements.
+
+To enable file storage for a resource, set property "with_companion_file" to true in the resource configuration.
+
+Example:
+
+{
+	"collections": [
+	  {
+		"resource": "release",
+		"schema_id": "https://backend.com/schemas/release.json"
+	  },
+	  {
+		"resource": "release/artefact",
+		"with_companion_file": "true"
+	  }
+	],
+	"singletons": [
+	],
+	"relations": [
+	]
+  }
+
+In the above example, the release/artefact resource will have the possibility to store a file together with this resource.
+Accessing this collection will add to the returned object four string properties `companion_download_url`,
+`companion_upload_url`.
+
+They will be populated based on the type of request:
+GET adds `download_url`
+POST adds `upload_url`
+PUT adds `upload_url`
+LIST no extra field. If flag `with_companion_urls=true` is set, `download_url` are provided for each item
+
+
+As their name suggest, the `companion_download_url` and `companion_upload_url`allow to respectively download and upload data.
+As a result, uploading and downloading file is a two-steps operation. First the download URL is fetched, then
+the URL is used to fetch data. The URL are pre-signed URL with a validity time which is defined in the url itself.
+
+Deleting a resource also delete the associated companion file if it exist
 
 Statistics
 
