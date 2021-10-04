@@ -917,12 +917,12 @@ func (c Client) RawDelete(path string) (int, error) {
 }
 
 // PostMultipart upload data using a Multipart Form
-func (c Client) PostMultipart(url, key string, data []byte) (status int, err error) {
+func (c Client) PostMultipart(url string, data []byte) (status int, err error) {
 	// Prepare a form that you will submit to that URL.
 	var b bytes.Buffer
 	w := multipart.NewWriter(&b)
 	var fw io.Writer
-	if fw, err = w.CreateFormFile(key, key); err != nil {
+	if fw, err = w.CreateFormFile("file", "file"); err != nil {
 		return
 	}
 

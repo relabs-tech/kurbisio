@@ -26,4 +26,4 @@
 #generate go files
 generated_*.go
 
-
+.DS_Store

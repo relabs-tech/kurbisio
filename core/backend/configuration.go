@@ -26,6 +26,7 @@ type collectionConfiguration struct {
 	SchemaID             string          `json:"schema_id"`
 	WithLog              bool            `json:"with_log"`
 	Default              json.RawMessage `json:"default"`
+	WithCompanionFile    bool            `json:"with_companion_file"`
 }
 
 // singletonConfiguration describes a singleton resource

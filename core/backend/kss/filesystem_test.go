@@ -41,7 +41,7 @@ func Test_PresignedURL_PostGet(t *testing.T) {
 	urlWithoutHost := strings.TrimPrefix(pushURL, "https://localhost")
 	cl := client.NewWithRouter(router)
 
-	_, err = cl.PostMultipart(urlWithoutHost, key, []byte("123"))
+	_, err = cl.PostMultipart(urlWithoutHost, []byte("123"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func Test_Delete(t *testing.T) {
 	urlWithoutHost := strings.TrimPrefix(pushURL, "https://localhost")
 	cl := client.NewWithRouter(router)
 
-	_, err = cl.PostMultipart(urlWithoutHost, key, []byte("123"))
+	_, err = cl.PostMultipart(urlWithoutHost, []byte("123"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -84,13 +84,6 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Default().Infof("Filesystem: [%s] key: '%s'", r.Method, key)
 	if r.Method == http.MethodGet {
-
-		// etag := "compute me"
-		// w.Header().Set("Etag", etag)
-		// if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
-		// 	w.WriteHeader(http.StatusNotModified)
-		// 	return
-		// }
 		http.ServeFile(w, r, filePath)
 		return
 	}
@@ -100,12 +93,14 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1200: Could not call ParseMultipartForm %s key: '%s'", r.URL.String(), key)
 			http.Error(w, "Error 1200", http.StatusInternalServerError)
+			return
 		}
 
-		file, _, err := r.FormFile(key)
+		file, _, err := r.FormFile("file")
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1201: Could not read FormFile %s key: '%s'", r.URL.String(), key)
 			http.Error(w, "Error 1201", http.StatusInternalServerError)
+			return
 		}
 		defer file.Close()
 
@@ -113,18 +108,21 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1202: Could not create `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1202", http.StatusInternalServerError)
+			return
 		}
 
 		dstFile, err := os.Create(path.Join(f.baseFolder, key, "file"))
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1203: Could not create `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1203", http.StatusInternalServerError)
+			return
 		}
 		defer dstFile.Close()
 		_, err = io.Copy(dstFile, file)
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1204: Could not copy `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1204", http.StatusInternalServerError)
+			return
 		}
 
 		return
@@ -134,11 +132,54 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// Delete deltes a the key file
+// Delete deletes a the key file
 func (f LocalFilesystem) Delete(key string) error {
-	filePath := filepath.Join(f.baseFolder, key)
-	return os.RemoveAll(filePath)
+	filePath := filepath.Join(f.baseFolder, key, "file")
+	if err := os.RemoveAll(filePath); err != nil {
+		return err
+	}
+	f.recurseDeleteParentIfEmpty(filepath.Join(f.baseFolder, key))
+	return nil
+}
 
+// Delete the current dir if it is empty and delete the parent if it is also empty after deleting the current
+func (f LocalFilesystem) recurseDeleteParentIfEmpty(currentDir string) {
+	absCurrentDir, err := filepath.Abs(currentDir)
+	if err != nil {
+		logger.Default().WithError(err).Error("Could not get abs path of ", currentDir)
+		return
+	}
+	absBaseFolder, err := filepath.Abs(f.baseFolder)
+	if err != nil {
+		logger.Default().WithError(err).Error("Could not get abs path of basefolder ", f.baseFolder)
+		return
+	}
+	if absBaseFolder == absCurrentDir {
+		return
+	}
+
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		logger.Default().WithError(err).Error("Could not list ", currentDir)
+		return
+	}
+	if len(entries) > 0 {
+		return
+	}
+	if err := os.Remove(currentDir); err != nil {
+		logger.Default().WithError(err).Error("Could not delete ", currentDir)
+	}
+	f.recurseDeleteParentIfEmpty(filepath.Dir(currentDir))
+}
+
+// DeleteAllWithPrefix all keys starting with
+func (f LocalFilesystem) DeleteAllWithPrefix(key string) error {
+	filePath := filepath.Join(f.baseFolder, key)
+	if err := os.RemoveAll(filePath); err != nil {
+		return err
+	}
+	f.recurseDeleteParentIfEmpty(filepath.Dir(filepath.Join(f.baseFolder, key)))
+	return nil
 }
 
 // GetPreSignedURL returns a pre-signed URL that can be used with the given method until expiry time is passed
@@ -150,6 +191,10 @@ func (f LocalFilesystem) GetPreSignedURL(method, key string, expiry time.Time) (
 	v.Set("method", method)
 	if strings.Contains(key, "..") {
 		err = fmt.Errorf("'..' is not allowed in a key")
+		return
+	}
+	if key == "" {
+		err = fmt.Errorf("empty key is not allowed")
 		return
 	}
 	u := url.URL{
@@ -216,27 +261,4 @@ func (f LocalFilesystem) isValid(URL string) bool {
 		return false
 	}
 	return true
-}
-
-// ifNoneMatchFound returns true if etag is found in ifNoneMatch. The format of ifNoneMatch is one
-// of the following:
-// If-None-Match: "<etag_value>"
-// If-None-Match: "<etag_value>", "<etag_value>", …
-// If-None-Match: *
-func ifNoneMatchFound(ifNoneMatch, etag string) bool {
-	ifNoneMatch = strings.Trim(ifNoneMatch, " ")
-	if len(ifNoneMatch) == 0 {
-		return false
-	}
-	if ifNoneMatch == "*" {
-		return true
-	}
-	for _, s := range strings.Split(ifNoneMatch, ",") {
-		s = strings.Trim(s, " \"")
-		t := strings.Trim(etag, " \"")
-		if s == t {
-			return true
-		}
-	}
-	return false
 }

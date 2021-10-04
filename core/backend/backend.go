@@ -23,6 +23,7 @@ import (
 
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/backend/kss"
 	"github.com/relabs-tech/backends/core/client"
 	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/logger"
@@ -67,6 +68,7 @@ type Backend struct {
 	hasJobsToProcessLock    sync.Mutex
 
 	jsonValidator *schema.Validator
+	KssDriver     kss.Driver
 }
 
 // Builder is a builder helper for the Backend
@@ -100,6 +102,9 @@ type Builder struct {
 
 	// if true, always update the schema. Otherwise only update when the schema json has changed.
 	UpdateSchema bool
+
+	// Defines the configuration for the KSS service
+	KssConfiguration kss.Configuration
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -212,6 +217,7 @@ func New(bb *Builder) *Backend {
 		logger.Default().Debugln("use previous schema version")
 	}
 
+	b.configureKSS(bb.KssConfiguration)
 	logger.AddRequestID(b.router)
 	b.handleCORS()
 	access.HandleAuthorizationRoute(b.router)

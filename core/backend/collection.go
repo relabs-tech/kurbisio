@@ -375,6 +375,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
+		var withCompanionUrls bool
 		for key, array := range urlQuery {
 			if key != "filter" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
@@ -431,6 +432,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			case "metaonly":
 				metaonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			case "with_companion_urls":
+				withCompanionUrls, err = strconv.ParseBool(array[0])
 				if err != nil {
 					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 					return
@@ -495,11 +503,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// fmt.Printf("\n\nQUERY %#v parameters: %#v\n\n", sqlQuery, queryParameters)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
-			if err != nil {
-				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-				http.Error(w, "Error 4724", http.StatusInternalServerError)
-				return
-			}
+			nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+			http.Error(w, "Error 4724", http.StatusInternalServerError)
+			return
 		}
 
 		response := []interface{}{}
@@ -515,6 +521,23 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if !metaonly {
+				var uploadURL string
+				if rc.WithCompanionFile && withCompanionUrls {
+					var key string
+					for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+						key += "/" + columns[i] + "/" + selectors[columns[i]]
+					}
+					key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
+
+					uploadURL, err = b.KssDriver.GetPreSignedURL(http.MethodGet, key, time.Now().Add(time.Minute*15))
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 5736: list companion URL")
+						http.Error(w, "Error 5736", http.StatusInternalServerError)
+						return
+					}
+					object["companion_download_url"] = uploadURL
+				}
+
 				mergeProperties(object)
 				// apply defaults if applicable
 				if rc.Default != nil {
@@ -1147,6 +1170,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4730", http.StatusInternalServerError)
 			return
 		}
+		if b.KssDriver != nil {
+			var key string
+			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			}
+			key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
+
+			err = b.KssDriver.DeleteAllWithPrefix(key)
+			if err != nil {
+				nillog.WithError(err).Error("Could not delete key ", key)
+			}
+		}
+
 		mergeProperties(object)
 		jsonData, _ := json.Marshal(object)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
@@ -1245,13 +1281,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		if externalValue == "" { // delete entire collection
-			sqlQuery = clearQuery + sqlWhereAll + ";"
+			sqlQuery = clearQuery + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+4)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d);", externalColumn, propertiesIndex+4)
+			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+1)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
@@ -1265,12 +1301,37 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
 
-		_, err = tx.Exec(sqlQuery, queryParameters...)
+		sqlQuery += " RETURNING " + primary + "_id;"
+
+		rows, err := tx.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			tx.Rollback()
 			nillog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
+		}
+		defer rows.Close()
+
+		if b.KssDriver != nil {
+			var basekey string
+			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+				basekey += "/" + columns[i] + "/" + selectors[columns[i]]
+			}
+			basekey += "/" + primary + "_id/"
+			for rows.Next() {
+				values := []interface{}{&uuid.UUID{}}
+				err := rows.Scan(values...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+					http.Error(w, "Error 4725", http.StatusInternalServerError)
+					return
+				}
+				key := basekey + values[0].(*uuid.UUID).String()
+				err = b.KssDriver.DeleteAllWithPrefix(key)
+				if err != nil {
+					nillog.WithError(err).Error("Could not delete key ", key)
+				}
+			}
 		}
 
 		// add collection identifiers to parameters for the notification
@@ -1524,6 +1585,25 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4735", http.StatusInternalServerError)
 			return
 		}
+
+		if rc.WithCompanionFile {
+			var uploadURL string
+			var key string
+			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			}
+			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(http.MethodPost, key, time.Now().Add(time.Minute*15))
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5736: create companion URL")
+				http.Error(w, "Error 5736", http.StatusInternalServerError)
+				return
+			}
+			response["companion_upload_url"] = uploadURL
+		}
+
 		mergeProperties(response)
 		jsonData, _ = json.Marshal(response)
 
