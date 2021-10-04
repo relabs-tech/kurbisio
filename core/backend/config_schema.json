@@ -50,6 +50,10 @@
                     },
                     "with_log": {
                         "type": "boolean"
+                    },
+                    "with_companion": {
+                        "type": "boolean",
+                        "description": "If true this resource will allow to add companion file stored externally"
                     }
                 }
             }

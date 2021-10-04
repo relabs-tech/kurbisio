@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -913,4 +914,49 @@ func (c Client) RawDelete(path string) (int, error) {
 		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
 	}
 	return status, nil
+}
+
+// PostMultipart upload data using a Multipart Form
+func (c Client) PostMultipart(url, key string, data []byte) (status int, err error) {
+	// Prepare a form that you will submit to that URL.
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	var fw io.Writer
+	if fw, err = w.CreateFormFile(key, key); err != nil {
+		return
+	}
+
+	if _, err = fw.Write(data); err != nil {
+		return
+	}
+
+	w.Close()
+
+	req, err := http.NewRequest("POST", url, &b)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	var res *http.Response
+	if c.router != nil {
+		rec := httptest.NewRecorder()
+		c.router.ServeHTTP(rec, req)
+		res = rec.Result()
+	} else {
+
+		if c.token != "" {
+			req.Header.Add("Authorization", "Bearer "+c.token)
+		}
+		res, err = c.httpClient.Do(req)
+		if err != nil {
+			return res.StatusCode, err
+		}
+		defer res.Body.Close()
+	}
+	status = res.StatusCode
+	if status != http.StatusOK {
+		err = fmt.Errorf("bad status: %s", res.Status)
+	}
+	return
 }

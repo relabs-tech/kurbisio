@@ -113,7 +113,7 @@ var configurationJSON string = `{
 			"foo_value":42,
 			"foo_bool":true
 		}
-	  }
+	  } 
 	],
 	"singletons": [
 	  {
