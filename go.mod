@@ -10,6 +10,10 @@ require (
 	github.com/DrmagicE/gmqtt v0.1.2
 	github.com/aws/aws-lambda-go v1.23.0
 	github.com/aws/aws-sdk-go v1.38.38
+	github.com/aws/aws-sdk-go-v2 v1.9.1 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.8.2 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.4.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.16.0
 	github.com/awslabs/aws-lambda-go-api-proxy v0.10.0
 	github.com/dchest/stemmer v0.0.0-20161207102402-66719a20c4b5
 	github.com/dghubble/oauth1 v0.7.0

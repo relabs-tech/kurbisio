@@ -1,0 +1,172 @@
+package kss_test
+
+import (
+	"net/http"
+	"net/url"
+	"testing"
+	"time"
+
+	_ "github.com/lib/pq"
+	"github.com/relabs-tech/backends/core/backend/kss"
+	"github.com/relabs-tech/backends/core/client"
+)
+
+func test_PresignedURL_PostGet(t *testing.T, driver kss.Driver, cl client.Client) {
+	// Test that to upload data can be done using signed URL
+
+	key := "some key"
+	// Push some data
+	pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = cl.RawPut(pushURL, []byte("123"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Now try to read the data
+	getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var data []byte
+	_, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "123" {
+		t.Fatalf("Expecting %v got '%v'", "123", string(data))
+	}
+
+	// Check that if we taint the URL, we are not authorized
+	pushURL, err = driver.GetPreSignedURL(kss.Put, "some other key", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tainted, err := url.Parse(pushURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := tainted.Query()
+	v.Set("key", "another key")
+	tainted.RawQuery = v.Encode()
+	status, err := cl.RawPut(tainted.String(), []byte("123"), nil)
+
+	if status != http.StatusForbidden {
+		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
+	}
+
+	// Check that if the URL is expired, we are not authorized
+	pushURL, err = driver.GetPreSignedURL(kss.Put, key, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Millisecond)
+	status, err = cl.RawPut(pushURL, []byte("123"), nil)
+	if status != http.StatusForbidden {
+		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
+	}
+
+	// Check that if we get a pre sign URL for Get, we cannot Post with it
+	pushURL, err = driver.GetPreSignedURL(kss.Get, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = cl.PostMultipart(pushURL, []byte("123"))
+	if status != http.StatusForbidden {
+		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
+	}
+
+	err = driver.Delete("another key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = driver.Delete("some key")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
+func test_Delete(t *testing.T, driver kss.Driver, cl client.Client) {
+	// Test that a file can be deleted
+
+	key := "some key"
+	// Push some data
+	pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = cl.PostMultipart(pushURL, []byte("123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now try to read the data
+	getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var data []byte
+	status, _, _ := cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	if status != http.StatusOK {
+		t.Fatalf("Expecting %v got '%v'", http.StatusOK, status)
+	}
+
+	err = driver.Delete(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	if status != http.StatusNotFound {
+		t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
+	}
+}
+
+func test_DeleteAllWithPrefix(t *testing.T, driver kss.Driver, cl client.Client) {
+	// Test that a file can be deleted
+
+	var urls []string
+	for _, key := range []string{"key/1", "key/2"} {
+		// Push some data
+		pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = cl.PostMultipart(pushURL, []byte("123"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Now try to read the data
+		getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		urls = append(urls, getURL)
+
+		var data []byte
+		_, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := driver.DeleteAllWithPrefix("key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range urls {
+		var data []byte
+		status, _, _ := cl.RawGetBlobWithHeader(u, map[string]string{}, &data)
+		if status != http.StatusNotFound {
+			t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
+		}
+	}
+
+}

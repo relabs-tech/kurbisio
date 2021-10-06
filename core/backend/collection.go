@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/backends/core"
 	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/backends/core/backend/kss"
 	"github.com/relabs-tech/backends/core/csql"
 	"github.com/relabs-tech/backends/core/logger"
 )
@@ -529,7 +530,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
 
-					uploadURL, err = b.KssDriver.GetPreSignedURL(http.MethodGet, key, time.Now().Add(time.Minute*15))
+					uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Get, key, time.Minute*15)
 					if err != nil {
 						nillog.WithError(err).Errorf("Error 5736: list companion URL")
 						http.Error(w, "Error 5736", http.StatusInternalServerError)
@@ -1594,7 +1595,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
 
-			uploadURL, err = b.KssDriver.GetPreSignedURL(http.MethodPost, key, time.Now().Add(time.Minute*15))
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Minute*15)
 			if err != nil {
 				tx.Rollback()
 				rlog.WithError(err).Errorf("Error 5736: create companion URL")

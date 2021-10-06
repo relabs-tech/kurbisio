@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,7 +62,7 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 
 	if !f.isValid(u.String()) {
 		logger.Default().Errorf("invalid signature for %s", u.String())
-		http.Error(w, "not authorized", http.StatusUnauthorized)
+		http.Error(w, "not authorized", http.StatusForbidden)
 		return
 	}
 
@@ -73,7 +72,7 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != method {
 		logger.Default().Errorf("Signature valid for %s, but was used for %s in %s", method, r.Method, r.URL.String())
-		w.WriteHeader(http.StatusUnauthorized)
+		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 	if strings.Contains(key, "..") {
@@ -87,24 +86,9 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filePath)
 		return
 	}
-	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+	if r.Method == http.MethodPut {
 
-		err := r.ParseMultipartForm(200 * 1024 * 1024)
-		if err != nil {
-			logger.Default().WithError(err).Errorf("Error 1200: Could not call ParseMultipartForm %s key: '%s'", r.URL.String(), key)
-			http.Error(w, "Error 1200", http.StatusInternalServerError)
-			return
-		}
-
-		file, _, err := r.FormFile("file")
-		if err != nil {
-			logger.Default().WithError(err).Errorf("Error 1201: Could not read FormFile %s key: '%s'", r.URL.String(), key)
-			http.Error(w, "Error 1201", http.StatusInternalServerError)
-			return
-		}
-		defer file.Close()
-
-		err = os.MkdirAll(path.Join(f.baseFolder, key), 0700)
+		err := os.MkdirAll(path.Join(f.baseFolder, key), 0700)
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1202: Could not create `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1202", http.StatusInternalServerError)
@@ -118,7 +102,8 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer dstFile.Close()
-		_, err = io.Copy(dstFile, file)
+		defer r.Body.Close()
+		_, err = io.Copy(dstFile, r.Body)
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1204: Could not copy `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1204", http.StatusInternalServerError)
@@ -184,11 +169,11 @@ func (f LocalFilesystem) DeleteAllWithPrefix(key string) error {
 
 // GetPreSignedURL returns a pre-signed URL that can be used with the given method until expiry time is passed
 // key must be a valid file name
-func (f LocalFilesystem) GetPreSignedURL(method, key string, expiry time.Time) (URL string, err error) {
+func (f LocalFilesystem) GetPreSignedURL(method Method, key string, expireIn time.Duration) (URL string, err error) {
 	v := url.Values{}
 	v.Set("key", key)
-	v.Set("expiry", expiry.Format(time.RFC3339))
-	v.Set("method", method)
+	v.Set("expiry", time.Now().Add(expireIn).Format(time.RFC3339))
+	v.Set("method", string(method))
 	if strings.Contains(key, "..") {
 		err = fmt.Errorf("'..' is not allowed in a key")
 		return
@@ -208,11 +193,7 @@ func (f LocalFilesystem) GetPreSignedURL(method, key string, expiry time.Time) (
 	// operation.
 	rng := rand.Reader
 
-	data, err := json.Marshal(u)
-	if err != nil {
-		return
-	}
-	hashed := sha256.Sum256(data)
+	hashed := sha256.Sum256([]byte(v.Encode()))
 
 	signature, err := rsa.SignPKCS1v15(rng, f.privateKey, crypto.SHA256, hashed[:])
 	if err != nil {
@@ -248,13 +229,8 @@ func (f LocalFilesystem) isValid(URL string) bool {
 
 	signature := v.Get("signature")
 	v.Del("signature")
-	u.RawQuery = v.Encode()
 
-	data, err := json.Marshal(u)
-	if err != nil {
-		return false
-	}
-	hashed := sha256.Sum256(data)
+	hashed := sha256.Sum256([]byte(v.Encode()))
 	err = rsa.VerifyPKCS1v15(&f.privateKey.PublicKey, crypto.SHA256, hashed[:], []byte(signature))
 	if err != nil {
 

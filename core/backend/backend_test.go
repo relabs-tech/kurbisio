@@ -204,6 +204,7 @@ func asJSON(object interface{}) string {
 }
 
 func TestMain(m *testing.M) {
+
 	if err := envdecode.Decode(&testService); err != nil {
 		panic(err)
 	}

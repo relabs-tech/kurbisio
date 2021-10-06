@@ -20,11 +20,7 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 		logger.Default().Info("KSS not in use")
 		return nil
 	}
-	logger.Default().Info("KSS in use")
-
-	if config.DriverType == kss.None {
-		panic("kss is used but no configuration is found")
-	}
+	logger.Default().Info("KSS in use with driver", config.DriverType)
 
 	if config.DriverType == kss.DriverTypeLocal {
 		if config.LocalConfiguration == nil {
@@ -37,9 +33,21 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 
 		drv, err := kss.NewLocalFilesystem(b.router, *config.LocalConfiguration, *u)
 		if err != nil {
-			return fmt.Errorf("cannot create new KSS driver %s %w", b.publicURL, err)
+			return fmt.Errorf("cannot create new Local KSS driver %s %w", b.publicURL, err)
 		}
 		b.KssDriver = drv
+	} else if config.DriverType == kss.DriverTypeAWSS3 {
+		if config.S3Configuration == nil {
+			return fmt.Errorf("kss expecting a configuration for S3 KSS, but got nothing")
+		}
+
+		drv, err := kss.NewS3(*config.S3Configuration)
+		if err != nil {
+			return fmt.Errorf("cannot create new S3 KSS driver %s %w", b.publicURL, err)
+		}
+		b.KssDriver = drv
+	} else {
+		panic("kss is used but unknown driver type :" + config.DriverType)
 	}
 	return nil
 

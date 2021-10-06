@@ -932,7 +932,7 @@ func (c Client) PostMultipart(url string, data []byte) (status int, err error) {
 
 	w.Close()
 
-	req, err := http.NewRequest("POST", url, &b)
+	req, err := http.NewRequest("PUT", url, &b)
 	if err != nil {
 		return
 	}
@@ -950,7 +950,10 @@ func (c Client) PostMultipart(url string, data []byte) (status int, err error) {
 		}
 		res, err = c.httpClient.Do(req)
 		if err != nil {
-			return res.StatusCode, err
+			if res != nil {
+				return res.StatusCode, err
+			}
+			return 0, err
 		}
 		defer res.Body.Close()
 	}
