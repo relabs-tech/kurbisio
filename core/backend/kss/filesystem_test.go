@@ -27,7 +27,7 @@ func Test_PresignedURL_PostGet(t *testing.T) {
 	}
 	defer os.RemoveAll(dir) // clean up
 
-	f, err := kss.New(router, dir, *u, nil)
+	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, nil}, *u)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func Test_Delete(t *testing.T) {
 	}
 	defer os.RemoveAll(dir) // clean up
 
-	f, err := kss.New(router, dir, *u, nil)
+	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, nil}, *u)
 	if err != nil {
 		t.Fatal(err)
 	}

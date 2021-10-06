@@ -35,7 +35,7 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 			return fmt.Errorf("cannot parse url %s %w", b.publicURL, err)
 		}
 
-		drv, err := kss.New(b.router, config.LocalConfiguration.BasePath, *u, nil)
+		drv, err := kss.NewLocalFilesystem(b.router, *config.LocalConfiguration, *u)
 		if err != nil {
 			return fmt.Errorf("cannot create new KSS driver %s %w", b.publicURL, err)
 		}

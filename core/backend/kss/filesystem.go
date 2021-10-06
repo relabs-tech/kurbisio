@@ -28,20 +28,20 @@ type LocalFilesystem struct {
 	privateKey *rsa.PrivateKey
 }
 
-// New returns a new LocalFilesystem
-func New(router *mux.Router, baseFolder string, publicURL url.URL, privateKey *rsa.PrivateKey) (*LocalFilesystem, error) {
-	if privateKey == nil {
+// NewLocalFilesystem returns a new LocalFilesystem
+func NewLocalFilesystem(router *mux.Router, config LocalConfiguration, publicURL url.URL) (*LocalFilesystem, error) {
+	if config.PrivateKey == nil {
 		logger.Default().Warn("No private key provided to sign URLs, a random one will be generated")
 		logger.Default().Warn("This can only work when running in a single instance configuration")
 		logger.Default().Warn("This cannot work when running in AWS Lambda")
 
 		var err error
-		privateKey, err = rsa.GenerateKey(rand.Reader, 2048)
+		config.PrivateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return nil, err
 		}
 	}
-	f := LocalFilesystem{router: router, baseFolder: baseFolder, publicURL: publicURL, privateKey: privateKey}
+	f := LocalFilesystem{router: router, baseFolder: config.BasePath, publicURL: publicURL, privateKey: config.PrivateKey}
 	f.configure()
 	return &f, nil
 }

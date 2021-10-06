@@ -125,7 +125,8 @@ func TestCompanion(t *testing.T) {
 		KssConfiguration: kss.Configuration{
 			DriverType: kss.DriverTypeLocal,
 			LocalConfiguration: &kss.LocalConfiguration{
-				BasePath: dir,
+				BasePath:   dir,
+				PrivateKey: nil,
 			},
 		},
 	})

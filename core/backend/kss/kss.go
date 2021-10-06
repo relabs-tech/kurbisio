@@ -1,6 +1,9 @@
 package kss
 
-import "time"
+import (
+	"crypto/rsa"
+	"time"
+)
 
 // kss package provide fonctionality to store large file outside of the standard Kurbisio database.
 // There is currently to possible backends: a local file system and AWS S3
@@ -32,5 +35,6 @@ type Configuration struct {
 
 // LocalConfiguration contains the configuration for the local filesystem KSS service
 type LocalConfiguration struct {
-	BasePath string
+	BasePath   string
+	PrivateKey *rsa.PrivateKey
 }
