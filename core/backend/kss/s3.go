@@ -185,12 +185,11 @@ func (s *S3) UploadData(key string, data []byte) error {
 
 // ListAllWithPrefix Lists all keys with prefix
 func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
-	s.logger.Infoln("Deleting all ", s.baseKeyName+key)
+	s.logger.Infoln("ListAllWithPrefix all ", s.baseKeyName+key)
 	client := s3.NewFromConfig(s.config)
 
 	var continuationToken *string
 	for {
-		s.logger.Infoln("Deleting all ", s.baseKeyName+key)
 		input := &s3.ListObjectsV2Input{
 			Bucket:            &s.bucket,
 			Prefix:            utils.StringPtr(s.baseKeyName + key),
@@ -225,8 +224,6 @@ func (s *S3) listenSQS() {
 	)
 
 	if err != nil {
-		fmt.Println(err)
-
 		s.logger.WithError(err).Error("Could not GetQueueUrl for queue ", s.sqsQueueName)
 		return
 	}
@@ -263,7 +260,6 @@ func (s *S3) listenSQS() {
 
 						err = json.Unmarshal([]byte(*m.Body), &msg)
 						if err != nil {
-							fmt.Println("Got an error receiving messages:")
 							s.logger.WithError(err).Error("Could not unmarshal ", *m.Body)
 							continue
 						}
@@ -272,7 +268,7 @@ func (s *S3) listenSQS() {
 								continue
 							}
 							if strings.Index(e.S3.Object.Key, s.baseKeyName) >= 0 && s.callback != nil {
-								s.logger.Println("Got key " + e.S3.Object.Key)
+								s.logger.Infoln("Got key " + e.S3.Object.Key)
 
 								if err := s.callback(FileUpdatedEvent{
 									Etags: e.S3.Object.ETag,
@@ -283,7 +279,8 @@ func (s *S3) listenSQS() {
 									s.logger.WithError(err).Error("Could not invoke callback ", *m.Body)
 								}
 							} else {
-								fmt.Println("got message for another base")
+								s.logger.Infoln("Got wrong key " + e.S3.Object.Key)
+
 							}
 						}
 						if _, err = client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{

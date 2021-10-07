@@ -588,7 +588,7 @@ func testCompanion_Notifications(t *testing.T, kssDrv kss.DriverType) {
 		}
 	}()
 	select {
-	case <-time.After(9 * time.Second):
+	case <-time.After(120 * time.Second):
 		done <- true
 		t.Fatal("Timeout waiting for notification to be received")
 	case <-called:

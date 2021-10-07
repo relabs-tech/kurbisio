@@ -43,7 +43,7 @@ func test_PresignedURL_PostGet(t *testing.T, driver kss.Driver, cl client.Client
 		t.Fatal(err)
 	}
 	select {
-	case <-time.After(9 * time.Second):
+	case <-time.After(120 * time.Second):
 		t.Fatal("Timeout waiting for event to be received")
 	case <-called:
 	}
