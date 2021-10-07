@@ -25,6 +25,7 @@ type LocalFilesystem struct {
 	baseFolder string
 	publicURL  url.URL
 	privateKey *rsa.PrivateKey
+	callback   FileUpdatedCallBack
 }
 
 // NewLocalFilesystem returns a new LocalFilesystem
@@ -40,19 +41,30 @@ func NewLocalFilesystem(router *mux.Router, config LocalConfiguration, publicURL
 			return nil, err
 		}
 	}
-	f := LocalFilesystem{router: router, baseFolder: config.BasePath, publicURL: publicURL, privateKey: config.PrivateKey}
+	f := LocalFilesystem{
+		router:     router,
+		baseFolder: config.BasePath,
+		publicURL:  publicURL,
+		privateKey: config.PrivateKey,
+	}
+
 	f.configure()
 	return &f, nil
 }
 
-func (f LocalFilesystem) configure() {
+// WithCallBack Replaces teh current callback with WithCallBack
+func (f *LocalFilesystem) WithCallBack(callback FileUpdatedCallBack) {
+	f.callback = callback
+}
+
+func (f *LocalFilesystem) configure() {
 	logger.Default().Debugln("filesystem routes enabled")
 	logger.Default().Debugln("  handle statistics route: /kuribisio/filesystem GET")
 
 	f.router.Handle("/kurbisio/filesystem", http.HandlerFunc(f.handler)).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPost)
 }
 
-func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
+func (f *LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
 	u := r.URL
 	if u.Scheme == "" && u.Host == "" {
@@ -110,6 +122,21 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if f.callback != nil {
+			s, err := dstFile.Stat()
+			size := s.Size()
+			if err != nil {
+				logger.Default().WithError(err).Errorf("Could not obtain stat for file %s", dstFile.Name())
+			}
+
+			go f.callback(FileUpdatedEvent{
+				Etags: time.Now().Format(time.RFC1123),
+				Key:   key,
+				Type:  "uploaded",
+				Size:  size,
+			})
+		}
+
 		return
 	}
 	w.WriteHeader(http.StatusMethodNotAllowed)
@@ -118,7 +145,7 @@ func (f LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete deletes a the key file
-func (f LocalFilesystem) Delete(key string) error {
+func (f *LocalFilesystem) Delete(key string) error {
 	filePath := filepath.Join(f.baseFolder, key, "file")
 	if err := os.RemoveAll(filePath); err != nil {
 		return err
@@ -127,8 +154,8 @@ func (f LocalFilesystem) Delete(key string) error {
 	return nil
 }
 
-// Delete the current dir if it is empty and delete the parent if it is also empty after deleting the current
-func (f LocalFilesystem) recurseDeleteParentIfEmpty(currentDir string) {
+// recurseDeleteParentIfEmpty the current dir if it is empty and delete the parent if it is also empty after deleting the current
+func (f *LocalFilesystem) recurseDeleteParentIfEmpty(currentDir string) {
 	absCurrentDir, err := filepath.Abs(currentDir)
 	if err != nil {
 		logger.Default().WithError(err).Error("Could not get abs path of ", currentDir)
@@ -158,7 +185,7 @@ func (f LocalFilesystem) recurseDeleteParentIfEmpty(currentDir string) {
 }
 
 // DeleteAllWithPrefix all keys starting with
-func (f LocalFilesystem) DeleteAllWithPrefix(key string) error {
+func (f *LocalFilesystem) DeleteAllWithPrefix(key string) error {
 	filePath := filepath.Join(f.baseFolder, key)
 	if err := os.RemoveAll(filePath); err != nil {
 		return err
@@ -169,7 +196,7 @@ func (f LocalFilesystem) DeleteAllWithPrefix(key string) error {
 
 // GetPreSignedURL returns a pre-signed URL that can be used with the given method until expiry time is passed
 // key must be a valid file name
-func (f LocalFilesystem) GetPreSignedURL(method Method, key string, expireIn time.Duration) (URL string, err error) {
+func (f *LocalFilesystem) GetPreSignedURL(method Method, key string, expireIn time.Duration) (URL string, err error) {
 	v := url.Values{}
 	v.Set("key", key)
 	v.Set("expiry", time.Now().Add(expireIn).Format(time.RFC3339))
@@ -208,7 +235,7 @@ func (f LocalFilesystem) GetPreSignedURL(method Method, key string, expireIn tim
 }
 
 // isValid tells whether or not this url is valid
-func (f LocalFilesystem) isValid(URL string) bool {
+func (f *LocalFilesystem) isValid(URL string) bool {
 	u, err := url.Parse(URL)
 	if err != nil {
 		return false

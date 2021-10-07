@@ -851,6 +851,10 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		logger.FromContext(nil).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
 	}
 
+	if !b.hasCollectionOrSingleton(resource) {
+		logger.FromContext(nil).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
+	}
+
 	if len(operations) == 0 {
 		operations = []core.Operation{core.OperationCreate, core.OperationUpdate, core.OperationDelete, core.OperationClear}
 	}
@@ -858,6 +862,17 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		if operation == core.OperationRead || operation == core.OperationList {
 			logger.FromContext(nil).Fatalf("resource notifications only work for mutable operations. Do you want HandleResourceRequest instead?")
 		}
+		if operation == core.OperationCompanionUploaded {
+			for _, c := range b.config.Collections {
+				if c.Resource == resource {
+					if !c.WithCompanionFile {
+						logger.FromContext(nil).Fatalf("handle resource notification for %s: operation %s only supported when companion feature is enabled", resource, operation)
+					}
+					break
+				}
+			}
+		}
+
 		key := notificationJobKey(resource, operation)
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(nil).Fatalf("resource notification handler for %s already installed", key)

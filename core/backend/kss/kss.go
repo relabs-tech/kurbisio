@@ -13,7 +13,19 @@ type Driver interface {
 	GetPreSignedURL(method Method, key string, expireIn time.Duration) (URL string, err error)
 	Delete(key string) error
 	DeleteAllWithPrefix(key string) error
+	WithCallBack(FileUpdatedCallBack)
 }
+
+// FileUpdatedEvent contains information about a file event
+type FileUpdatedEvent struct {
+	Type  string
+	Key   string
+	Etags string
+	Size  int64
+}
+
+// FileUpdatedCallBack are called when a new file has been uploaded
+type FileUpdatedCallBack func(event FileUpdatedEvent) error
 
 // DriverType represents the different type of KSS Drivers
 type DriverType string
@@ -65,6 +77,9 @@ type S3Configuration struct {
 
 	// The prefix that will be added to add keys
 	KeyPrefix string
+
+	// SQSNotificationQueue defines the queue to listen to get event notification
+	SQSNotificationQueue string
 }
 
 // S3Credentials contains S3 Credentials

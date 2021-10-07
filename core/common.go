@@ -11,6 +11,7 @@ import (
 type Operation string
 
 // all supported database operations
+// OperationCompanionUploaded is only applicable if the reosurce has companion file feature enabled
 const (
 	OperationCreate Operation = "create"
 	OperationRead   Operation = "read"
@@ -18,6 +19,8 @@ const (
 	OperationDelete Operation = "delete"
 	OperationList   Operation = "list"
 	OperationClear  Operation = "clear"
+
+	OperationCompanionUploaded Operation = "companion_uploaded"
 )
 
 // UnmarshalJSON is a custom JSON unmarshaller

@@ -11,8 +11,8 @@ import (
 	"github.com/relabs-tech/backends/core/client"
 )
 
-func Test_Local_PresignedURL_PostGet(t *testing.T) {
-	// Test that to upload data can be done using signed URL
+func Test_Local_PresignedURL_PutGet(t *testing.T) {
+	// Test that upload data can be done using signed URL
 	router := mux.NewRouter()
 	u, err := url.Parse("https://localhost")
 	if err != nil {

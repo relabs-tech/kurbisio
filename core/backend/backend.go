@@ -217,7 +217,10 @@ func New(bb *Builder) *Backend {
 		logger.Default().Debugln("use previous schema version")
 	}
 
-	b.configureKSS(bb.KssConfiguration)
+	err = b.configureKSS(bb.KssConfiguration)
+	if err != nil {
+		log.Fatalf("Invalid json %v", err)
+	}
 	logger.AddRequestID(b.router)
 	b.handleCORS()
 	access.HandleAuthorizationRoute(b.router)

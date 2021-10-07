@@ -25,15 +25,16 @@ func TestMain(m *testing.M) {
 
 var s3Credentials kss.S3Credentials
 
-func Test_S3_PresignedURL_PostGet(t *testing.T) {
-	// Test that to upload data can be done using signed URL
+func Test_S3_PresignedURL_PutGet(t *testing.T) {
+	// Test upload and download with pre signed URL
 
 	s, err := kss.NewS3(kss.S3Configuration{
-		AccessID:      s3Credentials.AccessID,
-		AccessKey:     s3Credentials.AccessKey,
-		AWSBucketName: "kss-test",
-		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format(time.RFC3339) + "/",
+		AccessID:             s3Credentials.AccessID,
+		AccessKey:            s3Credentials.AccessKey,
+		AWSBucketName:        "kss-test",
+		AWSRegion:            "eu-central-1",
+		KeyPrefix:            t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
+		SQSNotificationQueue: "TestS3BucketNotificationToSQS",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func Test_S3_Delete(t *testing.T) {
 		AccessKey:     s3Credentials.AccessKey,
 		AWSBucketName: "kss-test",
 		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format(time.RFC3339) + "/",
+		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func Test_S3_DeleteAllWithPrefix(t *testing.T) {
 		AccessKey:     s3Credentials.AccessKey,
 		AWSBucketName: "kss-test",
 		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format(time.RFC3339) + "/",
+		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +83,7 @@ func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
 		AccessKey:     s3Credentials.AccessKey,
 		AWSBucketName: "kss-test",
 		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format(time.RFC3339) + "/",
+		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
 	})
 	if err != nil {
 		t.Fatal(err)
