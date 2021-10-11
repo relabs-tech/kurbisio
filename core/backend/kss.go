@@ -2,10 +2,11 @@ package backend
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 	"github.com/relabs-tech/backends/core"

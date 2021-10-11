@@ -2,11 +2,12 @@ package backend
 
 import (
 	"compress/gzip"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/lib/pq"
 

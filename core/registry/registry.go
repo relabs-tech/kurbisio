@@ -5,9 +5,10 @@ The package uses JSON to serialize the data.
 package registry
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/relabs-tech/backends/core/csql"
 )

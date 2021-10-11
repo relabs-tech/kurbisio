@@ -2,13 +2,14 @@ package access
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"

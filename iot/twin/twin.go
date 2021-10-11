@@ -2,11 +2,12 @@ package twin
 
 import (
 	"database/sql"
-	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/relabs-tech/backends/core/logger"
 

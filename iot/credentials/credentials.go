@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -15,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/relabs-tech/backends/core/logger"
 

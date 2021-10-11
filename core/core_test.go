@@ -1,9 +1,10 @@
 package core
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/goccy/go-json"
 
 	_ "github.com/lib/pq"
 )

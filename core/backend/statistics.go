@@ -1,10 +1,11 @@
 package backend
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+
+	"github.com/goccy/go-json"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"

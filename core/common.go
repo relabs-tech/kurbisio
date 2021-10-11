@@ -1,9 +1,10 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/goccy/go-json"
 )
 
 // Operation represents a modifying backend storage operation, one of Create, Read, Update, Delete, List, Clear

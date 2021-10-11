@@ -1,10 +1,11 @@
 package access
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"

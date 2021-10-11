@@ -62,6 +62,7 @@ require (
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/go-fonts/liberation v0.1.1 // indirect
 	github.com/go-latex/latex v0.0.0-20210118124228-b3d85cf34e07 // indirect
+	github.com/goccy/go-json v0.7.9 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.5.2 // indirect

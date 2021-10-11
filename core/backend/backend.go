@@ -3,7 +3,6 @@ package backend
 import (
 	"crypto/sha1"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"net/http"
 

@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -15,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"

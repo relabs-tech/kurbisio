@@ -3,12 +3,13 @@ package kss
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"

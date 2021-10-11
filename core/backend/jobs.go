@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +10,8 @@ import (
 	"runtime/debug"
 	"strconv"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"

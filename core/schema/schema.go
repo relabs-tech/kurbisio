@@ -2,9 +2,10 @@ package schema
 
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/xeipuuv/gojsonschema"
 )

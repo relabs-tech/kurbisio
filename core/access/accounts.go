@@ -1,8 +1,9 @@
 package access
 
 import (
-	"encoding/json"
 	"fmt"
+
+	"github.com/goccy/go-json"
 
 	"github.com/relabs-tech/backends/core/csql"
 )

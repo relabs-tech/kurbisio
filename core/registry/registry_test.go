@@ -1,10 +1,11 @@
 package registry
 
 import (
-	"encoding/json"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/backends/core/csql"

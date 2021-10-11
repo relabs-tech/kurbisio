@@ -1,7 +1,7 @@
 package backend
 
 import (
-	"encoding/json"
+	"github.com/goccy/go-json"
 
 	"github.com/relabs-tech/backends/core/access"
 )

@@ -2,12 +2,13 @@ package backend
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"net/http"
 
