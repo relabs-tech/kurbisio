@@ -1186,7 +1186,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		mergeProperties(object)
 		jsonData, _ := json.Marshal(object)
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
+
+		var silent bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
+
+		if silent {
+			err = tx.Commit()
+
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, primaryID, jsonData)
+		}
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4750: cannot QueryRow")
 			http.Error(w, "Error 4750", http.StatusInternalServerError)

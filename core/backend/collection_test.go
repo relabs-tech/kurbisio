@@ -125,6 +125,24 @@ func TestEtagGetCollection(t *testing.T) {
 	}
 }
 
+func TestDeleteCollection(t *testing.T) {
+	b := B{}
+	c := C{}
+	if _, err := testService.client.RawPost("/bs", b, &b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawPost("/bs/"+b.BID.String()+"/cs", c, &c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawDelete("/bs/" + "all" + "/cs/" + c.CID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testService.client.RawDelete("/bs/" + b.BID.String()); err != nil {
+		t.Fatal(err)
+	}
+
+}
+
 // TestEtagRegenerated checks that if a property of an element is modified through a PUT request,
 // the ETag is modified
 func TestEtagRegenerated(t *testing.T) {
