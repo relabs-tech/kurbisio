@@ -3,6 +3,7 @@ package csql
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/lib/pq" // load database driver for postgres
 	"github.com/relabs-tech/backends/core/logger"
@@ -36,9 +37,16 @@ func OpenWithSchema(dataSourceName, dataSourcePassword, schema string) *DB {
 		schema = "public"
 	} else {
 		logger.Default().Infoln("selected database schema:", schema)
-		_, err = db.Exec(`CREATE extension IF NOT EXISTS "uuid-ossp";
-CREATE schema IF NOT EXISTS ` + schema + `;
-`)
+		_, err = db.Exec(`CREATE extension IF NOT EXISTS "uuid-ossp";`)
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate key value violates unique constraint \"pg_extension_name_index\"") {
+				logger.Default().Error("installing uuid-ossp extension failed, this should not happen except in CI")
+			} else {
+				panic(err)
+			}
+		}
+
+		_, err = db.Exec(`CREATE schema IF NOT EXISTS ` + schema + `;`)
 		if err != nil {
 			panic(err)
 		}
