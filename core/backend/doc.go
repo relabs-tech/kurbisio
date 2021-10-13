@@ -441,7 +441,7 @@ Example:
   }
 
 In the above example, the release/artefact resource will have the possibility to store a file together with this resource.
-Accessing this collection will add to the returned object four string properties `companion_download_url`,
+Accessing this collection will add to the returned object two string properties `companion_download_url`,
 `companion_upload_url`.
 
 They will be populated based on the type of request:

@@ -43,10 +43,13 @@ func NewS3(kssConfig S3Configuration) (*S3, error) {
 		return nil, fmt.Errorf("AWSBucketName must not be empty")
 	}
 
+	options := []func(*config.LoadOptions) error{config.WithRegion(kssConfig.AWSRegion)}
+	if kssConfig.AccessID != "" {
+		options = append(options, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(kssConfig.AccessID, kssConfig.AccessKey, "")))
+	}
 	config, err := config.LoadDefaultConfig(
 		context.TODO(),
-		config.WithRegion(kssConfig.AWSRegion),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(kssConfig.AccessID, kssConfig.AccessKey, "")),
+		options...,
 	)
 
 	if err != nil {
@@ -216,6 +219,7 @@ func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
 }
 
 func (s *S3) listenSQS() {
+	s.logger.Infof("Listening to SQS queue %s\n", s.sqsQueueName)
 	client := sqs.NewFromConfig(s.config)
 
 	// Get URL of queue
@@ -251,46 +255,21 @@ func (s *S3) listenSQS() {
 					}
 					s.logger.Infof("Got %d SQS messages\n", len(msgResult.Messages))
 
+					var messages []events.SQSMessage
+
+					// ReceiveMessage gives back types.Message while we want vents.SQSMessage
 					for _, m := range msgResult.Messages {
-						if m.Body == nil {
-							continue
-						}
-						var msg struct {
-							Records []events.S3EventRecord `json:"Records"`
-						}
+						messages = append(messages, events.SQSMessage{Body: utils.SafeString(m.Body)})
+					}
 
-						err = json.Unmarshal([]byte(*m.Body), &msg)
-						if err != nil {
-							s.logger.WithError(err).Error("Could not unmarshal ", *m.Body)
-							continue
-						}
-						for _, e := range msg.Records {
-							if e.EventName != "ObjectCreated:Put" {
-								continue
-							}
-							if strings.Index(e.S3.Object.Key, s.baseKeyName) >= 0 && s.callback != nil {
-								s.logger.Infoln("Got key " + e.S3.Object.Key)
-
-								if err := s.callback(FileUpdatedEvent{
-									Etags: e.S3.Object.ETag,
-									Key:   strings.TrimPrefix(e.S3.Object.Key, s.baseKeyName),
-									Size:  e.S3.Object.Size,
-									Type:  "uploaded",
-								}); err != nil {
-									s.logger.WithError(err).Error("Could not invoke callback ", *m.Body)
-								}
-							} else {
-								s.logger.Infoln("Got wrong key " + e.S3.Object.Key)
-
-							}
-						}
+					s.ProcessIncomingSQSMessageRecords(messages)
+					for _, m := range msgResult.Messages {
 						if _, err = client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
 							QueueUrl:      urlResult.QueueUrl,
 							ReceiptHandle: m.ReceiptHandle,
 						}); err != nil {
 							s.logger.WithError(err).Error("Could not delete message ", *m.Body)
 						}
-
 					}
 
 					s.stopListeningAtMutex.Lock()
@@ -304,31 +283,43 @@ func (s *S3) listenSQS() {
 	}()
 }
 
-// PurgeSQS purges the SQS queue of all previous messages
-func (s *S3) PurgeSQS() error {
-	client := sqs.NewFromConfig(s.config)
+// ProcessIncomingSQSMessageRecords processes messages coming from the SQS queue connected to the
+// S3 bucket that is used by thos S3 instance
+func (s *S3) ProcessIncomingSQSMessageRecords(messages []events.SQSMessage) {
+	for _, m := range messages {
+		if m.Body == "" {
+			s.logger.Error("Empty body ")
+			continue
+		}
+		var msg struct {
+			Records []events.S3EventRecord `json:"Records"`
+		}
 
-	// Get URL of queue
-	urlResult, err := client.GetQueueUrl(
-		context.TODO(),
-		&sqs.GetQueueUrlInput{QueueName: &s.sqsQueueName},
-	)
+		err := json.Unmarshal([]byte(m.Body), &msg)
+		if err != nil {
+			s.logger.WithError(err).Error("Could not unmarshal ", m.Body)
+			continue
+		}
 
-	if err != nil {
-		fmt.Println(err)
+		for _, e := range msg.Records {
+			if e.EventName != "ObjectCreated:Put" {
+				s.logger.Infoln("Got unexpected event name" + e.EventName)
+				continue
+			}
+			if strings.Index(e.S3.Object.Key, s.baseKeyName) >= 0 && s.callback != nil {
+				s.logger.Infoln("Got Uploaded key " + e.S3.Object.Key)
 
-		s.logger.WithError(err).Error("Could not GetQueueUrl for queue ", s.sqsQueueName)
-		return err
+				if err := s.callback(FileUpdatedEvent{
+					Etags: e.S3.Object.ETag,
+					Key:   strings.TrimPrefix(e.S3.Object.Key, s.baseKeyName),
+					Size:  e.S3.Object.Size,
+					Type:  "uploaded",
+				}); err != nil {
+					s.logger.WithError(err).Errorf("Could not invoke callback %+v", e)
+				}
+			} else {
+				s.logger.Errorln("Got wrong key " + e.S3.Object.Key)
+			}
+		}
 	}
-
-	gMInput := &sqs.PurgeQueueInput{
-		QueueUrl: urlResult.QueueUrl,
-	}
-
-	_, err = client.PurgeQueue(context.TODO(), gMInput)
-	if err != nil {
-		s.logger.WithError(err).Error("Got an error while calling PurgeQueue ")
-	}
-	return err
-
 }
