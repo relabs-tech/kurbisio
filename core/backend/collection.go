@@ -959,6 +959,22 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			response = defaultJSON
 		}
 
+		if rc.WithCompanionFile {
+			var key string
+			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			}
+			key += "/" + primary + "_id/" + params[primary+"_id"]
+
+			downloadURL, err := b.KssDriver.GetPreSignedURL(kss.Get, key, time.Minute*15)
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 1736: get companion URL")
+				http.Error(w, "Error 1736", http.StatusInternalServerError)
+				return
+			}
+			response["companion_download_url"] = downloadURL
+		}
+
 		// do request interceptors
 		jsonData, _ := json.Marshal(response)
 		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)

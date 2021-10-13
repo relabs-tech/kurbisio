@@ -193,6 +193,36 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 		}
 	}
 
+	// We chech that individual Get return the download URL
+	for n, a := range artefacts {
+		var aGet Artefact
+		_, err = readerClient.RawGet(releaseArtefactsString+"/"+a.ArtefactID.String(), &aGet)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if aGet.UploadURL != "" {
+			t.Fatalf("Expecting %v, got '%v'", "nothing", a.UploadURL)
+		}
+		if aGet.DownloadURL == "" {
+			t.Fatalf("Expecting %v, got '%v'", "soime url", a.DownloadURL)
+		}
+
+		var data []byte
+		status, _, err := externalClient.RawGetBlobWithHeader(aGet.DownloadURL, map[string]string{}, &data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status > 299 {
+			t.Fatalf("Expecting '%v', got '%v'", "below 299", status)
+		}
+		expected := "some data " + strconv.Itoa(len(artefacts)-n-1)
+		if string(data) != expected {
+			t.Fatalf("Expecting '%v', got '%v'", expected, string(data))
+		}
+
+	}
+
 	// We check that the list operation returns download urls if with_companion_urls=true
 	artefacts = []Artefact{}
 	status, err = readerClient.RawGet(releaseArtefactsString+"?with_companion_urls=true&order=asc", &artefacts)
