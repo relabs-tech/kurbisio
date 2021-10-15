@@ -120,7 +120,8 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 		kssConfiguration = kss.Configuration{
 			DriverType: kssDrv,
 			LocalConfiguration: &kss.LocalConfiguration{
-				BasePath: dir,
+				KeyPrefix: dir,
+				PublicURL: "",
 			},
 		}
 	} else if kssDrv == kss.DriverTypeAWSS3 {
@@ -276,7 +277,8 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		kssConfiguration = kss.Configuration{
 			DriverType: kssDrv,
 			LocalConfiguration: &kss.LocalConfiguration{
-				BasePath: dir,
+				KeyPrefix: dir,
+				PublicURL: "",
 			},
 		}
 	} else if kssDrv == kss.DriverTypeAWSS3 {
@@ -526,7 +528,8 @@ func testCompanion_Notifications(t *testing.T, kssDrv kss.DriverType) {
 		kssConfiguration = kss.Configuration{
 			DriverType: kss.DriverTypeLocal,
 			LocalConfiguration: &kss.LocalConfiguration{
-				BasePath: dir,
+				KeyPrefix: dir,
+				PublicURL: "",
 			},
 		}
 	} else if kssDrv == kss.DriverTypeAWSS3 {

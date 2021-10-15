@@ -1197,7 +1197,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			err = b.KssDriver.DeleteAllWithPrefix(key)
 			if err != nil {
-				nillog.WithError(err).Error("Could not delete key ", key)
+				nillog.WithError(err).Error("Could not DeleteAllWithPrefix key ", key)
 			}
 		}
 

@@ -57,7 +57,8 @@ type Configuration struct {
 
 // LocalConfiguration contains the configuration for the local filesystem KSS service
 type LocalConfiguration struct {
-	BasePath   string
+	KeyPrefix  string
+	PublicURL  string
 	PrivateKey *rsa.PrivateKey
 }
 

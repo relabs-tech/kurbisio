@@ -29,7 +29,7 @@ type LocalFilesystem struct {
 }
 
 // NewLocalFilesystem returns a new LocalFilesystem
-func NewLocalFilesystem(router *mux.Router, config LocalConfiguration, publicURL url.URL) (*LocalFilesystem, error) {
+func NewLocalFilesystem(router *mux.Router, config LocalConfiguration) (*LocalFilesystem, error) {
 	if config.PrivateKey == nil {
 		logger.Default().Warn("No private key provided to sign URLs, a random one will be generated")
 		logger.Default().Warn("This can only work when running in a single instance configuration")
@@ -41,10 +41,14 @@ func NewLocalFilesystem(router *mux.Router, config LocalConfiguration, publicURL
 			return nil, err
 		}
 	}
+	publicURL, err := url.Parse((config.PublicURL))
+	if err != nil {
+		return nil, err
+	}
 	f := LocalFilesystem{
 		router:     router,
-		baseFolder: config.BasePath,
-		publicURL:  publicURL,
+		baseFolder: config.KeyPrefix,
+		publicURL:  *publicURL,
 		privateKey: config.PrivateKey,
 	}
 

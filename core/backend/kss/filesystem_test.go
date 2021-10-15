@@ -1,7 +1,6 @@
 package kss_test
 
 import (
-	"net/url"
 	"os"
 	"testing"
 
@@ -14,17 +13,13 @@ import (
 func Test_Local_PresignedURL_PutGet(t *testing.T) {
 	// Test that upload data can be done using signed URL
 	router := mux.NewRouter()
-	u, err := url.Parse("https://localhost")
-	if err != nil {
-		t.Fatal(err)
-	}
 	dir, err := os.MkdirTemp("", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir) // clean up
 
-	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, nil}, *u)
+	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, "http://localhost", nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,10 +31,6 @@ func Test_Local_PresignedURL_PutGet(t *testing.T) {
 func Test_Local_Delete(t *testing.T) {
 	// Test that a file can be deleted
 	router := mux.NewRouter()
-	u, err := url.Parse("")
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	dir, err := os.MkdirTemp("", "test")
 	if err != nil {
@@ -47,7 +38,7 @@ func Test_Local_Delete(t *testing.T) {
 	}
 	defer os.RemoveAll(dir) // clean up
 
-	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, nil}, *u)
+	f, err := kss.NewLocalFilesystem(router, kss.LocalConfiguration{dir, "", nil})
 	if err != nil {
 		t.Fatal(err)
 	}

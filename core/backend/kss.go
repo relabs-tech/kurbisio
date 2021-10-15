@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -32,12 +31,16 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 		if config.LocalConfiguration == nil {
 			return fmt.Errorf("kss expecting a configuration for local KSS, but got nothing")
 		}
-		u, err := url.Parse(b.publicURL)
-		if err != nil {
-			return fmt.Errorf("cannot parse url %s %w", b.publicURL, err)
-		}
 
-		drv, err := kss.NewLocalFilesystem(b.router, *config.LocalConfiguration, *u)
+		if config.LocalConfiguration.PublicURL == "" {
+			if b.publicURL != "" {
+				logger.Default().Warnf("KSS uses %s as public URL since PublicURL is defined", b.publicURL)
+				config.LocalConfiguration.PublicURL = b.publicURL
+			} else {
+				logger.Default().Warnf("KSS has no PublicURL defined, this can only work in test. KSS Public URL shall be set to the name address that is served by Kurbisio")
+			}
+		}
+		drv, err := kss.NewLocalFilesystem(b.router, *config.LocalConfiguration)
 		drv.WithCallBack(b.fileUploadedCallBack)
 		if err != nil {
 			return fmt.Errorf("cannot create new Local KSS driver %s %w", b.publicURL, err)

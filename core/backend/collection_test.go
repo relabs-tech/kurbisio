@@ -316,7 +316,7 @@ func TestFilters(t *testing.T) {
 		t.Fatal("wrong item in collection:", asJSON(collectionResult))
 	}
 
-	_, err = testService.client.RawDelete("/bs") // clear entire collection
+	_, err = testService.client.Collection("b").Clear()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -202,7 +202,7 @@ func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
 		var resp *s3.ListObjectsV2Output
 		resp, err = client.ListObjectsV2(context.TODO(), input)
 		if err != nil {
-			s.logger.Error("Could not ListObjectsV2 from ", s.bucket)
+			s.logger.Errorf("Could not ListObjectsV2 from %s for key %s", s.bucket, key)
 			return
 		}
 		for _, item := range resp.Contents {
