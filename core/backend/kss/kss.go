@@ -84,8 +84,7 @@ type S3Configuration struct {
 }
 
 // S3Credentials contains S3 Credentials
-// TODO remove this credentials and put them in environment variables
 type S3Credentials struct {
-	AccessID  string `env:"S3_ACCESS_ID,default=AKIATWUUZB572F2LWOU2" description:"the access ID to kss-test bucket"`
-	AccessKey string `env:"S3_ACCESS_KEY,default=zJ5Qrz1zGe0vgNxgN7NdwObc/Fkc6y0FyliWiiJM" description:"the access ID to kss-test bucket"`
+	AccessID  string `env:"S3_ACCESS_ID" description:"the access ID to kss-test bucket"`
+	AccessKey string `env:"S3_ACCESS_KEY" description:"the access ID to kss-test bucket"`
 }

@@ -1,6 +1,14 @@
+//go:build integration
+
+// These tests require to have access to S3
+// to run these tests:
+//     - define S3_ACCESS_ID, and S3_ACCESS_KEY to have access to the kss-test repo
+//     - execute: 'go test -tags=integration'
+
 package kss_test
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -10,14 +18,9 @@ import (
 	"github.com/relabs-tech/kurbisio/core/client"
 )
 
-func Test_S3Credential(t *testing.T) {
-	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
-		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
-	}
-}
-
 func TestMain(m *testing.M) {
 	if err := envdecode.Decode(&s3Credentials); err != nil {
+		fmt.Println("S3 tests require s3Credentials to be provided in environment variables")
 		panic(err)
 	}
 	m.Run()
@@ -27,6 +30,10 @@ var s3Credentials kss.S3Credentials
 
 func Test_S3_PresignedURL_PutGet(t *testing.T) {
 	// Test upload and download with pre signed URL
+
+	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
+		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
+	}
 
 	s, err := kss.NewS3(kss.S3Configuration{
 		AccessID:             s3Credentials.AccessID,
@@ -45,6 +52,9 @@ func Test_S3_PresignedURL_PutGet(t *testing.T) {
 }
 
 func Test_S3_Delete(t *testing.T) {
+	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
+		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
+	}
 
 	s, err := kss.NewS3(kss.S3Configuration{
 		AccessID:      s3Credentials.AccessID,
@@ -61,6 +71,9 @@ func Test_S3_Delete(t *testing.T) {
 }
 
 func Test_S3_DeleteAllWithPrefix(t *testing.T) {
+	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
+		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
+	}
 
 	s, err := kss.NewS3(kss.S3Configuration{
 		AccessID:      s3Credentials.AccessID,
@@ -78,6 +91,9 @@ func Test_S3_DeleteAllWithPrefix(t *testing.T) {
 }
 
 func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
+	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
+		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
+	}
 	s, err := kss.NewS3(kss.S3Configuration{
 		AccessID:      s3Credentials.AccessID,
 		AccessKey:     s3Credentials.AccessKey,
