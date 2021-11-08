@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	_ "github.com/lib/pq" // load database driver for postgres
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 // DB encapsulates a standard sql.DB with a schema

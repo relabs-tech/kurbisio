@@ -8,9 +8,9 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 func (b *Backend) configureKSS(config kss.Configuration) error {

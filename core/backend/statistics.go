@@ -9,8 +9,8 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 // resourceStatistics represents information about a resource

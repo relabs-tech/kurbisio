@@ -1,7 +1,7 @@
 package schema_test
 
 import (
-	"github.com/relabs-tech/backends/core/schema"
+	"github.com/relabs-tech/kurbisio/core/schema"
 	"testing"
 )
 

@@ -6,8 +6,8 @@ import (
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/client"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/client"
 )
 
 func Test_Local_PresignedURL_PutGet(t *testing.T) {

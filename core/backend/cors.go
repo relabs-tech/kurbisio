@@ -3,7 +3,7 @@ package backend
 import (
 	"net/http"
 
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 func (b *Backend) handleCORS() {

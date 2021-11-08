@@ -22,14 +22,14 @@ import (
 	// To allow the use of go:embed
 	_ "embed"
 
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/client"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/core/logger"
-	"github.com/relabs-tech/backends/core/registry"
-	"github.com/relabs-tech/backends/core/schema"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/client"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/core/logger"
+	"github.com/relabs-tech/kurbisio/core/registry"
+	"github.com/relabs-tech/kurbisio/core/schema"
 )
 
 // ConfigSchemaJSON contains the Json schemafor the backend's configuration file

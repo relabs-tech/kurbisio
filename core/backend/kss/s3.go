@@ -19,8 +19,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/relabs-tech/backends/core/logger"
-	"github.com/relabs-tech/backends/services/fitness/utils"
+	"github.com/relabs-tech/kurbisio/core/logger"
+	"github.com/relabs-tech/kurbisio/core/pointers"
 	"github.com/sirupsen/logrus"
 )
 
@@ -90,7 +90,7 @@ func (s *S3) Delete(key string) error {
 
 	input := &s3.DeleteObjectInput{
 		Bucket: &s.bucket,
-		Key:    utils.StringPtr(s.baseKeyName + key),
+		Key:    pointers.StringPtr(s.baseKeyName + key),
 	}
 
 	_, err := client.DeleteObject(context.TODO(), input)
@@ -115,7 +115,7 @@ func (s *S3) DeleteAllWithPrefix(key string) error {
 	for _, key := range keys {
 		input := &s3.DeleteObjectInput{
 			Bucket: &s.bucket,
-			Key:    utils.StringPtr(key),
+			Key:    pointers.StringPtr(key),
 		}
 		s.logger.Infoln("Deleting ", key)
 		_, err := client.DeleteObject(context.TODO(), input)
@@ -196,7 +196,7 @@ func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
 	for {
 		input := &s3.ListObjectsV2Input{
 			Bucket:            &s.bucket,
-			Prefix:            utils.StringPtr(s.baseKeyName + key),
+			Prefix:            pointers.StringPtr(s.baseKeyName + key),
 			ContinuationToken: continuationToken,
 		}
 		var resp *s3.ListObjectsV2Output
@@ -259,7 +259,7 @@ func (s *S3) listenSQS() {
 
 					// ReceiveMessage gives back types.Message while we want vents.SQSMessage
 					for _, m := range msgResult.Messages {
-						messages = append(messages, events.SQSMessage{Body: utils.SafeString(m.Body)})
+						messages = append(messages, events.SQSMessage{Body: pointers.SafeString(m.Body)})
 					}
 
 					s.ProcessIncomingSQSMessageRecords(messages)

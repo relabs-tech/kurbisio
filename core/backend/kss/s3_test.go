@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/client"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/client"
 )
 
 func Test_S3Credential(t *testing.T) {

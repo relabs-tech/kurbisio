@@ -10,9 +10,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joeshaw/envdecode"
 	_ "github.com/lib/pq"
-	"github.com/relabs-tech/backends/core/backend"
-	"github.com/relabs-tech/backends/core/client"
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core/backend"
+	"github.com/relabs-tech/kurbisio/core/client"
+	"github.com/relabs-tech/kurbisio/core/csql"
 )
 
 func TestMain(m *testing.M) {

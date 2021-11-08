@@ -3,7 +3,7 @@ package backend
 import (
 	"github.com/goccy/go-json"
 
-	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/kurbisio/core/access"
 )
 
 // backendConfiguration holds a complete backend configuration

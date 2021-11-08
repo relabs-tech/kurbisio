@@ -9,13 +9,13 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/logger"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/iot"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/iot"
 )
 
 // API is the IoT appliance RESTful interface for the device twin.

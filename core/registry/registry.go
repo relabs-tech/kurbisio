@@ -10,7 +10,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core/csql"
 )
 
 // New creates a new registry for the specified database

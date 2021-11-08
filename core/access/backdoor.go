@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 // BackdoorMiddlewareBuilder is a helper builder for JwtMiddelware

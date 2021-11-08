@@ -15,11 +15,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/core/logger"
-	"github.com/relabs-tech/backends/services/fitness/utils"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/core/logger"
+	"github.com/relabs-tech/kurbisio/core/pointers"
 )
 
 // Notification is a database notification. Receive them
@@ -423,7 +423,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 				if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
 					// we have a rate limited event. We must reschedule if a) the event has an implicit
 					// schedule (happens at retry), or b) the event is too old
-					if utils.SafeBool(jb.ImplicitSchedule) ||
+					if pointers.SafeBool(jb.ImplicitSchedule) ||
 						(rateLimit.maxAge > 0 && event.ScheduledAt != nil &&
 							time.Now().Sub(*event.ScheduledAt) > rateLimit.maxAge) {
 						var rateLimitedSchedule time.Time

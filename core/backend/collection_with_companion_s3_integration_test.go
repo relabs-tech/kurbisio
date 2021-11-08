@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
 )
 
 func TestCompanion_Notifications_S3(t *testing.T) {

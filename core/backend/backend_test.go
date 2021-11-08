@@ -19,11 +19,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
 
-	"github.com/relabs-tech/backends/core/client"
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core/client"
+	"github.com/relabs-tech/kurbisio/core/csql"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"

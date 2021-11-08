@@ -10,8 +10,8 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 // contextKey is the type for context keys. Go linter does not like plain strings

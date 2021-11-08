@@ -23,8 +23,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
 )
 
 // Client provides easy access to the REST API.

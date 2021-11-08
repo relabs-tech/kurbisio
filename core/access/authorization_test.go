@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/relabs-tech/backends/core"
+	"github.com/relabs-tech/kurbisio/core"
 )
 
 func TestMain(m *testing.M) {

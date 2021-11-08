@@ -19,8 +19,8 @@ import (
 
 	"github.com/DrmagicE/gmqtt"
 	"github.com/DrmagicE/gmqtt/pkg/packets"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/iot/twin"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/iot/twin"
 
 	"github.com/google/uuid"
 )

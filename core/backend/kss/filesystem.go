@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 // LocalFilesystem is the entity which provides local filesystem

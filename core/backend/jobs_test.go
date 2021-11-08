@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/relabs-tech/backends/core/access"
+	"github.com/relabs-tech/kurbisio/core/access"
 )
 
 func TestPutEvent(t *testing.T) {

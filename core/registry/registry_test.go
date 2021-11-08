@@ -8,7 +8,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core/csql"
 
 	_ "github.com/lib/pq"
 )

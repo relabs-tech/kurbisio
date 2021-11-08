@@ -5,7 +5,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core/csql"
 )
 
 // FunctionAccount is a function accoutn

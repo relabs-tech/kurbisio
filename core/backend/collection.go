@@ -17,11 +17,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/csql"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/csql"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration, singleton bool) {

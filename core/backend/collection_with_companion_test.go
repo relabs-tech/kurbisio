@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/joeshaw/envdecode"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/backend"
-	"github.com/relabs-tech/backends/core/backend/kss"
-	"github.com/relabs-tech/backends/core/client"
-	"github.com/relabs-tech/backends/core/csql"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/backend"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/client"
+	"github.com/relabs-tech/kurbisio/core/csql"
 )
 
 var configurationCompanionJSON string = `{

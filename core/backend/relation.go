@@ -15,9 +15,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/lib/pq"
-	"github.com/relabs-tech/backends/core"
-	"github.com/relabs-tech/backends/core/access"
-	"github.com/relabs-tech/backends/core/logger"
+	"github.com/relabs-tech/kurbisio/core"
+	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 type stringlist []string
