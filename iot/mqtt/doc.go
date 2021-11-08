@@ -1,3 +1,9 @@
+// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
+// Unauthorized copying of this file, via any medium is strictly prohibited
+// Proprietary and confidential
+// info@dalarub.com
+//
+
 /*Package mqtt provides the IoT broker with device twin support
 
 A device twin is a set of JSON objects, each described with a unique key.

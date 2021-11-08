@@ -1,3 +1,9 @@
+// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
+// Unauthorized copying of this file, via any medium is strictly prohibited
+// Proprietary and confidential
+// info@dalarub.com
+//
+
 /*Package client provides easy and fast in-process access to a REST api
 
 Instead of marshalling HTTP, the client talks directly to the mux router. The client

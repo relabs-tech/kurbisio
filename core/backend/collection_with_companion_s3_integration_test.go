@@ -1,5 +1,11 @@
 //go:build integration
 
+// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
+// Unauthorized copying of this file, via any medium is strictly prohibited
+// Proprietary and confidential
+// info@dalarub.com
+//
+
 package backend_test
 
 // These tests are time sensitive and sometimes failing because the SQS queue is slow

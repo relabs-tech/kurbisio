@@ -1,3 +1,9 @@
+// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
+// Unauthorized copying of this file, via any medium is strictly prohibited
+// Proprietary and confidential
+// info@dalarub.com
+//
+
 /*Package iot provides core IoT functionality
 
 It contains two RESTful apis which implements device authorization and a device twin,
