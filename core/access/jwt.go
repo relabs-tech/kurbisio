@@ -27,14 +27,20 @@ import (
 
 // JwtMiddlewareBuilder is a helper builder for JwtMiddelware
 type JwtMiddlewareBuilder struct {
+	// The list of providers of identities
+	Issuers []IdentityIssuer
+	// DB is the postgres database. Must have a collection resource "account" with an external index
+	// "identity".
+	DB *csql.DB
+}
+
+// IdentityIssuer is an entity that provides identity
+type IdentityIssuer struct {
 	// PublicKeyDownloadURL is the download url for public keys. In case of google, this would be
 	//  "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
 	PublicKeyDownloadURL string
 	// Issuer is the accepted issuer for the token
-	Issuer string
-	// DB is the postgres database. Must have a collection resource "account" with an external index
-	// "identity".
-	DB *csql.DB
+	Name string
 }
 
 // NewJwtMiddelware returns a middleware handler to validate
@@ -56,35 +62,37 @@ type JwtMiddlewareBuilder struct {
 func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 	jwtRegistry := registry.New(jmb.DB).Accessor("_jwt_")
-	var wellKnownCertificates map[string]string
-	timestamp, err := jwtRegistry.Read(jmb.PublicKeyDownloadURL, &wellKnownCertificates)
-	if err != nil {
-		panic(err)
-	}
-	if time.Now().Sub(timestamp) > 6*time.Hour {
-		// time to check for new keys
-		res, err := http.Get(jmb.PublicKeyDownloadURL)
-		if err != nil {
-			return func(h http.Handler) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) })
-			}
-		}
-
-		defer res.Body.Close()
-		decoder := json.NewDecoder(res.Body)
-		err = decoder.Decode(&wellKnownCertificates)
+	wellKnownKeys := map[string]interface{}{}
+	for _, issuer := range jmb.Issuers {
+		var wellKnownCertificates map[string]string
+		timestamp, err := jwtRegistry.Read(issuer.PublicKeyDownloadURL, &wellKnownCertificates)
 		if err != nil {
 			panic(err)
 		}
-		jwtRegistry.Write(jmb.PublicKeyDownloadURL, wellKnownCertificates)
-	}
-	wellKnownKeys := map[string]interface{}{}
-	for kid, cert := range wellKnownCertificates {
-		key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(cert))
-		if err != nil {
-			log.Println("certificate error", err)
-		} else {
-			wellKnownKeys[kid] = key
+		if time.Now().Sub(timestamp) > 6*time.Hour {
+			// time to check for new keys
+			res, err := http.Get(issuer.PublicKeyDownloadURL)
+			if err != nil {
+				return func(h http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) })
+				}
+			}
+
+			defer res.Body.Close()
+			decoder := json.NewDecoder(res.Body)
+			err = decoder.Decode(&wellKnownCertificates)
+			if err != nil {
+				panic(err)
+			}
+			jwtRegistry.Write(issuer.PublicKeyDownloadURL, wellKnownCertificates)
+		}
+		for kid, cert := range wellKnownCertificates {
+			key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(cert))
+			if err != nil {
+				log.Println("certificate error", err)
+			} else {
+				wellKnownKeys[kid] = key
+			}
 		}
 	}
 
@@ -142,7 +150,15 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			}{}
 			token, err := jwt.ParseWithClaims(tokenString, &claims, jwksLookup)
 
-			if err != nil || !token.Valid || claims.Issuer != jmb.Issuer {
+			// Let's see if this comes from a known issuer
+			var foundIssuer bool
+			for _, issuer := range jmb.Issuers {
+				if claims.Issuer == issuer.Name {
+					foundIssuer = true
+				}
+			}
+
+			if err != nil || !token.Valid || !foundIssuer {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
