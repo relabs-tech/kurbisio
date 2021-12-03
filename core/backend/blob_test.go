@@ -4,7 +4,7 @@
 // info@dalarub.com
 //
 
-package backend
+package backend_test
 
 import (
 	"net/http"

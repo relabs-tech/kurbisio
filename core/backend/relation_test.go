@@ -202,6 +202,10 @@ type TestService struct {
 	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
 	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
 	backend          *backend.Backend
+	client           client.Client
+	clientNoAuth     client.Client
+	Db               *csql.DB
+	Router           *mux.Router
 }
 
 var testService TestService

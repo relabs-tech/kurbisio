@@ -48,7 +48,7 @@ const InternalDatabaseSchemaVersion = 2
 
 // Backend is the generic rest backend
 type Backend struct {
-	config              backendConfiguration
+	config              Configuration
 	db                  *csql.DB
 	router              *mux.Router
 	publicURL           string
@@ -119,7 +119,7 @@ type Builder struct {
 func New(bb *Builder) *Backend {
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	var config backendConfiguration
+	var config Configuration
 	err := json.Unmarshal([]byte(bb.Config), &config)
 	if err != nil {
 		panic(fmt.Errorf("parse error in backend configuration: %s", err))
@@ -521,4 +521,9 @@ func (b *Backend) Router() *mux.Router {
 // PublicURL returns this backend's deployments public URL
 func (b *Backend) PublicURL() string {
 	return b.publicURL
+}
+
+// Config returns the backend configuration
+func (b *Backend) Config() Configuration {
+	return b.config
 }

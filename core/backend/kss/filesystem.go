@@ -150,6 +150,7 @@ func (f *LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 
 // Delete deletes a the key file
 func (f *LocalFilesystem) Delete(key string) error {
+	logger.Default().Infoln("Deleting ", key)
 	filePath := filepath.Join(f.baseFolder, key, "file")
 	if err := os.RemoveAll(filePath); err != nil {
 		return err
