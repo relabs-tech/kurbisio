@@ -19,20 +19,20 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-// resourceStatistics represents information about a resource
-type resourceStatistics struct {
+// ResourceStatistics represents information about a resource
+type ResourceStatistics struct {
 	Resource     string  `json:"resource"`
 	Count        int64   `json:"count"`
 	SizeMB       float64 `json:"size_mb"`
 	AverageSizeB float64 `json:"average_size_b"`
 }
 
-// statistics represents information about the backend resources
-type statisticsDetails struct {
-	Collections []resourceStatistics `json:"collections"`
-	Singletons  []resourceStatistics `json:"singletons"`
-	Relations   []resourceStatistics `json:"relations"`
-	Blobs       []resourceStatistics `json:"blobs"`
+// StatisticsDetails represents information about the backend resources
+type StatisticsDetails struct {
+	Collections []ResourceStatistics `json:"collections"`
+	Singletons  []ResourceStatistics `json:"singletons"`
+	Relations   []ResourceStatistics `json:"relations"`
+	Blobs       []ResourceStatistics `json:"blobs"`
 }
 
 func (b *Backend) handleStatistics(router *mux.Router) {
@@ -52,7 +52,7 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s := statisticsDetails{}
+	s := StatisticsDetails{}
 	var collections, singletons, relations, blobs sort.StringSlice
 	for _, r := range b.config.Collections {
 		collections = append(collections, r.Resource)
@@ -72,8 +72,8 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 	relations.Sort()
 	blobs.Sort()
 
-	queryStatisticsFromDB := func(stats *[]resourceStatistics, resources sort.StringSlice) {
-		*stats = []resourceStatistics{} // do not return null in json, but empty array
+	queryStatisticsFromDB := func(stats *[]ResourceStatistics, resources sort.StringSlice) {
+		*stats = []ResourceStatistics{} // do not return null in json, but empty array
 		for _, resource := range resources {
 			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
 			var size, count int64
@@ -87,7 +87,7 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 				averageSize = float64(size / count)
 			}
 
-			*stats = append(*stats, resourceStatistics{
+			*stats = append(*stats, ResourceStatistics{
 				Resource:     resource,
 				Count:        count,
 				SizeMB:       float64(size) / 1024. / 1024.,

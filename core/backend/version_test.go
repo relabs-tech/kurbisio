@@ -4,10 +4,12 @@
 // info@dalarub.com
 //
 
-package backend
+package backend_test
 
 import (
 	"testing"
+
+	"github.com/relabs-tech/kurbisio/core/backend"
 )
 
 // TestVersion verifies that the /version endpoint works
@@ -23,7 +25,7 @@ func TestVersion(t *testing.T) {
 		t.Fatalf("Expecting 'unset' version by default, got %s", version)
 	}
 
-	Version = "another version"
+	backend.Version = "another version"
 
 	_, err = testService.client.RawGet("/version", &version)
 	if err != nil {

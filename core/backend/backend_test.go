@@ -4,7 +4,7 @@
 // info@dalarub.com
 //
 
-package backend
+package backend_test
 
 import (
 	"bytes"
@@ -27,6 +27,7 @@ import (
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/backend"
 
 	"github.com/relabs-tech/kurbisio/core/client"
 	"github.com/relabs-tech/kurbisio/core/csql"
@@ -191,20 +192,6 @@ var schemaWorkoutString = `{ "$id": "http://some_host.com/workout.json",
 								}
 							}`
 
-// TestService holds the configuration for this service
-//
-// use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
-// and POSTRGRES_PASSWORD="docker"
-type TestService struct {
-	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
-	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
-	backend          *Backend
-	client           client.Client
-	clientNoAuth     client.Client
-}
-
-var testService TestService
-
 func asJSON(object interface{}) string {
 	j, _ := json.Marshal(object)
 	return string(j)
@@ -221,7 +208,7 @@ func TestMain(m *testing.M) {
 	db.ClearSchema()
 
 	router := mux.NewRouter()
-	testService.backend = New(&Builder{
+	testService.backend = backend.New(&backend.Builder{
 		AuthorizationEnabled: true,
 		Config:               configurationJSON,
 		DB:                   db,
@@ -906,13 +893,13 @@ func TestNotifications(t *testing.T) {
 		createCount, updateCount, deleteCount, pointsCount int
 	)
 	var lock sync.Mutex
-	createHandler := func(ctx context.Context, n Notification) error {
+	createHandler := func(ctx context.Context, n backend.Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		createCount++
 		return nil
 	}
-	updateHandler := func(ctx context.Context, n Notification) error {
+	updateHandler := func(ctx context.Context, n backend.Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		updateCount++
@@ -926,7 +913,7 @@ func TestNotifications(t *testing.T) {
 		}
 		return nil
 	}
-	deleteHandler := func(ctx context.Context, n Notification) error {
+	deleteHandler := func(ctx context.Context, n backend.Notification) error {
 		lock.Lock()
 		defer lock.Unlock()
 		deleteCount++
@@ -1062,30 +1049,30 @@ func TestNotifications(t *testing.T) {
 }
 
 func TestRequestInterceptors(t *testing.T) {
-	backend := testService.backend
+	b := testService.backend
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		var object map[string]interface{}
 		json.Unmarshal(data, &object)
 		object["interceptor_create"] = "Kilroy was here!"
 		return json.Marshal(object)
 	}, core.OperationCreate)
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		var object map[string]interface{}
 		json.Unmarshal(data, &object)
 		object["interceptor_update"] = "Kilroy was here!"
 		return json.Marshal(object)
 	}, core.OperationUpdate)
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		var object map[string]interface{}
 		json.Unmarshal(data, &object)
 		object["interceptor_read"] = "Kilroy was here!"
 		return json.Marshal(object)
 	}, core.OperationRead)
 
-	backend.HandleResourceRequest("interception/single", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception/single", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		if len(data) == 0 {
 			object := map[string]interface{}{"single_read_create": "Kilroy was here!"}
 			client := testService.client
@@ -1100,15 +1087,15 @@ func TestRequestInterceptors(t *testing.T) {
 		return json.Marshal(object)
 	}, core.OperationRead)
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		return nil, errors.New("Kilroy does not want this to be deleted")
 	}, core.OperationDelete)
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		return nil, errors.New("Kilroy does not want the entire list to be cleared")
 	}, core.OperationClear)
 
-	backend.HandleResourceRequest("interception", func(ctx context.Context, request Request, data []byte) ([]byte, error) {
+	b.HandleResourceRequest("interception", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
 		var list []map[string]interface{}
 		json.Unmarshal(data, &list)
 		for i := range list {
@@ -1538,10 +1525,10 @@ func TestInvalidPaths(t *testing.T) {
 }
 
 func TestScheduleEvents(t *testing.T) {
-	backend := testService.backend
-	backend.HandleEvent("my-event", func(ctx context.Context, event Event) error { return nil })
+	b := testService.backend
+	b.HandleEvent("my-event", func(ctx context.Context, event backend.Event) error { return nil })
 	ctx := context.Background()
-	illegalEvent := Event{
+	illegalEvent := backend.Event{
 		Type:       "my-unhandled-event",
 		Key:        "lala",
 		Resource:   "something",
@@ -1550,43 +1537,43 @@ func TestScheduleEvents(t *testing.T) {
 
 	schedule := time.Now().Add(time.Hour).UTC()
 
-	err := backend.ScheduleEvent(ctx, illegalEvent, schedule)
+	err := b.ScheduleEvent(ctx, illegalEvent, schedule)
 	assert.NotNil(t, err, "scheduled unhandled event, expected error")
-	ok, err := backend.CancelEvent(ctx, illegalEvent)
+	ok, err := b.CancelEvent(ctx, illegalEvent)
 	assert.Nil(t, err, "unscheduled unhandled event")
 	assert.Equal(t, false, ok, "unscheduled unhandled event")
 
-	event := Event{
+	event := backend.Event{
 		Type:       "my-event",
 		Key:        "lala",
 		Resource:   "something",
 		ResourceID: uuid.New(),
 	}
-	_, _ = backend.CancelEvent(ctx, event)
-	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
+	_, _ = b.CancelEvent(ctx, event)
+	err = b.ScheduleEventIfNotExist(ctx, event, schedule)
 	assert.Nil(t, err, "scheduled handled event if not exist")
 
-	retrievedSchedule, err := backend.RetrieveEventSchedule(ctx, event)
+	retrievedSchedule, err := b.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
 	newSchedule := time.Now().Add(2 * time.Hour).UTC()
 
-	err = backend.ScheduleEventIfNotExist(ctx, event, schedule)
+	err = b.ScheduleEventIfNotExist(ctx, event, schedule)
 	assert.Nil(t, err, "scheduled handled event if not exist")
 
-	retrievedSchedule, err = backend.RetrieveEventSchedule(ctx, event)
+	retrievedSchedule, err = b.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, schedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
-	err = backend.ScheduleEvent(ctx, event, newSchedule)
+	err = b.ScheduleEvent(ctx, event, newSchedule)
 	assert.Nil(t, err, "scheduled handled event")
 
-	retrievedSchedule, err = backend.RetrieveEventSchedule(ctx, event)
+	retrievedSchedule, err = b.RetrieveEventSchedule(ctx, event)
 	assert.Nil(t, err, "retrieve event schedule")
 	assert.Equal(t, newSchedule.Unix(), retrievedSchedule.Unix(), "retrieve event schedule")
 
-	ok, err = backend.CancelEvent(ctx, event)
+	ok, err = b.CancelEvent(ctx, event)
 	assert.Nil(t, err, "cancel handled event")
 	assert.Equal(t, true, ok, "cancel handled event")
 }

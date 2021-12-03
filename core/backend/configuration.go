@@ -12,8 +12,8 @@ import (
 	"github.com/relabs-tech/kurbisio/core/access"
 )
 
-// backendConfiguration holds a complete backend configuration
-type backendConfiguration struct {
+// Configuration holds a complete backend configuration
+type Configuration struct {
 	Collections []collectionConfiguration `json:"collections"`
 	Singletons  []singletonConfiguration  `json:"singletons"`
 	Blobs       []blobConfiguration       `json:"blobs"`

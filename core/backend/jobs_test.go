@@ -4,7 +4,7 @@
 // info@dalarub.com
 //
 
-package backend
+package backend_test
 
 import (
 	"context"
@@ -14,12 +14,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/backend"
 )
 
 func TestPutEvent(t *testing.T) {
 	eventType := "some-event"
-	received := make(chan Event, 10)
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+	received := make(chan backend.Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
 		received <- event
 		return nil
 	})
@@ -71,18 +72,18 @@ func TestPutEvent(t *testing.T) {
 
 func TestEventRetry(t *testing.T) {
 	eventType := "retry-event"
-	received := make(chan Event, 10)
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+	received := make(chan backend.Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
 		received <- event
 		return fmt.Errorf("this fails")
 	})
 	t0 := time.Now()
-	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
 
-	var events []Event
+	var events []backend.Event
 	numExpectedEvents := 4
 	timeouts := [3]time.Duration{time.Second, time.Second * 2, time.Second * 3}
 	timeout := 7 * time.Second
@@ -139,8 +140,8 @@ func TestEventRetry(t *testing.T) {
 
 func TestRateLimitEvent(t *testing.T) {
 	eventType := "rate-limited-event"
-	received := make(chan Event, 10)
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+	received := make(chan backend.Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
 		received <- event
 		return nil
 	})
@@ -148,24 +149,24 @@ func TestRateLimitEvent(t *testing.T) {
 	delta := 500 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, time.Minute)
 	t0 := time.Now().UTC()
-	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
 
-	var events []Event
+	var events []backend.Event
 	numExpectedEvents := 4
 	timeout := 4 * time.Second
 
@@ -208,9 +209,9 @@ func TestRateLimitEvent(t *testing.T) {
 func TestRateLimitEventRetry(t *testing.T) {
 	eventType := "rate-limited-event-retry"
 
-	received := make(chan Event, 10)
+	received := make(chan backend.Event, 10)
 	failedOnce := false
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
 		received <- event
 		if !failedOnce {
 			failedOnce = true
@@ -222,12 +223,12 @@ func TestRateLimitEventRetry(t *testing.T) {
 	delta := 1000 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, time.Minute)
 	t0 := time.Now().UTC()
-	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
 
-	var events []Event
+	var events []backend.Event
 	numExpectedEvents := 2
 	timeouts := [3]time.Duration{500 * time.Millisecond, 5 * time.Minute, 45 * time.Minute}
 	timeout := 5 * time.Second
@@ -265,8 +266,8 @@ func TestRateLimitEventRetry(t *testing.T) {
 
 func TestRateLimitEventMaxAge(t *testing.T) {
 	eventType := "rate-limited-event-maxage"
-	received := make(chan Event, 10)
-	testService.backend.HandleEvent(eventType, func(ctx context.Context, event Event) error {
+	received := make(chan backend.Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
 		received <- event
 		return nil
 	})
@@ -274,11 +275,11 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	delta := 200 * time.Millisecond
 	maxAge := 1000 * time.Millisecond
 	testService.backend.DefineRateLimitForEvent(eventType, delta, maxAge)
-	err := testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
-	err = testService.backend.RaiseEvent(context.TODO(), Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType, Resource: "something", ResourceID: uuid.New()})
 	if err != nil {
 		t.Fatalf("raise event error: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	// and continue processing. The rate limited events are now older than max age and should be rescheduled by the system
 	t0 := time.Now().UTC()
 
-	var events []Event
+	var events []backend.Event
 	numExpectedEvents := 2
 	timeout := 5 * time.Second
 

@@ -103,9 +103,6 @@ type Artefact struct {
 	DownloadURL string    `json:"companion_download_url"`
 	UploadURL   string    `json:"companion_upload_url"`
 }
-type B struct {
-	BID uuid.UUID `json:"b_id"`
-}
 
 func TestCompanion_LocalFilesystem(t *testing.T) {
 	testCompanion(t, kss.DriverTypeLocal)
