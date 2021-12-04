@@ -8,6 +8,8 @@ package backend_test
 
 import (
 	"net/http"
+	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -325,5 +327,189 @@ func TestFilters(t *testing.T) {
 	_, err = testService.client.Collection("b").Clear()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSearchEqual test searching in searchable_properties and in json properties
+func TestSearchEqual(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	numberOfElements := 16
+	for i := 0; i < numberOfElements; i++ {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as",
+			A{
+				ExternalID:     "external_id_" + strconv.Itoa(i),
+				SearchableProp: "searchable_prop_" + strconv.Itoa(i%2),
+				StaticProp:     "static_prop_" + strconv.Itoa(i%4),
+				Foo:            "foo_" + strconv.Itoa(i%8),
+			}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var collectionResult []A
+
+	// Search in external_index
+	_, err := testService.client.RawGet("/as?filter=external_id=external_id_1", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatal("unexpected number of items in collection, expected 1, got", asJSON(collectionResult))
+	}
+	if collectionResult[0].ExternalID != "external_id_1" {
+		t.Fatal("wrong item in collection:", collectionResult[0].ExternalID)
+	}
+
+	// Search in searchable_properties
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable_prop_1", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 8 {
+		t.Fatalf("unexpected number of items in collection, expected 8, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+	if collectionResult[0].SearchableProp != "searchable_prop_1" {
+		t.Fatal("wrong item in collection:", collectionResult[0].SearchableProp)
+	}
+
+	// Search in json document
+	_, err = testService.client.RawGet("/as?filter=foo=foo_1", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 2 {
+		t.Fatalf("unexpected number of items in collection, expected 2, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+	if collectionResult[0].Foo != "foo_1" {
+		t.Fatal("wrong item in collection:", collectionResult[0].Foo)
+	}
+
+	// Search in unknown json document
+	_, err = testService.client.RawGet("/as?filter=foo2=foo_1", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatalf("unexpected number of items in collection, expected 0, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+
+	// Search in json document and searchable properties
+	_, err = testService.client.RawGet("/as?filter=foo=foo_0&filter=searchable_prop=searchable_prop_0", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 2 {
+		t.Fatalf("unexpected number of items in collection, expected 1, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+	if collectionResult[0].Foo != "foo_0" {
+		t.Fatal("wrong item in collection:", collectionResult[0].Foo)
+	}
+	if collectionResult[0].SearchableProp != "searchable_prop_0" {
+		t.Fatal("wrong item in collection:", collectionResult[0].SearchableProp)
+	}
+}
+
+// TestStatistics verifies that the /kurbisio/statistics endpoint returns information about the backend
+func TestSearchPattern(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	numberOfElements := 16
+	for i := 0; i < numberOfElements; i++ {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as",
+			A{
+				ExternalID:     "external_id_" + strconv.Itoa(i),
+				SearchableProp: "searchable_prop_" + strconv.Itoa(i%2),
+				Foo:            "foo_" + strconv.Itoa(i%8),
+			}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var collectionResult []A
+
+	// Search in external_index
+	_, err := testService.client.RawGet("/as?filter="+url.QueryEscape("external_id~%_id_1"), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatalf("unexpected number of items in collection, expected 1, got %v %v", len(collectionResult), asJSON(collectionResult))
+	}
+	if collectionResult[0].ExternalID != "external_id_1" {
+		t.Fatal("wrong item in collection:", collectionResult[0].ExternalID)
+	}
+
+	_, err = testService.client.RawGet("/as?filter="+url.QueryEscape("external_id~external%"), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 16 {
+		t.Fatal("unexpected number of items in collection, expected 16, got", asJSON(collectionResult))
+	}
+
+	// Search in json document
+	_, err = testService.client.RawGet("/as?filter="+url.QueryEscape("foo~%o_1"), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 2 {
+		t.Fatalf("unexpected number of items in collection, expected 2, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+
+	// Search in unknown json document
+	_, err = testService.client.RawGet("/as?filter=foo2~foo_1", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatalf("unexpected number of items in collection, expected 0, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+
+	// Search in json document and searchable properties
+	_, err = testService.client.RawGet("/as?filter="+url.QueryEscape("foo~%o_0")+"&filter="+url.QueryEscape("searchable_prop~%_prop_0"), &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 2 {
+		t.Fatalf("unexpected number of items in collection, expected 1, got %v %s", len(collectionResult), asJSON(collectionResult))
+	}
+	if collectionResult[0].Foo != "foo_0" {
+		t.Fatal("wrong item in collection:", collectionResult[0].Foo)
+	}
+	if collectionResult[0].SearchableProp != "searchable_prop_0" {
+		t.Fatal("wrong item in collection:", collectionResult[0].SearchableProp)
 	}
 }

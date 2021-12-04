@@ -369,17 +369,21 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		var (
-			queryParameters []interface{}
-			sqlQuery        string
-			limit           int = 100
-			page            int = 1
-			until           time.Time
-			from            time.Time
-			externalColumns []string
-			externalValues  []string
-			ascendingOrder  bool
-			metaonly        bool
-			err             error
+			queryParameters     []interface{}
+			sqlQuery            string
+			limit               int = 100
+			page                int = 1
+			until               time.Time
+			from                time.Time
+			externalColumns     []string
+			externalValues      []string
+			externalOperators   []string
+			filterJSONColumns   []string
+			filterJSONValues    []string
+			filterJSONOperators []string
+			ascendingOrder      bool
+			metaonly            bool
+			err                 error
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
@@ -409,10 +413,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			case "filter":
 				for _, value := range array {
+					var operator string
 					i := strings.IndexRune(value, '=')
 					if i < 0 {
-						err = fmt.Errorf("cannot parse filter, must be of type property=value")
-						break
+						i = strings.IndexRune(value, '~')
+						if i < 0 {
+							err = fmt.Errorf("cannot parse filter, must be of type property=value or property~value")
+							break
+						} else {
+							operator = " LIKE "
+						}
+					} else {
+						operator = "="
 					}
 					filterKey := value[:i]
 					filterValue := value[i+1:]
@@ -421,14 +433,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					for _, searchableColumn := range searchableColumns {
 						if filterKey == searchableColumn {
 							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, searchableColumn)
+							externalColumns = append(externalColumns, filterKey)
 							found = true
+							externalOperators = append(externalOperators, operator)
 							break
 						}
 					}
+					// This was not a search inside a colums, then we try to search in the json document
 					if !found {
-						err = fmt.Errorf("unknown filter property '%s'", filterKey)
-						break
+						filterJSONValues = append(externalValues, filterValue)
+						filterJSONColumns = append(externalColumns, filterKey)
+						filterJSONOperators = append(filterJSONOperators, operator)
 					}
 				}
 			case "order":
@@ -474,13 +489,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			sqlQuery = readQueryWithTotal
 		}
 		sqlQuery += sqlWhereAll
-		if len(externalValues) == 0 { // no filter(s), get entire collection
+		if len(externalValues) == 0 && len(filterJSONValues) == 0 { // no filter(s), get entire collection
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6)
 		} else {
-			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues))
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues)+len(filterJSONValues))
 			for i := range externalValues {
-				sqlQuery += fmt.Sprintf("AND (%s=$%d) ", externalColumns[i], propertiesIndex-ownerIndex+7+i)
+				sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+7+i)
 				queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
+			}
+			for i := range filterJSONValues {
+				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+7+i+len(externalValues))
+				queryParameters[propertiesIndex-ownerIndex+6+i+len(externalValues)] = filterJSONValues[i]
 			}
 		}
 

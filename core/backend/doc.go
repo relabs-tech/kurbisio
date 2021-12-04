@@ -211,10 +211,21 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
-The GET request on collections can be customized with any of the searchable properties, an external index or the ids of
-the resources as a filter.
+The GET request on collections can be customized with any of the searchable properties, an external index, the ids of
+the resources or the first layer of properties of the json document as a filter. It is possibile to search for equality of to search
+a pattern.
+
+Searching for equality:
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?filter=identity=test@test.com
+
+Searching pattern:
+Searching for pattern is done using the `~` character instead of `=`. Pattern are written using SQL LIKE format.
+% is represents zero, one, or multiple characters
+_ represents one, single character
+	GET /users?filter=identity~%@test.com
+	returns all users with an email which ends with @test.com
+
 If you specify multiple filters, they filter on top of each other (i.e. with logical AND).
 
 Filters can be combined with the wildcard 'all' keyword. For instance, it is possible to get all the devices of a user by filtering
