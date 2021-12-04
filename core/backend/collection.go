@@ -19,6 +19,7 @@ import (
 
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
@@ -1063,6 +1064,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	updatePropertyWithAuth := func(w http.ResponseWriter, r *http.Request, property string) {
 		params := mux.Vars(r)
+
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
@@ -1101,6 +1103,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		value := params[property]
+
+		value, err = url.PathUnescape(value)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("cannot unescape %s, err: %v", value, err), http.StatusBadRequest)
+			return
+		}
+
 		query := fmt.Sprintf(updatePropertyQuery, property)
 
 		queryParameters := make([]interface{}, propertiesIndex+1)
