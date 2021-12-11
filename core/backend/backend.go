@@ -147,7 +147,7 @@ func New(bb *Builder) *Backend {
 	if err != nil {
 		log.Fatalf("Invalid json %v", err)
 	}
-
+	bb.Router.UseEncodedPath()
 	b := &Backend{
 		config:                   config,
 		db:                       bb.DB,
