@@ -83,21 +83,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	jsonToHeader := map[string]string{}
 
+	createPropertiesQuery := ""
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
-		createColumns = append(createColumns, createColumn)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
 		columns = append(columns, property)
 		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
 	}
 
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
-		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
-		createColumns = append(createColumns, createColumn)
 		columns = append(columns, property)
 		jsonToHeader[property] = core.PropertyNameToCanonicalHeader(property)
 		searchableColumns = append(searchableColumns, property)
@@ -108,11 +107,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// an external index is a manadory and unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL", name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
 		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"external_index_"+this+"_"+name,
 			schema, resource, name)
-		createColumns = append(createColumns, createColumn)
 		columns = append(columns, name)
 		jsonToHeader[name] = core.PropertyNameToCanonicalHeader(name)
 		searchableColumns = append(searchableColumns, name)
@@ -122,7 +120,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	createColumn := "blob bytea NOT NULL"
 	createColumns = append(createColumns, createColumn)
 
-	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createIndicesQuery
+	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createPropertiesQuery + createIndicesQuery
 
 	var err error
 	if b.updateSchema {
@@ -263,7 +261,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
-			case "filter":
+			case "filter", "search":
 				i := strings.IndexRune(value, '=')
 				if i < 0 {
 					err = fmt.Errorf("cannot parse filter, must be of type property=value")
