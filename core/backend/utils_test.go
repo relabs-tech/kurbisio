@@ -21,7 +21,17 @@ import (
 // CreateTestService creates a new service that can be used for testing
 // It is expected to close the Db from the returned object when the object is no longer used
 func CreateTestService(config, schemaName string) *TestService {
-	// ensure that we do not call garmin
+	return createTestServiceInternal(config, schemaName, true) // clear schema
+}
+
+// UpdateTestService creates a new service that can be used for testing, reusing
+// the data in the schema from the previous call.
+// It is expected to close the Db from the returned object when the object is no longer used
+func UpdateTestService(config, schemaName string) *TestService {
+	return createTestServiceInternal(config, schemaName, false) // keep schema
+}
+
+func createTestServiceInternal(config, schemaName string, clearSchema bool) *TestService {
 
 	s := TestService{}
 	if err := envdecode.Decode(&s); err != nil {
@@ -29,7 +39,9 @@ func CreateTestService(config, schemaName string) *TestService {
 	}
 
 	s.Db = csql.OpenWithSchema(s.Postgres, s.PostgresPassword, schemaName)
-	s.Db.ClearSchema()
+	if clearSchema {
+		s.Db.ClearSchema()
+	}
 
 	s.Router = mux.NewRouter()
 

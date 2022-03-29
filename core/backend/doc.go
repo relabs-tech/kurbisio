@@ -215,13 +215,20 @@ The GET request on collections can be customized with any of the searchable prop
 the resources or the first layer of properties of the json document as a filter. It is possibile to search for equality of to search
 a pattern.
 
+Searching and Filtering
+
+Collections support two different operators for searching and filtering: search and filter. The operator "search" is guaranteed to be fast, it only
+works on external indices or explicitely marked searchable properties. If you try to search for resources by a different property it
+will flag a bad request error. The operator "filter" will try to use database indices when availble, but it will also filter based on
+JSON properties.
+
 Searching for equality:
 In our example, the resource "user" has an external index "identity", hence we can query all users for a specific identity with
 	GET /users?filter=identity=test@test.com
 
 Searching pattern:
 Searching for pattern is done using the `~` character instead of `=`. Pattern are written using SQL LIKE format.
-% is represents zero, one, or multiple characters
+% represents zero, one, or multiple characters
 _ represents one, single character
 	GET /users?filter=identity~%@test.com
 	returns all users with an email which ends with @test.com

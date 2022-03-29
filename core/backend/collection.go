@@ -138,26 +138,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
 
+	createPropertiesQuery := ""
+
 	staticPropertiesIndex := len(columns) // where static properties start
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
-		createColumns = append(createColumns, createColumn)
-		createColumnsLog = append(createColumnsLog, createColumn)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
 		columns = append(columns, property)
 	}
 
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", property)
-		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
-		createIndicesQueryLog = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
-		createColumns = append(createColumns, createColumn)
-		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, property)
 		searchableColumns = append(searchableColumns, property)
 	}
@@ -167,16 +165,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// an external index is a unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
-		createColumn := fmt.Sprintf("\"%s\" varchar NOT NULL DEFAULT ''", name)
-		createIndicesQuery = createIndicesQuery + fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
+		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
 			"external_index_"+this+"_"+name,
 			schema, resource, name, name)
 		// the log index is not unique
-		createIndicesQueryLog = createIndicesQuery + fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
 			"external_index_"+this+"_"+name,
 			schema, resource, name)
-		createColumns = append(createColumns, createColumn)
-		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, name)
 		searchableColumns = append(searchableColumns, name)
 	}
@@ -187,10 +183,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		createColumns = append(createColumns, createColumn)
 	}
 
-	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createIndicesQuery
+	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createPropertiesQuery + createIndicesQuery
 
 	if rc.WithLog {
-		createQuery += createQueryLog + "(" + strings.Join(createColumnsLog, ", ") + ");" + createIndicesQueryLog
+		createQuery += createQueryLog + "(" + strings.Join(createColumnsLog, ", ") + ");" + createPropertiesQuery + createIndicesQueryLog
 	}
 
 	var err error
@@ -412,7 +408,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
 
-			case "filter":
+			case "filter", "search":
 				for _, value := range array {
 					var operator string
 					i := strings.IndexRune(value, '=')
@@ -442,6 +438,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					// This was not a search inside a colums, then we try to search in the json document
 					if !found {
+						if key == "search" {
+							err = fmt.Errorf("unknown search property '%s'", filterKey)
+							break
+						}
 						filterJSONValues = append(externalValues, filterValue)
 						filterJSONColumns = append(externalColumns, filterKey)
 						filterJSONOperators = append(filterJSONOperators, operator)
