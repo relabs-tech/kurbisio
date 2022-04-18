@@ -391,6 +391,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			value := array[0]
+		switchStatement:
 			switch key {
 			case "limit":
 				limit, err = strconv.Atoi(value)
@@ -440,10 +441,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					if !found {
 						if key == "search" {
 							err = fmt.Errorf("unknown search property '%s'", filterKey)
-							break
+							break switchStatement
 						}
-						filterJSONValues = append(externalValues, filterValue)
-						filterJSONColumns = append(externalColumns, filterKey)
+						filterJSONValues = append(filterJSONValues, filterValue)
+						filterJSONColumns = append(filterJSONColumns, filterKey)
 						filterJSONOperators = append(filterJSONOperators, operator)
 					}
 				}
