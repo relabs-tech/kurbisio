@@ -26,7 +26,7 @@ require (
 )
 
 require (
-	github.com/goccy/go-json v0.7.10
+	github.com/goccy/go-json v0.9.5
 	github.com/golang-jwt/jwt/v4 v4.1.0
 )
 
