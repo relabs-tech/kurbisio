@@ -74,7 +74,7 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 func (b *Backend) fileUploadedCallBack(event kss.FileUpdatedEvent) error {
 	nillog := logger.FromContext(nil)
 	// We create an empty Tx to be able to call commitWithNotification
-	// TODO store informatino about the file (etags and size at least) in the resource.
+	// TODO store information about the file (etags and size at least) in the resource.
 	// The Tx will be useful in this case and this avoid to refactor commitWithNotification to be
 	// able to use it without a Tx
 	tx, err := b.db.BeginTx(context.TODO(), nil)

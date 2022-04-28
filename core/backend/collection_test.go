@@ -31,7 +31,7 @@ func TestEtagGet(t *testing.T) {
 
 	etag := firstHeader.Get("ETag")
 	if etag == "" {
-		t.Fatal("ETag is not present in reponse's header from Get header")
+		t.Fatal("ETag is not present in response's header from Get header")
 	}
 
 	// Check that another Get with If-None-Match and ETag header returns 304
@@ -89,7 +89,7 @@ func TestEtagGetCollection(t *testing.T) {
 
 	etag := h1.Get("ETag")
 	if etag == "" {
-		t.Fatal("ETag is not present in reponse's header from Get header")
+		t.Fatal("ETag is not present in response's header from Get header")
 	}
 
 	// Check that another Get with If-None-Match and ETag header returns 304
@@ -197,7 +197,7 @@ func TestEtagCollectionRegenerated(t *testing.T) {
 
 	etag := h1.Get("ETag")
 	if etag == "" {
-		t.Fatal("ETag is not present in reponse's header from Get header")
+		t.Fatal("ETag is not present in response's header from Get header")
 	}
 
 	if _, err := testService.client.RawPost("/as", A{ExternalID: t.Name() + "2"}, &A{}); err != nil {
@@ -300,7 +300,7 @@ func TestFilters(t *testing.T) {
 	}
 
 	var collectionResult []C
-	// we now search for the searachable property and should only find our single item a
+	// we now search for the searchable property and should only find our single item a
 	_, err = testService.client.RawGet("/bs/all/cs?filter=b_id="+b.BID.String(), &collectionResult)
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +312,7 @@ func TestFilters(t *testing.T) {
 		t.Fatal("wrong item in collection:", asJSON(collectionResult))
 	}
 
-	// we now search for the searachable property and should only find our single item a
+	// we now search for the searchable property and should only find our single item a
 	_, err = testService.client.RawGet("/bs/all/cs?filter=c_id="+c.CID.String(), &collectionResult)
 	if err != nil {
 		t.Fatal(err)
