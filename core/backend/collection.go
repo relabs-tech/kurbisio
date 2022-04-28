@@ -437,7 +437,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 							break
 						}
 					}
-					// This was not a search inside a colums, then we try to search in the json document
+					// This was not a search inside a columns, then we try to search in the json document
 					if !found {
 						if key == "search" {
 							err = fmt.Errorf("unknown search property '%s'", filterKey)
@@ -1650,8 +1650,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		var uploadURL string
 		if rc.WithCompanionFile {
-			var uploadURL string
 			var key string
 			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
 				key += "/" + columns[i] + "/" + selectors[columns[i]]
@@ -1665,7 +1665,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "Error 5736", http.StatusInternalServerError)
 				return
 			}
-			response["companion_upload_url"] = uploadURL
 		}
 
 		mergeProperties(response)
@@ -1694,6 +1693,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		// We add companion_upload_url after inserting in the database if needed
+		if uploadURL != "" {
+			response["companion_upload_url"] = uploadURL
+			jsonData, _ = json.Marshal(response)
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusCreated)
 		w.Write(jsonData)
@@ -2022,6 +2026,23 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
+		var uploadURL string
+		if rc.WithCompanionFile {
+			var key string
+			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
+				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			}
+			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Minute*15)
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5736: create companion URL")
+				http.Error(w, "Error 5736", http.StatusInternalServerError)
+				return
+			}
+		}
+
 		if silent {
 			err = tx.Commit()
 		} else {
@@ -2033,6 +2054,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		// We add companion_upload_url after inserting in the database if needed
+		if uploadURL != "" {
+			response["companion_upload_url"] = uploadURL
+			jsonData, _ = json.Marshal(response)
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)

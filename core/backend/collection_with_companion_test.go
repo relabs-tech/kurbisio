@@ -68,31 +68,41 @@ var configurationCompanionJSON string = `{
 			  ]
 		  },
 		  {
-		  "resource":"release/b/artefact",
-		  "with_companion_file": true,
-		  "permits": [
-				{
-					"role": "creator",
-					"operations": [
-						"create",
-						"update",
-						"delete",
-						"clear"
-					]
-				},
-				{
-					"role": "reader",
-					"operations": [
-						"read",
-						"list"
-					]
-				}
-			]
-		}	 		
-	]
+			"resource":"release/b/artefact",
+			"with_companion_file": true,
+			"permits": [
+				  {
+					  "role": "creator",
+					  "operations": [
+						  "create",
+						  "update",
+						  "delete",
+						  "clear"
+					  ]
+				  },
+				  {
+					  "role": "reader",
+					  "operations": [
+						  "read",
+						  "list"
+					  ]
+				  }
+			  ]
+		  },
+		  {
+			"resource":"c_with_companion",
+			"with_companion_file": true
+		  }	 		
+  
+	  ]
   }
 `
 
+type CWithKss struct {
+	CID         uuid.UUID `json:"c_with_companion_id"`
+	DownloadURL string    `json:"companion_download_url"` // This field is expected to NEVER be populated
+	UploadURL   string    `json:"companion_upload_url"`   // This field is expected to NEVER be populated
+}
 type Release struct {
 	ReleaseID   uuid.UUID `json:"release_id"`
 	DownloadURL string    `json:"companion_download_url"` // This field is expected to NEVER be populated
@@ -111,14 +121,10 @@ func TestCompanion_LocalFilesystem(t *testing.T) {
 func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 
 	var kssConfiguration kss.Configuration
-	dir, err := os.MkdirTemp("", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir := t.TempDir()
 	router := mux.NewRouter()
 	creatorClient := client.NewWithRouter(router).WithRole("creator")
 	var externalClient client.Client
-	defer os.RemoveAll(dir) // clean up
 	if kssDrv == kss.DriverTypeLocal {
 		externalClient = creatorClient
 		kssConfiguration = kss.Configuration{
@@ -198,7 +204,7 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 		}
 	}
 
-	// We chech that individual Get return the download URL
+	// We check that individual Get return the download URL
 	for n, a := range artefacts {
 		var aGet Artefact
 		_, err = readerClient.RawGet(releaseArtefactsString+"/"+a.ArtefactID.String(), &aGet)
@@ -210,7 +216,7 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 			t.Fatalf("Expecting %v, got '%v'", "nothing", a.UploadURL)
 		}
 		if aGet.DownloadURL == "" {
-			t.Fatalf("Expecting %v, got '%v'", "soime url", a.DownloadURL)
+			t.Fatalf("Expecting %v, got '%v'", "some url", a.DownloadURL)
 		}
 
 		var data []byte
@@ -258,6 +264,64 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 		if string(data) != expected {
 			t.Fatalf("Expecting %v, got '%v'", expected, string(data))
 		}
+	}
+}
+
+func TestCompanionPut(t *testing.T) {
+
+	// Test that PUT on an existing property do generate a new upload URL
+
+	var kssConfiguration kss.Configuration
+	dir := t.TempDir()
+
+	router := mux.NewRouter()
+	creatorClient := client.NewWithRouter(router).WithAdminAuthorization()
+
+	kssConfiguration = kss.Configuration{
+		DriverType: kss.DriverTypeLocal,
+		LocalConfiguration: &kss.LocalConfiguration{
+			KeyPrefix: dir,
+			PublicURL: "",
+		},
+	}
+
+	var testService TestService
+
+	if err := envdecode.Decode(&testService); err != nil {
+		panic(err)
+	}
+
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_companion_unit_test_"+t.Name())
+	defer db.Close()
+	db.ClearSchema()
+
+	testService.backend = backend.New(&backend.Builder{
+		Config:               configurationCompanionJSON,
+		DB:                   db,
+		Router:               router,
+		UpdateSchema:         true,
+		AuthorizationEnabled: true,
+		KssConfiguration:     kssConfiguration,
+	})
+
+	c := CWithKss{CID: uuid.New()}
+	_, err := creatorClient.RawPut("/c_with_companions", &c, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if c.UploadURL == "" {
+		t.Errorf("Expecting UploadURL, got nothing")
+	}
+
+	c2 := CWithKss{CID: c.CID}
+	_, err = creatorClient.RawPut("/c_with_companions", c2, &c2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if c2.UploadURL == "" {
+		t.Errorf("Expecting UploadURL, got nothing")
 	}
 }
 
@@ -596,11 +660,11 @@ func testCompanion_Notifications(t *testing.T, kssDrv kss.DriverType) {
 	}
 	called := make(chan bool)
 
-	updloadHandler := func(ctx context.Context, n backend.Notification) error {
+	uploadHandler := func(ctx context.Context, n backend.Notification) error {
 		called <- true
 		return nil
 	}
-	testService.backend.HandleResourceNotification("release/b/artefact", updloadHandler, core.OperationCompanionUploaded)
+	testService.backend.HandleResourceNotification("release/b/artefact", uploadHandler, core.OperationCompanionUploaded)
 
 	var status int
 	status, err = externalClient.RawPut(artefact.UploadURL, []byte("some data"), nil)
