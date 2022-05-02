@@ -46,7 +46,7 @@ A user has a child resource "user/profile", which is declared as a singleton, i.
 Hence a profile does not have an id of its own, but uses the user_id as its primary identifier, and there
 is a convenient singular resource accessor for a user's profile.
 
-Finally there is a relation from device to user which creates two more virtuals child resources "user/device" and "device/user".
+Finally there is a relation from device to user which creates two more virtual child resources "user/device" and "device/user".
 
 This configuration creates the following REST routes:
   /users GET,POST,PUT,PATCH
@@ -146,7 +146,7 @@ have a role "userrole" which contains a selector for a user resource. Then we ca
 	  }
 	...
 
-This creates additional REST routes where every path segement /users/{user_id} is replaced with the shortcut /user for all
+This creates additional REST routes where every path segment /users/{user_id} is replaced with the shortcut /user for all
 generated routes. For example, instead of querying a user's devices with users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
 you would simply query /user/devices.
 
@@ -184,7 +184,7 @@ Static Properties
 In the example above, we have extended the user and the device collections with an external index. Likewise it is possible to extend
 resource with list of static string properties, using an array "static_properties". Static properties (searchable or not) have the
 advantage, that they can be updated must faster than any other dynamic property. If the user resource from above had a static
-propery "name", you could update that name quickly with
+property "name", you could update that name quickly with
     POST /user/{user_id}/name/{new_name}
 It is only in rare occasions when you actually need this. In the regular case, properties of a resource should not need to be
 declared static, and property updates should be done with a standard PATCH request, returning the fully patched object.
@@ -212,14 +212,14 @@ or
 	GET /user?children=profile&children=devices
 
 The GET request on collections can be customized with any of the searchable properties, an external index, the ids of
-the resources or the first layer of properties of the json document as a filter. It is possibile to search for equality of to search
+the resources or the first layer of properties of the json document as a filter. It is possible to search for equality of to search
 a pattern.
 
 Searching and Filtering
 
 Collections support two different operators for searching and filtering: search and filter. The operator "search" is guaranteed to be fast, it only
 works on external indices or explicitely marked searchable properties. If you try to search for resources by a different property it
-will flag a bad request error. The operator "filter" will try to use database indices when availble, but it will also filter based on
+will flag a bad request error. The operator "filter" will try to use database indices when available, but it will also filter based on
 JSON properties.
 
 Searching for equality:
@@ -292,7 +292,7 @@ The example demonstrated a relation between "user" and "device", which created t
 "device/user". Relations also work between different child resources, for example between "fleet/user" and "fleet/device",
 as long as both resources have a compatible base (in this case "fleet"). Furthermore relations are transient. Say you
 have actual resources "device" and "fleet", and a relation between them, which creates a virtual resource "fleet/device".
-In this case you can also have a relation between "fleet/user" and "fleet/device", leading to the two addditional
+In this case you can also have a relation between "fleet/user" and "fleet/device", leading to the two additional
 resources "fleet/user/device" and "fleet/device/user".
 
 Relations support separate permits for the left and the right resource, called "left_permits" and "right_permits".
