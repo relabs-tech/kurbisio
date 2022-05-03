@@ -790,7 +790,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 	}
 	if status == http.StatusConflict {
-		return status, fmt.Errorf("conflict while writing to path:'%s', wanted to write %+v, conflict: %+v", path, body, result)
+		return status, fmt.Errorf("conflict while writing to path:'%s', wanted to write %s, conflict: %s", path, string(j), string(resBody))
 	}
 	return status, err
 }
