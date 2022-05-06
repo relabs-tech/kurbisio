@@ -585,7 +585,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// do request interceptors
-		jsonData, _ := json.Marshal(response)
+		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
 		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, selectors, parameters, jsonData)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4726: cannot request interceptors")
@@ -992,6 +992,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				key += "/" + columns[i] + "/" + selectors[columns[i]]
 			}
 			key += "/" + primary + "_id/" + params[primary+"_id"]
+			// key += "/" + core.Plural(primary) + "/" + params[primary+"_id"]
 
 			downloadURL, err := b.KssDriver.GetPreSignedURL(kss.Get, key, time.Minute*15)
 			if err != nil {
@@ -1003,7 +1004,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// do request interceptors
-		jsonData, _ := json.Marshal(response)
+		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
 		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4748: interceptor")
@@ -1033,7 +1034,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					http.Error(w, err.Error(), status)
 					return
 				}
-				jsonData, _ = json.Marshal(response)
+				jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 			}
@@ -1143,7 +1144,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		notification := map[string]string{
 			property: value,
 		}
-		notificationJSON, _ := json.Marshal(notification)
+		notificationJSON, _ := json.MarshalWithOption(notification, json.DisableHTMLEscape())
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, primaryID, notificationJSON)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4744: sqlQuery `%s`", query)
@@ -1237,7 +1238,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		mergeProperties(object)
-		jsonData, _ := json.Marshal(object)
+		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 
 		var silent bool
 		if s := r.URL.Query().Get("silent"); s != "" {
@@ -1405,7 +1406,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				parameters[columns[i]] = idOrAll
 			}
 		}
-		notificationJSON, _ := json.Marshal(parameters)
+		notificationJSON, _ := json.MarshalWithOption(parameters, json.DisableHTMLEscape())
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
@@ -1506,7 +1507,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			bodyJSON = defaultJSON
 		}
 
-		jsonData, _ := json.Marshal(bodyJSON)
+		jsonData, _ := json.MarshalWithOption(bodyJSON, json.DisableHTMLEscape())
 
 		validateSchema := rc.SchemaID != "" && !force
 
@@ -1571,7 +1572,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			extract[key] = value
 		}
 
-		propertiesJSON, _ := json.Marshal(extract)
+		propertiesJSON, _ := json.MarshalWithOption(extract, json.DisableHTMLEscape())
 		values[i] = propertiesJSON
 		i++
 
@@ -1668,7 +1669,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		mergeProperties(response)
-		jsonData, _ = json.Marshal(response)
+		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 
 		// write log
 		if rc.WithLog {
@@ -1696,7 +1697,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// We add companion_upload_url after inserting in the database if needed
 		if uploadURL != "" {
 			response["companion_upload_url"] = uploadURL
-			jsonData, _ = json.Marshal(response)
+			jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusCreated)
@@ -1839,7 +1840,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
 			mergeProperties(object)
-			jsonData, _ := json.Marshal(object)
+			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusConflict)
 			w.Write(jsonData)
@@ -1854,7 +1855,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		if r.Method == http.MethodPatch {
 
 			// convert object into generic json for patching (the datatypes are different compared to the database) in the database)
-			body, _ := json.Marshal(object)
+			body, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			var objectJSON map[string]interface{}
 			json.Unmarshal(body, &objectJSON)
 
@@ -1908,7 +1909,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			bodyJSON[k] = values[i]
 		}
 
-		jsonData, _ := json.Marshal(bodyJSON)
+		jsonData, _ := json.MarshalWithOption(bodyJSON, json.DisableHTMLEscape())
 		validateSchema := rc.SchemaID != "" && !force
 		if validateSchema {
 			if !b.jsonValidator.HasSchema(rc.SchemaID) {
@@ -1961,7 +1962,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			extract[key] = value
 		}
 
-		propertiesJSON, _ := json.Marshal(extract)
+		propertiesJSON, _ := json.MarshalWithOption(extract, json.DisableHTMLEscape())
 		values[i] = propertiesJSON
 		i++
 
@@ -2012,7 +2013,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 		mergeProperties(response)
-		jsonData, _ = json.Marshal(response)
+		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 
 		// write log
 		if rc.WithLog {
@@ -2057,7 +2058,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// We add companion_upload_url after inserting in the database if needed
 		if uploadURL != "" {
 			response["companion_upload_url"] = uploadURL
-			jsonData, _ = json.Marshal(response)
+			jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)

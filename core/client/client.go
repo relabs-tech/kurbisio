@@ -380,9 +380,15 @@ func (r Item) Subcollection(resource string) Collection {
 // Expects http.StatusOK as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
+// Optional singleton children are added to the response.
+//
 // result can also be map[string]interface{} or a raw *[]byte.
-func (r Item) Read(result interface{}) (int, error) {
-	return r.col.client.RawGet(r.Path(), result)
+func (r Item) Read(result interface{}, children ...string) (int, error) {
+	var extra string
+	if len(children) > 0 {
+		extra = "?children=" + strings.Join(children, ",")
+	}
+	return r.col.client.RawGet(r.Path()+extra, result)
 }
 
 // Delete deletes an item from a collection

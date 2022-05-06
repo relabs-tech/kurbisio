@@ -444,12 +444,14 @@ func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, r
 		if strings.ContainsRune(child, '/') {
 			return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
 		}
-		var childJSON interface{}
+		var childJSON map[string]interface{}
 		status, err := client.RawGet(r.URL.Path+"/"+child, &childJSON)
 		if err != nil {
 			return status, fmt.Errorf("cannot get child %s", child)
 		}
-		response[child] = &childJSON
+		if childJSON != nil {
+			response[child] = &childJSON
+		}
 	}
 	return http.StatusOK, nil
 }

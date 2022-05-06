@@ -455,7 +455,7 @@ Example:
 	  },
 	  {
 		"resource": "release/artefact",
-		"with_companion_file": "true"
+		"with_companion_file": true
 	  }
 	],
 	"singletons": [
