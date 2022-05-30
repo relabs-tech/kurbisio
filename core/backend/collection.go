@@ -872,6 +872,24 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		var err error
 
 		params := mux.Vars(r)
+		noIntercept := false
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			switch key {
+			case "nointercept":
+				noIntercept, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			case "children":
+				break
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
 			selectors[columns[i]] = params[columns[i]]
@@ -936,14 +954,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					jsonData, _ = json.Marshal(bodyJSON)
 				}
-				data, err := b.intercept(r.Context(), resource, core.OperationRead, primaryID, selectors, nil, jsonData)
-				if err != nil {
-					nillog.WithError(err).Errorf("Error 4751: interceptor")
-					http.Error(w, "Error 4751", http.StatusInternalServerError)
-					return
-				}
-				if data != nil {
-					jsonData = data
+				if !noIntercept {
+					data, err := b.intercept(r.Context(), resource, core.OperationRead, primaryID, selectors, nil, jsonData)
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 4751: interceptor")
+						http.Error(w, "Error 4751", http.StatusInternalServerError)
+						return
+					}
+					if data != nil {
+						jsonData = data
+					}
 				}
 				if jsonData != nil {
 					etag := bytesToEtag(jsonData)
@@ -1016,9 +1036,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// add children if requested
-		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
 			switch key {
+			case "nointercept":
+				break
 			case "children":
 				if data != nil { // data was changed in interceptor
 					err = json.Unmarshal(jsonData, &response)
@@ -1029,7 +1050,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 				}
 
-				status, err := b.addChildrenToGetResponse(array, r, response)
+				status, err := b.addChildrenToGetResponse(array, noIntercept, r, response)
 				if err != nil {
 					http.Error(w, err.Error(), status)
 					return
@@ -1037,6 +1058,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+				return
 			}
 		}
 

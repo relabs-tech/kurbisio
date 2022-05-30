@@ -434,18 +434,22 @@ func (b *Backend) hasCollectionOrSingleton(resource string) bool {
 	return ok
 }
 
-func (b *Backend) addChildrenToGetResponse(children []string, r *http.Request, response map[string]interface{}) (int, error) {
+func (b *Backend) addChildrenToGetResponse(children []string, noIntercept bool, r *http.Request, response map[string]interface{}) (int, error) {
 	var all []string
 	for _, child := range children {
 		all = append(all, strings.Split(child, ",")...)
 	}
 	client := client.NewWithRouter(b.router).WithContext(r.Context())
+	options := ""
+	if noIntercept {
+		options = "?nointercept=true"
+	}
 	for _, child := range all {
 		if strings.ContainsRune(child, '/') {
 			return http.StatusBadRequest, fmt.Errorf("invalid child %s", child)
 		}
 		var childJSON map[string]interface{}
-		status, err := client.RawGet(r.URL.Path+"/"+child, &childJSON)
+		status, err := client.RawGet(r.URL.Path+"/"+child+options, &childJSON)
 		if err != nil {
 			return status, fmt.Errorf("cannot get child %s", child)
 		}
