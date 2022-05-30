@@ -211,6 +211,8 @@ a specific user, the user's profile and the user's devices, you can do all that 
 or
 	GET /user?children=profile&children=devices
 
+By using the paramter nointercept=true, it is possible to supress any interceptors and return the latest version of the document stored.
+
 The GET request on collections can be customized with any of the searchable properties, an external index, the ids of
 the resources or the first layer of properties of the json document as a filter. It is possible to search for equality of to search
 a pattern.
