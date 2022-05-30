@@ -391,8 +391,9 @@ func (r Item) Path() string {
 	var path string
 	if r.isSingleton {
 		path = r.col.SingletonPath()
+	} else {
+		path = r.col.CollectionPath() + "/" + r.id.String()
 	}
-	path = r.col.CollectionPath() + "/" + r.id.String()
 	if len(r.parameters) > 0 {
 		path += "?" + strings.Join(r.parameters, "&")
 	}
