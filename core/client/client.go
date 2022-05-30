@@ -357,6 +357,25 @@ func (r Collection) Singleton() Item {
 	return Item{col: r, isSingleton: true}
 }
 
+// WithParameter returns a new item client with a URL parameter added.
+func (r Item) WithParameter(key string, value string) Item {
+
+	return Item{
+		id:          r.id,
+		isSingleton: r.isSingleton,
+		col:         r.col.WithParameter(key, value),
+	}
+}
+
+// WithParameters returns a new item client with all URL parameters added.
+func (r Item) WithParameters(keyValues map[string]string) Item {
+	return Item{
+		id:          r.id,
+		isSingleton: r.isSingleton,
+		col:         r.col.WithParameters(keyValues),
+	}
+}
+
 // Path returns the created path for this item
 func (r Item) Path() string {
 	if r.isSingleton {
@@ -384,11 +403,11 @@ func (r Item) Subcollection(resource string) Collection {
 //
 // result can also be map[string]interface{} or a raw *[]byte.
 func (r Item) Read(result interface{}, children ...string) (int, error) {
-	var extra string
+	col := r.col
 	if len(children) > 0 {
-		extra = "?children=" + strings.Join(children, ",")
+		col = r.col.WithParameter("children", strings.Join(children, ","))
 	}
-	return r.col.client.RawGet(r.Path()+extra, result)
+	return col.client.RawGet(r.Path(), result)
 }
 
 // Delete deletes an item from a collection
