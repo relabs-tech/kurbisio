@@ -345,6 +345,7 @@ type Item struct {
 	col         Collection
 	id          uuid.UUID
 	isSingleton bool
+	parameters  []string
 }
 
 // Item gets an item from a collection
@@ -359,29 +360,43 @@ func (r Collection) Singleton() Item {
 
 // WithParameter returns a new item client with a URL parameter added.
 func (r Item) WithParameter(key string, value string) Item {
+	parameter := url.QueryEscape(key) + "=" + url.QueryEscape(value)
 
 	return Item{
 		id:          r.id,
 		isSingleton: r.isSingleton,
-		col:         r.col.WithParameter(key, value),
+		col:         r.col,
+		// we want a true copy to avoid side effects
+		parameters: append(append([]string{}, r.parameters...), parameter),
 	}
 }
 
 // WithParameters returns a new item client with all URL parameters added.
 func (r Item) WithParameters(keyValues map[string]string) Item {
+	var parameters []string
+	for key, value := range keyValues {
+		parameter := url.QueryEscape(key) + "=" + url.QueryEscape(value)
+		parameters = append(parameters, parameter)
+	}
 	return Item{
 		id:          r.id,
 		isSingleton: r.isSingleton,
-		col:         r.col.WithParameters(keyValues),
+		col:         r.col,
+		parameters:  append(append([]string{}, r.parameters...), parameters...),
 	}
 }
 
 // Path returns the created path for this item
 func (r Item) Path() string {
+	var path string
 	if r.isSingleton {
-		return r.col.SingletonPath()
+		path = r.col.SingletonPath()
 	}
-	return r.col.CollectionPath() + "/" + r.id.String()
+	path = r.col.CollectionPath() + "/" + r.id.String()
+	if len(r.parameters) > 0 {
+		path += "?" + strings.Join(r.parameters, "&")
+	}
+	return path
 }
 
 // Subcollection returns a subcollection for this item
@@ -403,11 +418,10 @@ func (r Item) Subcollection(resource string) Collection {
 //
 // result can also be map[string]interface{} or a raw *[]byte.
 func (r Item) Read(result interface{}, children ...string) (int, error) {
-	col := r.col
 	if len(children) > 0 {
-		col = r.col.WithParameter("children", strings.Join(children, ","))
+		return r.WithParameter("children", strings.Join(children, ",")).Read(result)
 	}
-	return col.client.RawGet(r.Path(), result)
+	return r.col.client.RawGet(r.Path(), result)
 }
 
 // Delete deletes an item from a collection
