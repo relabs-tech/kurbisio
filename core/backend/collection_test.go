@@ -603,7 +603,6 @@ func TestAddPropertyInSchemaUpdate(t *testing.T) {
 	}
 }
 
-// TestStatistics verifies that the /kurbisio/statistics endpoint returns information about the backend
 func TestSearchPattern(t *testing.T) {
 	jsonConfig := `{
 	"collections": [

@@ -304,8 +304,8 @@ Relations support separate permits for the left and the right resource, called "
 Examples:
   - to read left/{left_id}/right/{right_id}, one needs to have the "read" permission on the left_permit.
   - to read right/{right_id}/left/{left_id}, one needs to have the "read" permission on the right_permit.
-  - to create left/{left_id}/right/{right_id}, one needs to have the "create" permission on the left_permit.
-  - to create right/{right_id}/left/{left_id}, one needs to have the "create" permission on the right_permit.
+  - to create left/{left_id}/right/{right_id}, one needs to have the "create" permission on the left_permit and read permission on the right resource
+  - to create right/{right_id}/left/{left_id}, one needs to have the "create" permission on the right_permit and read permission on the left resource
   - to list left/{left_id}/rights, one needs to have the "list" permission on the left_permit.
   - to list right/{right_id}/lefts, one needs to have the "list" permission on the right_permit.
   - to delete left/{left_id}/right/{right_id}, one needs to have the "delete" permission on the left_permit.
