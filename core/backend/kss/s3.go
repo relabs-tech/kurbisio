@@ -78,7 +78,7 @@ func NewS3(kssConfig S3Configuration) (*S3, error) {
 	return &s, nil
 }
 
-// WithCallBack Replaces teh current callback with WithCallBack
+// WithCallBack Replaces the current callback with WithCallBack
 func (s *S3) WithCallBack(callback FileUpdatedCallBack) {
 	s.callback = callback
 }

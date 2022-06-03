@@ -104,7 +104,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	propertiesEndIndex := len(columns) // where properties end
 
-	// an external index is a manadory and unique varchar property.
+	// an external index is a mandatory and unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
@@ -116,7 +116,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		searchableColumns = append(searchableColumns, name)
 	}
 
-	// the actual blob data as bytea
+	// the actual blob data as bytes
 	createColumn := "blob bytea NOT NULL"
 	createColumns = append(createColumns, createColumn)
 
@@ -241,7 +241,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		for key, array := range urlQuery {
 			var err error
 			if len(array) > 1 {
-				http.Error(w, "illegal paramter array '"+key+"'", http.StatusBadRequest)
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
 			value := array[0]

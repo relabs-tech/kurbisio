@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	// Version is the version of the curent build
+	// Version is the version of the current build
 	Version = "unset"
 )
 
