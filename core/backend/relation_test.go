@@ -34,8 +34,9 @@ func TestRelation(t *testing.T) {
 	db.ClearSchema()
 
 	var configurationJSON string = `{
-		"collections": [
-		  {
+		"collections": [			
+
+	    	{
 			"resource": "a",
 			"permits": [
 				{
@@ -55,6 +56,12 @@ func TestRelation(t *testing.T) {
 					"operations": [
 						"create",
 						"update"
+					]
+				},
+				{
+					"role": "role2",
+					"operations": [
+						"read"
 					]
 				}
 			]
@@ -82,7 +89,14 @@ func TestRelation(t *testing.T) {
 							"read",				
 							"list"
 						]
+					},
+					{
+						"role": "role1",
+						"operations": [										
+							"list"
+						]
 					}
+
 				]
 			}
 		]
@@ -133,17 +147,27 @@ func TestRelation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// We verify that we can list the relation in both directions
+	// We verify that role1 cannot list the relation a/b, but only b/a
+	status, _ = role1Client.RawGet(fmt.Sprintf("/as/%s/bs", a.AID), &[]B{})
+	if status != http.StatusUnauthorized {
+		t.Fatalf("Expecting unauthorized access, got %v", status)
+	}
+	status, _ = role1Client.RawGet(fmt.Sprintf("/bs/%s/as", b.BID), &[]B{})
+	if status != http.StatusOK {
+		t.Fatalf("Expecting unauthorized access, got %v", status)
+	}
+
+	// We verify that role2 can list the relation in both directions
 	bs := []B{}
 	_, err = role2Client.RawGet(fmt.Sprintf("/as/%s/bs", a.AID), &bs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(bs) != 1 {
-		t.Fatalf("Execting one relation, got %d", len(bs))
+		t.Fatalf("Expecting one relation, got %d", len(bs))
 	}
 	if bs[0].BID != b.BID {
-		t.Fatalf("Execting %s, got %s", b.BID, bs[0].BID)
+		t.Fatalf("Expecting %s, got %s", b.BID, bs[0].BID)
 	}
 
 	as := []A{}
@@ -152,17 +176,13 @@ func TestRelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(as) != 1 {
-		t.Fatalf("Execting one relation, got %d", len(as))
+		t.Fatalf("Expecting one relation, got %d", len(as))
 	}
 	if as[0].AID != a.AID {
-		t.Fatalf("Execting %s, got %s", a.AID, as[0].AID)
+		t.Fatalf("Expecting %s, got %s", a.AID, as[0].AID)
 	}
 
-	// Check that role2 does not allow to list nor read bs and as
-	status, _ = role2Client.RawGet(fmt.Sprintf("/bs/%s", b.BID), nil)
-	if status != http.StatusUnauthorized {
-		t.Fatalf("Expecting unauthorized access, got %v", status)
-	}
+	// Check that role2 does not allow to list nor read as
 	status, _ = role2Client.RawGet(fmt.Sprintf("/as/%s", b.BID), nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("Expecting unauthorized access, got %v", status)
@@ -192,12 +212,12 @@ func TestRelation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(as) != 0 {
-		t.Fatalf("Execting 0 relation, got %d", len(as))
+		t.Fatalf("Expecting 0 relation, got %d", len(as))
 	}
 }
 
 // use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
-// and POSTRGRES_PASSWORD="docker"
+// and POSTGRES_PASSWORD="docker"
 type TestService struct {
 	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
 	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`

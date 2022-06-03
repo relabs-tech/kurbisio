@@ -79,7 +79,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	// now columns and validateColumns should contain exactly the same identifiers
 	if !reflect.DeepEqual(columns, validateColumns) {
-		panic(fmt.Sprintf(`"%s" and "%s" do not share a compatible base, symmetic relation not possible`, left, right))
+		panic(fmt.Sprintf(`"%s" and "%s" do not share a compatible base, symmetric relation not possible`, left, right))
 	}
 
 	for _, c := range columns {
@@ -140,14 +140,23 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	// register this relation, so that other relations can relate to it
 	virtualLeftResource := rc.Left + "/" + right
 	b.relations[virtualLeftResource] = resource
-	virtualLeftCollection := rightCollection
-	virtualLeftCollection.permits = rc.LeftPermits
-	b.collectionFunctions[virtualLeftResource] = virtualLeftCollection
+	virtualLeftCollection := collectionFunctions{
+		permits: rc.LeftPermits,
+		list:    rightCollection.list,
+		read:    rightCollection.read,
+	}
+
+	b.collectionFunctions[virtualLeftResource] = &virtualLeftCollection
+
 	virtualRightResource := rc.Right + "/" + left
 	b.relations[virtualRightResource] = resource
-	virtualRightCollection := leftCollection
-	virtualRightCollection.permits = rc.LeftPermits
-	b.collectionFunctions[virtualRightResource] = leftCollection
+	virtualRightCollection := collectionFunctions{
+		permits: rc.RightPermits,
+		list:    leftCollection.list,
+		read:    leftCollection.read,
+	}
+
+	b.collectionFunctions[virtualRightResource] = &virtualRightCollection
 
 	// The limit ensures reasonable fast database queries with the nested relational query. If we ever come
 	// into a situation where relations are much larger than that, we would need to work out something
