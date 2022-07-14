@@ -53,15 +53,16 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	validateColumns := []string{}
 	createColumns := []string{"serial SERIAL"}
 
-	resource := rc.Resource
-	pathPrefix := "/" + resource
-	resourcePrefix := resource + "/"
+	resource := rc.Left + ":" + rc.Right
+	pathPrefix := ""
+	resourcePrefix := ""
 
-	if resource == "" { // compatibility for un-named relations
-		resource = rc.Left + ":" + rc.Right
-		pathPrefix = ""
-		resourcePrefix = ""
+	if rc.Resource != "" {
+		resource = rc.Resource + ":" + resource
+		pathPrefix = "/" + rc.Resource
+		resourcePrefix = rc.Resource + "/"
 	}
+
 	rlog := logger.Default()
 	rlog.Debugln("create relation:", resource)
 	if rc.Description != "" {
