@@ -317,6 +317,9 @@ example, one fleet can have up to 1000 users and devices, and each user then can
 
 Relations support an extra query parameter "?idonly=true", which returns only the list of ids as opposed to full objects.
 
+Relations can also be given an explicit Resource name just like any other collection, which allows multiple different
+relations from the the same resource types. The resource name then becomes a prefix to access the relation.
+
 Blobs
 
 Blobs are collections of binary resources. They will be served to the client as-is. You can use blobs

@@ -161,6 +161,9 @@
                     "right"
                 ],
                 "properties": {
+                    "resource": {
+                        "type": "string"
+                    },
                     "left": {
                         "type": "string",
                         "minLength": 1
