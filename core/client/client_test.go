@@ -26,12 +26,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestCient(t *testing.T) {
+func TestCient_TestClient(t *testing.T) {
 
 	client := client.NewWithRouter(nil)
 
 	parentID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9b")
 	childID := uuid.MustParse("c46da255-eb72-4cc6-8835-1b34a9917826")
+	leftID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9c")
 
 	collection := client.Collection("parent/child")
 	if p := collection.CollectionPath(); p != "/parents/all/children" {
@@ -61,6 +62,11 @@ func TestCient(t *testing.T) {
 	// filter really is a only a shortcut for WithParameter
 	collection = client.Collection("parent/child").WithParameter("filter", "email=maybe@yes.no").WithParameter("something", "else")
 	if p := collection.CollectionPath(); p != "/parents/all/children?filter="+url.QueryEscape("email=maybe@yes.no")+"&something=else" {
+		t.Fatal("unexpected collection path:", p)
+	}
+
+	collection = client.Relation("myrelation").Collection("left/right").WithParent(leftID)
+	if p := collection.CollectionPath(); p != "/myrelation/lefts/"+leftID.String()+"/rights" {
 		t.Fatal("unexpected collection path:", p)
 	}
 
