@@ -115,6 +115,7 @@ func (c Client) context() context.Context {
 
 // Collection represents a collection of particular resource
 type Collection struct {
+	prefix     string
 	client     *Client
 	resources  []string
 	selectors  map[string]string
@@ -129,6 +130,29 @@ func (c Client) Collection(resource string) Collection {
 	}
 }
 
+// Relation represents a relation of particular resources
+type Relation struct {
+	resource string
+	client   *Client
+}
+
+// Relation returns a new relation client
+func (c Client) Relation(resource string) Relation {
+	return Relation{
+		client:   &c,
+		resource: resource,
+	}
+}
+
+// Collection returns a new collection client, for a collection within this relation
+func (r Relation) Collection(resource string) Collection {
+	return Collection{
+		prefix:    "/" + r.resource,
+		client:    r.client,
+		resources: strings.Split(resource, "/"),
+	}
+}
+
 // WithSelector returns a new collection client with a selector added
 func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 	// we want a true copy to avoid side effects
@@ -138,6 +162,7 @@ func (r Collection) WithSelector(key string, value uuid.UUID) Collection {
 	}
 	return Collection{
 		client:     r.client,
+		prefix:     r.prefix,
 		resources:  r.resources,
 		selectors:  selectors,
 		parameters: r.parameters,
@@ -155,6 +180,7 @@ func (r Collection) WithSelectors(keyValues map[string]string) Collection {
 	}
 	return Collection{
 		client:     r.client,
+		prefix:     r.prefix,
 		resources:  r.resources,
 		selectors:  selectors,
 		parameters: r.parameters,
@@ -176,6 +202,7 @@ func (r Collection) WithParameter(key string, value string) Collection {
 
 	return Collection{
 		client:    r.client,
+		prefix:    r.prefix,
 		resources: r.resources,
 		selectors: r.selectors,
 		// we want a true copy to avoid side effects
@@ -192,6 +219,7 @@ func (r Collection) WithParameters(keyValues map[string]string) Collection {
 	}
 	return Collection{
 		client:    r.client,
+		prefix:    r.prefix,
 		resources: r.resources,
 		selectors: r.selectors,
 		// we want a true copy to avoid side effects
@@ -206,7 +234,7 @@ func (r Collection) WithFilter(key string, value string) Collection {
 }
 
 func (r Collection) paths() (collectionPath, singletonPath string) {
-	var itemPath string
+	itemPath := r.prefix
 	for _, resource := range r.resources {
 		singletonPath = itemPath + "/" + resource
 		collectionPath = itemPath + "/" + core.Plural(resource)
