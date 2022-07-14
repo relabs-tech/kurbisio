@@ -53,7 +53,15 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	validateColumns := []string{}
 	createColumns := []string{"serial SERIAL"}
 
-	resource := rc.Left + ":" + rc.Right
+	resource := rc.Resource
+	pathPrefix := "/" + resource
+	resourcePrefix := resource + "/"
+
+	if resource == "" { // compatibility for un-named relations
+		resource = rc.Left + ":" + rc.Right
+		pathPrefix = ""
+		resourcePrefix = ""
+	}
 	rlog := logger.Default()
 	rlog.Debugln("create relation:", resource)
 	if rc.Description != "" {
@@ -138,7 +146,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	}
 
 	// register this relation, so that other relations can relate to it
-	virtualLeftResource := rc.Left + "/" + right
+	virtualLeftResource := resourcePrefix + rc.Left + "/" + right
 	b.relations[virtualLeftResource] = resource
 	virtualLeftCollection := collectionFunctions{
 		permits: rc.LeftPermits,
@@ -148,7 +156,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 	b.collectionFunctions[virtualLeftResource] = &virtualLeftCollection
 
-	virtualRightResource := rc.Right + "/" + left
+	virtualRightResource := resourcePrefix + rc.Right + "/" + left
 	b.relations[virtualRightResource] = resource
 	virtualRightCollection := collectionFunctions{
 		permits: rc.RightPermits,
@@ -174,15 +182,15 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(columns, ","), parameterString(len(columns)))
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(columns))
 
-	leftListRoute := ""
-	leftItemRoute := ""
+	leftListRoute := pathPrefix
+	leftItemRoute := pathPrefix
 	for _, r := range leftResources {
 		leftListRoute = leftItemRoute + "/" + core.Plural(r)
 		leftItemRoute = leftItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	rightListRoute := ""
-	rightItemRoute := ""
+	rightListRoute := pathPrefix
+	rightItemRoute := pathPrefix
 	for _, r := range rightResources {
 		rightListRoute = rightItemRoute + "/" + core.Plural(r)
 		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
