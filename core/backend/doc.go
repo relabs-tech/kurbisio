@@ -316,6 +316,8 @@ For each relation, the number of related resources for one other resource is cur
 example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.
 
 Relations support an extra query parameter "?idonly=true", which returns only the list of ids as opposed to full objects.
+If you furthermore specify "withtimestamp=true", you will receice both the ids and the timestamp when this relation was
+established.
 
 Relations can also be given an explicit Resource name just like any other collection, which allows multiple different
 relations from the the same resource types. The resource name then becomes a prefix to access the relation.
