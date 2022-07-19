@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -129,6 +130,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	createColumns = append(createColumns, createColumn)
 
 	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
+	createQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS timestamp timestamp NOT NULL DEFAULT now();", schema, resource)
 
 	if b.updateSchema {
 		_, err := b.db.Exec(createQuery)
@@ -173,9 +175,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	// searchable properties, external indices) and keep those in sync with the original table.
 	sqlPagination := " ORDER BY serial LIMIT 1000"
 
-	leftQuery := fmt.Sprintf("SELECT %s_id FROM %s.\"%s\" WHERE ", right, schema, resource) +
+	leftQuery := fmt.Sprintf("SELECT %s_id, timestamp FROM %s.\"%s\" WHERE ", right, schema, resource) +
 		compareIDsString(leftColumns[:len(leftColumns)-1]) + sqlPagination + ";"
-	rightQuery := fmt.Sprintf("SELECT %s_id FROM %s.\"%s\" WHERE ", left, schema, resource) +
+	rightQuery := fmt.Sprintf("SELECT %s_id, timestamp FROM %s.\"%s\" WHERE ", left, schema, resource) +
 		compareIDsString(rightColumns[:len(rightColumns)-1]) + sqlPagination + ";"
 
 	leftSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s %s) ", right, right, schema, resource, sqlPagination)
@@ -215,18 +217,27 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			}
 		}
 
-		var idonly bool
+		var idonly, withtimestamp bool
 		var err error
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
-			if key == "idonly" {
+			switch key {
+			case "idonly":
 				idonly, err = strconv.ParseBool(array[0])
 				if err != nil {
 					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 					return
 				}
+			case "withtimestamp":
+				withtimestamp, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			default:
 			}
 		}
+
 		queryParameters := make([]interface{}, len(leftColumns)-1)
 		for i := 0; i < len(leftColumns)-1; i++ { // skip ID
 			queryParameters[i] = params[leftColumns[i]]
@@ -234,6 +245,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 		if idonly {
 			response := []uuid.UUID{}
+			responseWithTimestamp := []map[string]interface{}{}
+			idName := fmt.Sprintf("%s_id", left)
+
 			rows, err := b.db.Query(leftQuery, queryParameters...)
 			if err != sql.ErrNoRows {
 				if err != nil {
@@ -244,16 +258,28 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				defer rows.Close()
 				for rows.Next() {
 					id := uuid.UUID{}
-					err := rows.Scan(&id)
+					timestamp := time.Time{}
+					err := rows.Scan(&id, &timestamp)
 					if err != nil {
 						rlog.WithError(err).Errorln("Error 4124: Next")
 						http.Error(w, "Error 4124: ", http.StatusInternalServerError)
 						return
 					}
 					response = append(response, id)
+					responseWithTimestamp = append(responseWithTimestamp, map[string]interface{}{
+						"timestamp": timestamp,
+						idName:      id,
+					})
 				}
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+			if withtimestamp {
+				jsonData, _ := json.Marshal(responseWithTimestamp)
+				w.Write(jsonData)
+				return
+			}
+
 			jsonData, _ := json.Marshal(response)
 			w.Write(jsonData)
 			return
@@ -281,16 +307,24 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			}
 		}
 
-		var idonly bool
+		var idonly, withtimestamp bool
 		var err error
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
-			if key == "idonly" {
+			switch key {
+			case "idonly":
 				idonly, err = strconv.ParseBool(array[0])
 				if err != nil {
 					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 					return
 				}
+			case "withtimestamp":
+				withtimestamp, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			default:
 			}
 		}
 
@@ -301,6 +335,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 
 		if idonly {
 			response := []uuid.UUID{}
+			responseWithTimestamp := []map[string]interface{}{}
+			idName := fmt.Sprintf("%s_id", left)
+
 			rows, err := b.db.Query(rightQuery, queryParameters...)
 			if err != sql.ErrNoRows {
 				if err != nil {
@@ -311,16 +348,28 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				defer rows.Close()
 				for rows.Next() {
 					id := uuid.UUID{}
-					err := rows.Scan(&id)
+					timestamp := time.Time{}
+					err := rows.Scan(&id, &timestamp)
 					if err != nil {
 						rlog.WithError(err).Errorln("Error 4126: Scan")
 						http.Error(w, "Error 4126: ", http.StatusInternalServerError)
 						return
 					}
 					response = append(response, id)
+					responseWithTimestamp = append(responseWithTimestamp, map[string]interface{}{
+						"timestamp": timestamp,
+						idName:      id,
+					})
 				}
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+			if withtimestamp {
+				jsonData, _ := json.Marshal(responseWithTimestamp)
+				w.Write(jsonData)
+				return
+			}
+
 			jsonData, _ := json.Marshal(response)
 			w.Write(jsonData)
 			return
