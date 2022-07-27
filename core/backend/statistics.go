@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/goccy/go-json"
 
@@ -52,6 +53,7 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	s := StatisticsDetails{}
 	var collections, singletons, relations, blobs sort.StringSlice
 	for _, r := range b.config.Collections {
@@ -61,7 +63,11 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 		singletons = append(singletons, r.Resource)
 	}
 	for _, r := range b.config.Relations {
-		relations = append(relations, r.Left+":"+r.Right)
+		resource := r.Left + ":" + r.Right
+		if r.Resource != "" {
+			resource = r.Resource + ":" + resource
+		}
+		relations = append(relations, resource)
 	}
 	for _, r := range b.config.Blobs {
 		blobs = append(blobs, r.Resource)
@@ -72,9 +78,53 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 	relations.Sort()
 	blobs.Sort()
 
+	var allResources []string
+	allResources = append(allResources, collections...)
+	allResources = append(allResources, singletons...)
+	allResources = append(allResources, relations...)
+	allResources = append(allResources, blobs...)
+
+	var err error
+	urlQuery := r.URL.Query()
+	filter := map[string]bool{}
+	for key, array := range urlQuery {
+		if key != "resource" && len(array) > 1 {
+			http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+			return
+		}
+		switch key {
+		case "resource":
+			for _, values := range array {
+				for _, value := range strings.Split(values, ",") {
+					found := false
+					for _, r := range allResources {
+						if value == r {
+							found = true
+							filter[value] = true
+							break
+						}
+					}
+					if !found {
+						err = fmt.Errorf("unknown resource %s", value)
+					}
+				}
+			}
+		default:
+			err = fmt.Errorf("unknown")
+		}
+
+		if err != nil {
+			http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	queryStatisticsFromDB := func(stats *[]ResourceStatistics, resources sort.StringSlice) {
 		*stats = []ResourceStatistics{} // do not return null in json, but empty array
 		for _, resource := range resources {
+			if len(filter) > 0 && filter[resource] == false {
+				continue
+			}
 			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
 			var size, count int64
 			if err := row.Scan(&size, &count); err != nil {
