@@ -53,6 +53,14 @@ func TestStatistics(t *testing.T) {
 	for _, r := range testService.backend.Config().Blobs {
 		expectedResources = append(expectedResources, r.Resource)
 	}
+	for _, r := range testService.backend.Config().Relations {
+		resource := ""
+		if r.Resource != "" {
+			resource = r.Resource + ":" + resource
+		}
+		resource += r.Left + ":" + r.Right
+		expectedResources = append(expectedResources, resource)
+	}
 	for _, r := range testService.backend.Config().Singletons {
 		expectedResources = append(expectedResources, r.Resource)
 	}
@@ -98,6 +106,47 @@ func TestStatistics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestStatisticsFiltered verifies that the /kurbisio/statistics endpoint returns information about the backend
+func TestStatisticsFiltered(t *testing.T) {
+
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
+	var stats backend.StatisticsDetails
+	_, h, err := testService.client.WithAdminAuthorization().RawGetWithHeader("/kurbisio/statistics?resource=a,b", map[string]string{}, &stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Get("ETag") == "" {
+		t.Fatal("ETag is empty")
+	}
+
+	var receivedResources sort.StringSlice
+
+	expectedResources := sort.StringSlice{"a", "b"}
+
+	for _, r := range stats.Collections {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Singletons {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Relations {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+	for _, r := range stats.Blobs {
+		receivedResources = append(receivedResources, r.Resource)
+	}
+
+	// Sort so that comparison between expected vs received is simple
+	receivedResources.Sort()
+
+	if !reflect.DeepEqual(expectedResources, receivedResources) {
+		t.Fatalf("Expected %v resources statistics, got %v", expectedResources, receivedResources)
+	}
+
 }
 
 func getResourceByName(name string, stats backend.StatisticsDetails) *backend.ResourceStatistics {

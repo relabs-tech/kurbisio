@@ -514,6 +514,9 @@ This returns a JSON body like this:
 	]
 }
 
+If you are only interested in certain resources, you can filter using the resource parameter like this:
+	/statistics?resource=user,device
+
 Version
 
 The Version of the software running can be obtain from a dedicated endpoint. The version can be set
