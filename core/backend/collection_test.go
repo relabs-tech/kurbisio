@@ -689,3 +689,29 @@ func TestSearchPattern(t *testing.T) {
 		t.Fatal("wrong item in collection:", collectionResult[0].SearchableProp)
 	}
 }
+
+func TestPatch(t *testing.T) {
+	a := A{ExternalID: t.Name()}
+	if _, err := testService.client.RawPost("/as", a, &a); err != nil {
+		t.Fatal(err)
+	}
+
+	var result A
+	status, err := testService.client.RawPatch("/as/"+a.AID.String(),
+		map[string]string{"foo": "new_foo"}, &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || result.Foo != "new_foo" {
+		t.Fatalf("patch did not work")
+	}
+
+	// patching an unknown object should return 404 not found
+	unknownID := uuid.New()
+	status, err = testService.client.RawPatch("/as/"+unknownID.String(),
+		map[string]string{"foo": "new_foo"}, &result)
+	if err == nil || status != http.StatusNotFound {
+		t.Fatalf("patch of unknown object did return %d", status)
+	}
+
+}
