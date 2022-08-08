@@ -1822,10 +1822,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
 		if err == csql.ErrNoRows {
-			// item does not exist yet. If we have the right permissions, we can create it. Otherwise
-			// we are forced to return 404 Not Found.
-			// We must not check this for singletons, as singletons exist always (at least conceptually)
-			if b.authorizationEnabled && !singleton {
+			// item does not exist yet.
+			if singleton {
+				// This is OK for singletons (they conceptually always exist)
+			} else if r.Method == http.MethodPatch {
+				// cannot patch an object which does not exist
+				tx.Rollback()
+				http.Error(w, "no such "+this, http.StatusNotFound)
+				return
+			} else if b.authorizationEnabled {
+				// normal upsert, check whether we can create the object
 				auth := access.AuthorizationFromContext(r.Context())
 				if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
 					tx.Rollback()
