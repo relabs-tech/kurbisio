@@ -14,7 +14,6 @@ import (
 )
 
 // Operation represents a modifying backend storage operation, one of Create, Read, Update, Delete, List, Clear
-//
 type Operation string
 
 // all supported database operations
@@ -49,6 +48,9 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 //
 // This is the algorithm used to create idiomatic REST routes
 func Plural(singular string) string {
+	if strings.HasSuffix(singular, "ey") {
+		return strings.TrimSuffix(singular, "ey") + "eys"
+	}
 	if strings.HasSuffix(singular, "y") {
 		return strings.TrimSuffix(singular, "y") + "ies"
 	}
