@@ -558,7 +558,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 					key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
 
-					uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Get, key, time.Minute*15)
+					validitySeconds := 900
+					if rc.CompanionPresignedURLValidity > 0 {
+						validitySeconds = rc.CompanionPresignedURLValidity
+					}
+
+					uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Get, key, time.Second*time.Duration(validitySeconds))
 					if err != nil {
 						nillog.WithError(err).Errorf("Error 5736: list companion URL")
 						http.Error(w, "Error 5736", http.StatusInternalServerError)
@@ -1014,7 +1019,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			key += "/" + primary + "_id/" + params[primary+"_id"]
 			// key += "/" + core.Plural(primary) + "/" + params[primary+"_id"]
 
-			downloadURL, err := b.KssDriver.GetPreSignedURL(kss.Get, key, time.Minute*15)
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			downloadURL, err := b.KssDriver.GetPreSignedURL(kss.Get, key, time.Second*time.Duration(validitySeconds))
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 1736: get companion URL")
 				http.Error(w, "Error 1736", http.StatusInternalServerError)
@@ -1681,7 +1691,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
 
-			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Minute*15)
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
 			if err != nil {
 				tx.Rollback()
 				rlog.WithError(err).Errorf("Error 5736: create companion URL")
@@ -2063,7 +2078,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
 
-			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Minute*15)
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
 			if err != nil {
 				tx.Rollback()
 				rlog.WithError(err).Errorf("Error 5736: create companion URL")

@@ -54,6 +54,11 @@
                     "with_companion_file": {
                         "type": "boolean",
                         "description": "If true this resource will allow to add companion file stored externally"
+                    },
+                    "companion_presigned_url_validity": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "description": "The validity in seconds of the pre signed URL. Defaults to 900 (15 minutes)"
                     }
                 }
             }
