@@ -70,6 +70,7 @@ var configurationCompanionJSON string = `{
 		  {
 			"resource":"release/b/artefact",
 			"with_companion_file": true,
+			"companion_presigned_url_validity": 86400,
 			"permits": [
 				  {
 					  "role": "creator",

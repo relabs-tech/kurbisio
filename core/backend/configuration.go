@@ -23,16 +23,17 @@ type Configuration struct {
 
 // collectionConfiguration describes a collection resource
 type collectionConfiguration struct {
-	Resource             string          `json:"resource"`
-	ExternalIndex        string          `json:"external_index"`
-	StaticProperties     []string        `json:"static_properties"`
-	SearchableProperties []string        `json:"searchable_properties"`
-	Permits              []access.Permit `json:"permits"`
-	Description          string          `json:"description"`
-	SchemaID             string          `json:"schema_id"`
-	WithLog              bool            `json:"with_log"`
-	Default              json.RawMessage `json:"default"`
-	WithCompanionFile    bool            `json:"with_companion_file"`
+	Resource                      string          `json:"resource"`
+	ExternalIndex                 string          `json:"external_index"`
+	StaticProperties              []string        `json:"static_properties"`
+	SearchableProperties          []string        `json:"searchable_properties"`
+	Permits                       []access.Permit `json:"permits"`
+	Description                   string          `json:"description"`
+	SchemaID                      string          `json:"schema_id"`
+	WithLog                       bool            `json:"with_log"`
+	Default                       json.RawMessage `json:"default"`
+	WithCompanionFile             bool            `json:"with_companion_file"`
+	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
 }
 
 // singletonConfiguration describes a singleton resource
