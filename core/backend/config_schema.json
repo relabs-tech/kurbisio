@@ -132,6 +132,9 @@
                     "mutable": {
                         "type": "boolean"
                     },
+                    "max_age_cache": {
+                        "type": "integer"
+                    },
                     "permits": {
                         "$ref": "#/definitions/permits"
                     },
