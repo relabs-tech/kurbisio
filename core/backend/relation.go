@@ -151,20 +151,20 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 	// register this relation, so that other relations can relate to it
 	virtualLeftResource := resourcePrefix + rc.Left + "/" + right
 	b.relations[virtualLeftResource] = resource
-	virtualLeftCollection := collectionFunctions{
-		permits: rc.LeftPermits,
-		list:    rightCollection.list,
-		read:    rightCollection.read,
+	virtualLeftCollection := CollectionFunctions{
+		Permits: rc.LeftPermits,
+		List:    rightCollection.List,
+		Read:    rightCollection.Read,
 	}
 
 	b.collectionFunctions[virtualLeftResource] = &virtualLeftCollection
 
 	virtualRightResource := resourcePrefix + rc.Right + "/" + left
 	b.relations[virtualRightResource] = resource
-	virtualRightCollection := collectionFunctions{
-		permits: rc.RightPermits,
-		list:    leftCollection.list,
-		read:    leftCollection.read,
+	virtualRightCollection := CollectionFunctions{
+		Permits: rc.RightPermits,
+		List:    leftCollection.List,
+		Read:    leftCollection.Read,
 	}
 
 	b.collectionFunctions[virtualRightResource] = &virtualRightCollection
@@ -285,13 +285,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			return
 		}
 
-		injectRelation := &relationInjection{
-			subquery:        leftSQLInjectRelation,
-			columns:         leftColumns[:len(leftColumns)-1], // skip ID
-			queryParameters: queryParameters,
+		injectRelation := &RelationInjection{
+			Subquery:        leftSQLInjectRelation,
+			Columns:         leftColumns[:len(leftColumns)-1], // skip ID
+			QueryParameters: queryParameters,
 		}
 
-		rightCollection.list(w, r, injectRelation)
+		rightCollection.List(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// LIST RIGHT
@@ -375,13 +375,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 			return
 		}
 
-		injectRelation := &relationInjection{
-			subquery:        rightSQLInjectRelation,
-			columns:         rightColumns[:len(rightColumns)-1], // skip ID
-			queryParameters: queryParameters,
+		injectRelation := &RelationInjection{
+			Subquery:        rightSQLInjectRelation,
+			Columns:         rightColumns[:len(rightColumns)-1], // skip ID
+			QueryParameters: queryParameters,
 		}
 
-		leftCollection.list(w, r, injectRelation)
+		leftCollection.List(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ LEFT
@@ -400,13 +400,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		for i := 0; i < len(leftColumns); i++ {
 			queryParameters[i] = params[leftColumns[i]]
 		}
-		injectRelation := &relationInjection{
-			subquery:        leftSQLInjectRelation,
-			columns:         leftColumns,
-			queryParameters: queryParameters,
+		injectRelation := &RelationInjection{
+			Subquery:        leftSQLInjectRelation,
+			Columns:         leftColumns,
+			QueryParameters: queryParameters,
 		}
 
-		rightCollection.read(w, r, injectRelation)
+		rightCollection.Read(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// READ RIGHT
@@ -424,13 +424,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		for i := 0; i < len(rightColumns); i++ {
 			queryParameters[i] = params[rightColumns[i]]
 		}
-		injectRelation := &relationInjection{
-			subquery:        rightSQLInjectRelation,
-			columns:         rightColumns,
-			queryParameters: queryParameters,
+		injectRelation := &RelationInjection{
+			Subquery:        rightSQLInjectRelation,
+			Columns:         rightColumns,
+			QueryParameters: queryParameters,
 		}
 
-		leftCollection.read(w, r, injectRelation)
+		leftCollection.Read(w, r, injectRelation)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	create := func(w http.ResponseWriter, r *http.Request) {
@@ -483,7 +483,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
-			if !auth.IsAuthorized(rightResources[:len(rightResources)-1], core.OperationRead, params, rightCollection.permits) {
+			if !auth.IsAuthorized(rightResources[:len(rightResources)-1], core.OperationRead, params, rightCollection.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -502,7 +502,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
-			if !auth.IsAuthorized(leftResources[:len(leftResources)-1], core.OperationRead, params, leftCollection.permits) {
+			if !auth.IsAuthorized(leftResources[:len(leftResources)-1], core.OperationRead, params, leftCollection.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}

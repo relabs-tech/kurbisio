@@ -364,7 +364,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 	}
 
-	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		var (
 			queryParameters     []interface{}
 			sqlQuery            string
@@ -517,9 +517,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if relation != nil {
 			// inject subquery for relation
-			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
+			sqlQuery += fmt.Sprintf(relation.Subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.Columns))
+			queryParameters = append(queryParameters, relation.QueryParameters...)
 		}
 
 		if ascendingOrder {
@@ -644,7 +644,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -657,7 +657,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		list(w, r, nil)
 	}
 
-	log := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	log := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -774,9 +774,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if relation != nil {
 			// inject subquery for relation
-			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
+			sqlQuery += fmt.Sprintf(relation.Subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.Columns))
+			queryParameters = append(queryParameters, relation.QueryParameters...)
 		}
 
 		if ascendingOrder {
@@ -860,7 +860,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	logWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	logWithAuth := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -873,7 +873,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		log(w, r, nil)
 	}
 
-	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		var err error
 
 		params := mux.Vars(r)
@@ -926,9 +926,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		subQuery := ""
 		if relation != nil {
 			// inject subquery for relation
-			subQuery = fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
+			subQuery = fmt.Sprintf(relation.Subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.Columns))
+			queryParameters = append(queryParameters, relation.QueryParameters...)
 		}
 
 		values, response := createScanValuesAndObject(&time.Time{}, new(int))
@@ -1897,7 +1897,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// for MethodPatch we get the existing object from the database and patch property by property
 		if r.Method == http.MethodPatch {
 
-			// convert object into generic json for patching (the datatypes are different compared to the database) in the database)
+			// convert object into generic json for patching (the data types are different compared to the database) in the database)
 			body, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			var objectJSON map[string]interface{}
 			json.Unmarshal(body, &objectJSON)
@@ -1933,7 +1933,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values[i] = current[i]
 			idAsString := values[i].(*uuid.UUID).String()
 
-			// validate that the paramaters  match the object
+			// validate that the parameters  match the object
 			if params[k] != "all" && params[k] != idAsString {
 				tx.Rollback()
 				http.Error(w, "no such "+this, http.StatusNotFound)
@@ -2019,7 +2019,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			values[i] = value
 		}
 
-		// next value is timestamp. We only change it when explicitely requested
+		// next value is timestamp. We only change it when explicitly requested
 		if value, ok := bodyJSON["timestamp"]; ok {
 			timestampAsString, _ := value.(string)
 			t, err := time.Parse(time.RFC3339, timestampAsString)
@@ -2113,11 +2113,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Write(jsonData)
 	}
 
-	// store the collection functions  for later usage in relations
-	b.collectionFunctions[resource] = &collectionFunctions{
-		permits: rc.Permits,
-		list:    list,
-		read:    read,
+	// store the collection functions for later usage in relations
+	b.collectionFunctions[resource] = &CollectionFunctions{
+		Permits: rc.Permits,
+		List:    list,
+		Read:    read,
 	}
 
 	// CREATE
