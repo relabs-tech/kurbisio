@@ -39,6 +39,7 @@ import (
 )
 
 // ConfigSchemaJSON contains the Json schemafor the backend's configuration file
+//
 //go:embed config_schema.json
 var ConfigSchemaJSON string
 
@@ -52,7 +53,7 @@ type Backend struct {
 	db                  *csql.DB
 	router              *mux.Router
 	publicURL           string
-	collectionFunctions map[string]*collectionFunctions
+	collectionFunctions map[string]*CollectionFunctions
 	relations           map[string]string
 	// Registry is the JSON object registry for this backend's schema
 	Registry             registry.Registry
@@ -153,7 +154,7 @@ func New(bb *Builder) *Backend {
 		db:                       bb.DB,
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
-		collectionFunctions:      make(map[string]*collectionFunctions),
+		collectionFunctions:      make(map[string]*CollectionFunctions),
 		relations:                make(map[string]string),
 		Registry:                 registry.New(bb.DB),
 		authorizationEnabled:     bb.AuthorizationEnabled,
@@ -286,6 +287,15 @@ func (r byDepth) Less(i, j int) bool {
 	return r[i].depth() < r[j].depth()
 }
 
+func (b *Backend) DB() *csql.DB {
+	return b.db
+}
+
+// CollectionFunctions returns the collection functions for a given resource
+func (b *Backend) CollectionFunctions(resource string) *CollectionFunctions {
+	return b.collectionFunctions[resource]
+}
+
 // handleResourceRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleResourceRoutes() {
 
@@ -355,16 +365,17 @@ func (b *Backend) handleResourceRoutes() {
 
 }
 
-type relationInjection struct {
-	subquery        string
-	columns         []string
-	queryParameters []interface{}
+type RelationInjection struct {
+	Subquery        string
+	Columns         []string
+	QueryParameters []interface{}
 }
 
-type collectionFunctions struct {
-	permits []access.Permit
-	list    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	read    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
+// CollectionFunctions contains the functions for a collection
+type CollectionFunctions struct {
+	Permits []access.Permit
+	List    func(w http.ResponseWriter, r *http.Request, relation *RelationInjection)
+	Read    func(w http.ResponseWriter, r *http.Request, relation *RelationInjection)
 }
 
 // returns $1,...,$n

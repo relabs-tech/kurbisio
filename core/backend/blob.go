@@ -225,7 +225,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 		}
 	}
-	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -318,9 +318,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		if relation != nil {
 			// inject subquery for relation
-			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
+			sqlQuery += fmt.Sprintf(relation.Subquery,
+				compareIDsStringWithOffset(len(queryParameters), relation.Columns))
+			queryParameters = append(queryParameters, relation.QueryParameters...)
 		}
 
 		sqlQuery += sqlPagination
@@ -372,7 +372,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
-	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -385,7 +385,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		list(w, r, nil)
 	}
 
-	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request, relation *RelationInjection) {
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -968,9 +968,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	// store the collection helper for later usage in relations
-	b.collectionFunctions[this] = &collectionFunctions{
-		list: list,
-		read: read,
+	b.collectionFunctions[this] = &CollectionFunctions{
+		List: list,
+		Read: read,
 	}
 
 	// CREATE

@@ -7,6 +7,7 @@
 package backend_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +15,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
+	"github.com/relabs-tech/kurbisio/core/backend"
+	"github.com/relabs-tech/kurbisio/core/logger"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -347,6 +352,7 @@ func TestSearchEqual(t *testing.T) {
   }
 `
 	testService := CreateTestService(jsonConfig, t.Name())
+
 	defer testService.Db.Close()
 
 	numberOfElements := 16
@@ -712,6 +718,82 @@ func TestPatch(t *testing.T) {
 		map[string]string{"foo": "new_foo"}, &result)
 	if err == nil || status != http.StatusNotFound {
 		t.Fatalf("patch of unknown object did return %d", status)
+	}
+
+}
+
+// TestRelationsAndSubCollection verifies that given a relation a-b, we can list all elements of
+// a/c where a is in a relation with a given b
+func TestRelationsAndSubCollection(t *testing.T) {
+	jsonConfig := `
+	{
+	"collections": [
+		{
+			"resource": "a"
+		  },
+		  {
+			"resource": "b"
+		  },
+		  {
+			"resource": "a/c"
+		  }
+		],
+		"relations": [
+			{		
+				"left":"a",
+				"right":"b"
+			}
+		]
+	  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+
+	defer testService.Db.Close()
+
+	client := testService.client.WithAdminAuthorization()
+	var a1, a2 A
+	var b1 B
+	var c1, c2, c3 C
+	client.MustRawPost("/bs", B{}, &b1)
+	client.MustRawPost("/as", A{}, &a1)
+	client.MustRawPost("/as", A{}, &a2)
+	client.MustRawPost("/as/"+a1.AID.String()+"/cs", C{}, &c1)
+	client.MustRawPost("/as/"+a1.AID.String()+"/cs", C{}, &c2)
+	client.MustRawPost("/as/"+a2.AID.String()+"/cs", C{}, &c3)
+	client.MustRawPut("/as/"+a1.AID.String()+"/bs/"+b1.BID.String(), nil, nil)
+
+	functions := testService.backend.CollectionFunctions("a/c")
+	if functions == nil {
+		t.Fatal("no functions for a/c")
+	}
+
+	testService.backend.Router().Handle("/newRoute/{b_id}",
+		handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			vars := mux.Vars(r)
+			r = mux.SetURLVars(r, map[string]string{"a_id": "all"})
+
+			// we should get that from Backend
+			right := "a"
+			schema := testService.backend.DB().Schema
+			resource := "a:b"
+			leftSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s) ", right, right, schema, resource)
+
+			functions.List(w, r, &backend.RelationInjection{
+				Subquery:        leftSQLInjectRelation,
+				Columns:         []string{"b_id"},
+				QueryParameters: []interface{}{vars["b_id"]},
+			})
+		}))).Methods(http.MethodOptions, http.MethodGet)
+
+	var result []C
+
+	_, err := client.RawGet("/newRoute/"+b1.BID.String(), &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 2 {
+		t.Fatal("unexpected number of items in collection, expected 2, got", len(result))
 	}
 
 }

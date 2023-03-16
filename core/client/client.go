@@ -4,7 +4,8 @@
 // info@dalarub.com
 //
 
-/*Package client provides easy and fast in-process access to a REST api
+/*
+Package client provides easy and fast in-process access to a REST api
 
 Instead of marshalling HTTP, the client talks directly to the mux router. The client
 is the tool of choice if one request handler needs to call other handlers to fulfill
@@ -34,7 +35,6 @@ import (
 )
 
 // Client provides easy access to the REST API.
-//
 type Client struct {
 	router     *mux.Router
 	httpClient *http.Client
@@ -73,14 +73,16 @@ func (c Client) WithToken(token string) Client {
 
 // WithAdminAuthorization returns a new client with admin authorizations
 // (this works only directly against the mux router, for a normal client
-//  use WithToken()))
+//
+//	use WithToken()))
 func (c Client) WithAdminAuthorization() Client {
 	return c.WithRole("admin")
 }
 
 // WithRole returns a new client with role authorization
 // (this works only directly against the mux router, for a normal client
-//  use WithToken()))
+//
+//	use WithToken()))
 func (c Client) WithRole(role string) Client {
 	c.auth = &access.Authorization{
 		Roles: []string{role},
@@ -90,7 +92,8 @@ func (c Client) WithRole(role string) Client {
 
 // WithAuthorization returns a new client with specific authorizations
 // (this works only directly against the mux router, for a normal client
-//  use WithToken())
+//
+//	use WithToken())
 func (c Client) WithAuthorization(auth *access.Authorization) Client {
 	c.auth = auth
 	return c
@@ -356,7 +359,6 @@ func (r Collection) Clear() (int, error) {
 // List gets the entire collection up until the specified limit.
 //
 // If you potentially need multiple pages, use FirstPage() instead.
-//
 //
 // The operation corresponds to a GET request.
 //
@@ -710,6 +712,15 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	return status, res.Header, nil
 }
 
+// MustRawPost calls RawPost and panics on error.
+func (c Client) MustRawPost(path string, body interface{}, result interface{}) int {
+	res, err := c.RawPost(path, body, result)
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
 // RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
@@ -767,7 +778,6 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
-//
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
@@ -803,6 +813,15 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 		err = json.Unmarshal(resBody, result)
 	}
 	return status, err
+}
+
+// MustRawPut calls RawPost and panics on error.
+func (c Client) MustRawPut(path string, body interface{}, result interface{}) int {
+	res, err := c.RawPut(path, body, result)
+	if err != nil {
+		panic(err)
+	}
+	return res
 }
 
 // RawPut puts a resource to path. Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
