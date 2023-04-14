@@ -86,13 +86,10 @@ func TestEventRetry(t *testing.T) {
 	var events []backend.Event
 	numExpectedEvents := 4
 	timeouts := [3]time.Duration{time.Second, time.Second * 2, time.Second * 3}
-	timeout := 7 * time.Second
+	timeout := 10 * time.Second
 
 	for {
 		if time.Now().Sub(t0) > timeout {
-			break
-		}
-		if len(events) == numExpectedEvents {
 			break
 		}
 		select {
@@ -316,5 +313,82 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	// we get 2 events with delta delay between them
 	if d := events[1].ScheduledAt.Sub(*events[0].ScheduledAt); d < delta {
 		t.Fatalf("events too close: %v", d)
+	}
+}
+
+func TestRaiseEventRecursive(t *testing.T) {
+	eventType := "recursive-event"
+	received := make(chan backend.Event, 10)
+
+	recursionStart := false
+	recursionDone := false
+	id := uuid.New()
+	testService.backend.HandleEvent("filler", func(ctx context.Context, event backend.Event) error {
+		return nil
+	})
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
+		if !recursionStart {
+			received <- event
+			recursionStart = true
+			fmt.Println("do recursion")
+			err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType,
+				Resource: "something", ResourceID: id}.WithPayload("from inside handler"))
+			if err != nil {
+				t.Fatalf("raise event error: %v", err)
+			}
+			time.Sleep(2 * time.Second)
+			recursionDone = true
+			fmt.Println("recursion finished")
+		} else {
+			fmt.Println("received event")
+			if recursionDone {
+				received <- event
+			} else {
+				fmt.Printf("received a recursive event %s while still processing, this must not happen\n", string(event.Payload))
+			}
+		}
+		return nil
+	})
+
+	err := testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: "filler",
+		Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: eventType,
+		Resource: "something", ResourceID: id})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+
+	err = testService.backend.RaiseEvent(context.TODO(), backend.Event{Type: "filler",
+		Resource: "something", ResourceID: uuid.New()})
+	if err != nil {
+		t.Fatalf("raise event error: %v", err)
+	}
+
+	t0 := time.Now()
+	var events []backend.Event
+	numExpectedEvents := 2
+	timeout := 3 * time.Second
+
+	for {
+		if time.Now().Sub(t0) > timeout {
+			break
+		}
+		if len(events) == numExpectedEvents {
+			break
+		}
+		select {
+		case e := <-received:
+			events = append(events, e)
+		default:
+			testService.backend.ProcessJobsSync(-1)
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	if len(events) != numExpectedEvents {
+		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
 	}
 }
