@@ -67,7 +67,7 @@ type Backend struct {
 	pipelineConcurrency int
 
 	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
-	jobsUpdateQuery, jobsDeleteQuery, jobsUpdateScheduleQuery, rateLimitQuery string
+	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery, jobsUpdateScheduleQuery, rateLimitQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}

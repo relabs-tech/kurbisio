@@ -127,14 +127,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._sch
 
 	b.jobsInsertQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,4,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0 
-	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=4,context=$8, 
-	scheduled_at=CASE WHEN $9=null THEN _job_.scheduled_at ELSE $9 END::TIMESTAMP 
+	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=5,context=$8,
+	scheduled_at=CASE WHEN $9 is NULL THEN _job_.scheduled_at ELSE $9 END::TIMESTAMP,
+	implicit_schedule=CASE WHEN $9 is NULL THEN _job_.implicit_schedule ELSE false END
 	RETURNING serial;`
 
 	b.jobsInsertIfNotExistQuery = `INSERT INTO ` + b.db.Schema + `."_job_"
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,4,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
 	DO NOTHING RETURNING serial;`
 
 	b.jobsUpdateQuery = `UPDATE ` + b.db.Schema + `."_job_"
@@ -142,7 +143,7 @@ SET attempts_left = attempts_left - 1,
 last_implicit_schedule = implicit_schedule,
 implicit_schedule = TRUE,
 last_scheduled_at = scheduled_at,
-scheduled_at = CASE WHEN attempts_left>3 then $2 WHEN attempts_left=3 THEN $3 ELSE $4 END::TIMESTAMP
+scheduled_at = CASE WHEN attempts_left>4 then $2 WHEN attempts_left=4 THEN $3 ELSE $4 END::TIMESTAMP
 WHERE serial = (
 SELECT serial
  FROM ` + b.db.Schema + `."_job_"
@@ -154,7 +155,7 @@ SELECT serial
 RETURNING serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context, last_scheduled_at, last_implicit_schedule;
 `
 	b.jobsDeleteQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
-WHERE serial = $1 AND attempts_left < 4 RETURNING serial;`
+WHERE serial = $1 AND attempts_left < 5 RETURNING serial;`
 
 	b.jobsCancelQuery = `DELETE FROM ` + b.db.Schema + `."_job_"
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`
@@ -165,6 +166,10 @@ THEN _schedule_.scheduled_at + $3
 ELSE $2 END::TIMESTAMP
 RETURNING scheduled_at;
 `
+	b.jobsResetImplicitScheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
+	SET scheduled_at = null,
+	implicit_schedule = FALSE
+	WHERE serial = $1 AND implicit_schedule = true RETURNING serial;`
 
 	b.jobsUpdateScheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET scheduled_at = $2,
@@ -395,6 +400,10 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
+		if jb.AttemptsLeft == 0 {
+			ready <- true
+			continue
+		}
 		var key string
 		rlog := logger.Default()
 
@@ -474,11 +483,17 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 		} else {
 			rlog.Info("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 4)
+			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
 			var serial int
 			err = b.db.QueryRow(b.jobsDeleteQuery, &jb.Serial).Scan(&serial)
 			if err != nil && err != sql.ErrNoRows {
 				rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			} else if err == sql.ErrNoRows {
+				// job was recursively raised again, if we still have an impicit schedule, we must reset it
+				err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery, &jb.Serial).Scan(&serial)
+				if err != nil && err != sql.ErrNoRows {
+					rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+				}
 			}
 		}
 		ready <- true
@@ -597,12 +612,12 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 
 	var jobCount, readyCount int
 	for i := 0; i < b.pipelineConcurrency; i++ {
-		txj, err := getJob()
+		job, err := getJob()
 		if err != nil {
 			break
 		}
 		jobCount++
-		jobs <- txj
+		jobs <- job
 	}
 
 	for readyCount < jobCount {
@@ -611,10 +626,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 
 		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; !maxedOut {
 			// we have time for more jobs, check if there are any in the database
-			txj, err := getJob()
+			job, err := getJob()
 			if err == nil {
 				jobCount++
-				jobs <- txj
+				jobs <- job
 			}
 		}
 	}
