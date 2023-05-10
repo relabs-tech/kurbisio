@@ -532,8 +532,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// fmt.Printf("\n\nQUERY %#v parameters: %#v\n\n", sqlQuery, queryParameters)
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-			http.Error(w, "Error 4724", http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4721: cannot execute query `%s` %+v", sqlQuery, queryParameters)
+			http.Error(w, "Error 4721", http.StatusInternalServerError)
 			return
 		}
 
@@ -608,8 +608,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[propertiesIndex-ownerIndex+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
-				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-				http.Error(w, "Error 4724", http.StatusInternalServerError)
+				nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
+				http.Error(w, "Error 4722", http.StatusInternalServerError)
 				return
 			}
 			defer rows.Close()
@@ -788,8 +788,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
-			http.Error(w, "Error 4724", http.StatusInternalServerError)
+			nillog.WithError(err).Errorf("Error 4723: cannot execute query `%s` %v", sqlQuery, queryParameters)
+			http.Error(w, "Error 4723", http.StatusInternalServerError)
 			return
 		}
 
@@ -824,7 +824,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters[propertiesIndex-ownerIndex+5] = 0
 			rows, err := b.db.Query(sqlQuery, queryParameters...)
 			if err != nil {
-				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s`", sqlQuery)
+				nillog.WithError(err).Errorf("Error 4724: cannot execute query `%s` %v", sqlQuery, queryParameters)
 				http.Error(w, "Error 4724", http.StatusInternalServerError)
 				return
 			}
