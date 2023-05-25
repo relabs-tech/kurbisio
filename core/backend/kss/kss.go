@@ -14,6 +14,8 @@ type Driver interface {
 	Delete(key string) error
 	DeleteAllWithPrefix(key string) error
 	WithCallBack(FileUpdatedCallBack)
+	UploadData(key string, data []byte) error
+	DownloadData(key string) ([]byte, error)
 }
 
 // FileUpdatedEvent contains information about a file event

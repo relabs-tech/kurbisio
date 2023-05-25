@@ -16,6 +16,7 @@ import (
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -185,6 +186,25 @@ func (s *S3) UploadData(key string, data []byte) error {
 		return fmt.Errorf("failed to upload file, %v", err)
 	}
 	return err
+}
+
+// DownloadData downloads data from key object
+func (s *S3) DownloadData(key string) ([]byte, error) {
+	cl := s3.NewFromConfig(s.config)
+
+	downloader := manager.NewDownloader(cl)
+
+	w := manager.WriteAtBuffer{}
+	_, err := downloader.Download(context.TODO(), &w,
+		&s3.GetObjectInput{
+			Bucket: aws.String(s.bucket),
+			Key:    aws.String(s.baseKeyName + key),
+		})
+	if err != nil {
+		return w.Bytes(), fmt.Errorf("failed to download file, %v", err)
+	}
+
+	return w.Bytes(), nil
 }
 
 // ListAllWithPrefix Lists all keys with prefix

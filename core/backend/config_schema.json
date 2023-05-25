@@ -155,6 +155,10 @@
                             "type": "string",
                             "minLength": 1
                         }
+                    },
+                    "stored_externally": {
+                        "type": "boolean",
+                        "description": "If true this resource will not be stored in the database, but stored externally"
                     }
                 }
             }

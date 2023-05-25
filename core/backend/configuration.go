@@ -34,6 +34,7 @@ type collectionConfiguration struct {
 	Default                       json.RawMessage `json:"default"`
 	WithCompanionFile             bool            `json:"with_companion_file"`
 	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
+	needsKSS                      bool            // true of this collection or any subcollection or subblob needs kss
 }
 
 // singletonConfiguration describes a singleton resource
@@ -58,6 +59,8 @@ type blobConfiguration struct {
 	Mutable              bool            `json:"mutable"`
 	Permits              []access.Permit `json:"permits"`
 	Description          string          `json:"description"`
+	StoredExternally     bool            `json:"stored_externally"`
+	needsKSS             bool            // true of this blob or any subcollection or subblob needs kss
 }
 
 // relationConfiguration is a n:m relation from

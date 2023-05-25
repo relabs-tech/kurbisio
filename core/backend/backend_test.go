@@ -28,6 +28,7 @@ import (
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
 	"github.com/relabs-tech/kurbisio/core/backend"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
 
 	"github.com/relabs-tech/kurbisio/core/client"
 	"github.com/relabs-tech/kurbisio/core/csql"
@@ -165,6 +166,11 @@ var configurationJSON string = `{
 	  {
 		"resource": "a/blob",
 		"searchable_properties":["content_type"]
+	  },
+	  {
+		"resource": "a/blobex",
+		"searchable_properties":["content_type"],
+		"stored_externally":true
 	  }
 
 	],
@@ -224,6 +230,12 @@ func TestMain(m *testing.M) {
 		JSONSchemasRefs:      []string{schemaRefString},
 		UpdateSchema:         true,
 		PipelineConcurrency:  2,
+		KssConfiguration: kss.Configuration{
+			DriverType: kss.DriverTypeLocal,
+			LocalConfiguration: &kss.LocalConfiguration{
+				KeyPrefix: "kssdata",
+			},
+		},
 	})
 	testService.client = client.NewWithRouter(router).WithAdminAuthorization()
 	testService.clientNoAuth = client.NewWithRouter(router)
@@ -793,6 +805,11 @@ func TestCollectionOrder(t *testing.T) {
 
 type Blob struct {
 	BlobID      uuid.UUID `json:"blob_id"`
+	Timestamp   time.Time `json:"timestamp"`
+	ContentType string    `json:"content_type"`
+}
+type BlobEx struct {
+	BlobExID    uuid.UUID `json:"blobex_id"`
 	Timestamp   time.Time `json:"timestamp"`
 	ContentType string    `json:"content_type"`
 }

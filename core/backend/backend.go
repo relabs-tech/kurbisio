@@ -289,7 +289,8 @@ func (r byDepth) Less(i, j int) bool {
 // handleResourceRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleResourceRoutes() {
 
-	logger.FromContext(nil).Debugln("backend: handle resource routes")
+	nillog := logger.FromContext(nil)
+	nillog.Debugln("backend: handle resource routes")
 	router := b.router
 
 	// we combine all types of resources into one and sort them by depth. Rationale: dependencies of
@@ -318,6 +319,39 @@ func (b *Backend) handleResourceRoutes() {
 		allResources = append(allResources, anyResourceConfiguration{relation: rc})
 	}
 	sort.Sort(byDepth(allResources))
+
+	for _, rc := range allResources {
+		if rc.collection != nil && rc.collection.WithCompanionFile {
+			rc.collection.needsKSS = true
+			for _, rrc := range allResources {
+				if rrc.collection != nil {
+					if strings.HasPrefix(rc.collection.Resource, rrc.collection.Resource) {
+						rrc.collection.needsKSS = true
+					}
+				}
+				if rrc.blob != nil {
+					if strings.HasPrefix(rc.collection.Resource, rrc.blob.Description) {
+						rrc.blob.needsKSS = true
+					}
+				}
+			}
+		}
+		if rc.blob != nil && rc.blob.StoredExternally {
+			rc.blob.needsKSS = true
+			for _, rrc := range allResources {
+				if rrc.collection != nil {
+					if strings.HasPrefix(rc.blob.Resource, rrc.collection.Resource) {
+						rrc.collection.needsKSS = true
+					}
+				}
+				if rrc.blob != nil {
+					if strings.HasPrefix(rc.blob.Resource, rrc.blob.Description) {
+						rrc.blob.needsKSS = true
+					}
+				}
+			}
+		}
+	}
 
 	for _, rc := range allResources {
 		if rc.collection != nil {

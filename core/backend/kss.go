@@ -27,11 +27,18 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 			break
 		}
 	}
-	if !hasCompanionFileEnabled {
+	var hasExternalStorageEnabled bool
+	for _, c := range b.config.Blobs {
+		if c.StoredExternally {
+			hasExternalStorageEnabled = true
+			break
+		}
+	}
+
+	if !hasCompanionFileEnabled && !hasExternalStorageEnabled {
 		logger.Default().Info("KSS not in use")
 		return nil
 	}
-	logger.Default().Info("KSS in use with driver", config.DriverType)
 
 	if config.DriverType == kss.DriverTypeLocal {
 		if config.LocalConfiguration == nil {
@@ -64,9 +71,13 @@ func (b *Backend) configureKSS(config kss.Configuration) error {
 		}
 		drv.WithCallBack(b.fileUploadedCallBack)
 		b.KssDriver = drv
+	} else if config.DriverType == "" {
+		panic("kss is requested but no driver type is specified")
 	} else {
-		panic("kss is used but unknown driver type :" + config.DriverType)
+		panic("kss is requested but unknown driver type :" + config.DriverType)
+
 	}
+	logger.Default().Info("KSS in use with driver", config.DriverType)
 	return nil
 
 }

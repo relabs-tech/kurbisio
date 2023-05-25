@@ -49,19 +49,22 @@ func (o *Operation) UnmarshalJSON(data []byte) error {
 // This is the algorithm used to create idiomatic REST routes
 func Plural(singular string) string {
 	if strings.HasSuffix(singular, "ey") {
-		return strings.TrimSuffix(singular, "ey") + "eys"
+		return singular + "s"
 	}
 	if strings.HasSuffix(singular, "y") {
 		return strings.TrimSuffix(singular, "y") + "ies"
 	}
 	if strings.HasSuffix(singular, "child") {
-		return strings.TrimSuffix(singular, "child") + "children"
+		return singular + "ren"
 	}
 	if strings.HasSuffix(singular, "lysis") {
-		return strings.TrimSuffix(singular, "lysis") + "lyses"
+		return strings.TrimSuffix(singular, "is") + "es"
 	}
 	if strings.HasSuffix(singular, "s") {
-		return strings.TrimSuffix(singular, "s") + "ses"
+		return singular + "es"
+	}
+	if strings.HasSuffix(singular, "x") {
+		return singular + "es"
 	}
 	return singular + "s"
 
