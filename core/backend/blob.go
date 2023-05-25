@@ -31,10 +31,10 @@ import (
 func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
-	rlog := logger.Default()
-	rlog.Debugln("create blob:", resource)
+	nillog := logger.FromContext(nil)
+	nillog.Debugln("create blob:", resource)
 	if rc.Description != "" {
-		rlog.Debugln("  description:", rc.Description)
+		nillog.Debugln("  description:", rc.Description)
 	}
 
 	resources := strings.Split(rc.Resource, "/")
@@ -137,13 +137,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 	}
 
-	rlog.Debugln("  handle blob routes:", listRoute, "GET,POST,DELETE")
-	rlog.Debugln("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
+	nillog.Debugln("  handle blob routes:", listRoute, "GET,POST,DELETE")
+	nillog.Debugln("  handle blob routes:", itemRoute, "GET,PUT, DELETE")
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, blob FROM %s.\"%s\" ", schema, resource)
 	readQueryMeta := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp FROM %s.\"%s\" ", schema, resource)
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
-	sqlReturnID := " RETURNING " + this + "_id;"
+	sqlReturnMeta := " RETURNING " + strings.Join(columns, ", ") + ", timestamp"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", timestamp, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
@@ -287,7 +287,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				err = fmt.Errorf("unknown")
 			}
 			if err != nil {
-				rlog.Errorf("parameter '" + key + "': " + err.Error())
+				nillog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -386,6 +386,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		rlog := logger.FromContext(r.Context())
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -403,7 +404,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				// for calculating the etag, we prefer doing an extra query instead of
 				// loading the entire binary blob into memory for no good reason
 				var timestamp time.Time
-				values, response := createScanValuesAndObject(&timestamp)
+				values, object := createScanValuesAndObject(&timestamp)
 				err = b.db.QueryRow(readQueryMeta+sqlWhereOne+";", queryParameters...).Scan(values...)
 				if err == sql.ErrNoRows {
 					http.Error(w, "no such "+this, http.StatusNotFound)
@@ -419,13 +420,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 					w.Header().Set("Etag", etag)
 					for i := propertiesIndex + 1; i < len(columns); i++ {
 						k := columns[i]
-						w.Header().Set(jsonToHeader[k], *response[k].(*string))
+						w.Header().Set(jsonToHeader[k], *object[k].(*string))
 					}
 					w.Header().Set("Etag", timeToEtag(timestamp))
 					if len(maxAge) > 0 {
 						w.Header().Set("Cache-Control", maxAge)
 					}
-					metaData, _ := json.Marshal(response)
+					metaData, _ := json.Marshal(object)
 					w.Header().Set("Kurbisio-Meta-Data", string(metaData))
 					w.WriteHeader(http.StatusNotModified)
 					return
@@ -435,7 +436,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		var blob []byte
 		var timestamp time.Time
-		values, response := createScanValuesAndObject(&timestamp, &blob)
+		values, object := createScanValuesAndObject(&timestamp, &blob)
 
 		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
@@ -452,9 +453,24 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			http.Error(w, err.Error(), status)
 			return
 		}
+
+		if len(blob) == 0 && rc.StoredExternally && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+			file, err := b.KssDriver.DownloadData(key)
+			if err != nil {
+				rlog.WithError(err).Errorf("Error 5320: download data `%s`", key)
+				http.Error(w, "Error 5320: data not available", http.StatusFailedDependency)
+				return
+			}
+			blob = file
+		}
+
 		for i := propertiesIndex + 1; i < len(columns); i++ {
 			k := columns[i]
-			w.Header().Set(jsonToHeader[k], *response[k].(*string))
+			w.Header().Set(jsonToHeader[k], *object[k].(*string))
 		}
 		if rc.Mutable {
 			w.Header().Set("Etag", timeToEtag(timestamp))
@@ -463,9 +479,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			w.Header().Set("Cache-Control", maxAge)
 		}
 
-		mergeProperties(response)
+		mergeProperties(object)
 
-		metaData, _ := json.Marshal(response)
+		metaData, _ := json.Marshal(object)
 		w.Header().Set("Kurbisio-Meta-Data", string(metaData))
 		w.Header().Set("Content-Length", strconv.Itoa(len(blob)))
 		w.WriteHeader(http.StatusOK)
@@ -485,6 +501,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		rlog := logger.FromContext(r.Context())
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -516,7 +533,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		values := make([]interface{}, len(columns)+2)
 		var i int
 
-		values[i] = uuid.New() // create always creates a new object
+		primaryID := uuid.New() // create always creates a new object
+		values[i] = primaryID
 		i++
 
 		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
@@ -554,7 +572,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		// next is the blob itself
-		values[i] = &blob
+		if rc.StoredExternally && b.KssDriver != nil {
+			values[i] = &[]byte{}
+		} else {
+			values[i] = &blob
+		}
 		i++
 
 		// last value is timestamp
@@ -597,8 +619,23 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		err = tx.QueryRow(readQueryMeta+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 5322: create blob")
+			http.Error(w, "Error 5322: cannot create object", http.StatusInternalServerError)
 			return
+		}
+
+		if rc.StoredExternally && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+			err := b.KssDriver.UploadData(key, blob)
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5321: upload externally stored data `%s`", key)
+				http.Error(w, "Error 5321: cannot store data", http.StatusFailedDependency)
+				return
+			}
 		}
 
 		jsonData, _ := json.Marshal(response)
@@ -614,7 +651,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	upsertWithAuth := func(w http.ResponseWriter, r *http.Request) {
-		// low-key feature for the backup/restore tool
+		rlog := logger.FromContext(r.Context())
+
+		// silent is a low-key feature for the backup/restore tool
 		var silent bool
 		if s := r.URL.Query().Get("silent"); s != "" {
 			silent, _ = strconv.ParseBool(s)
@@ -701,7 +740,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		// next is the blob itself
-		values[i] = &blob
+		if rc.StoredExternally && b.KssDriver != nil {
+			values[i] = &[]byte{}
+		} else {
+			values[i] = &blob
+		}
 		i++
 
 		// last value is timestamp
@@ -767,6 +810,20 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
+		if rc.StoredExternally && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+			err := b.KssDriver.UploadData(key, blob)
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5323: upload externally stored data `%s`", key)
+				http.Error(w, "Error 5323: cannot store data", http.StatusFailedDependency)
+				return
+			}
+		}
+
 		jsonData, _ := json.Marshal(response)
 
 		if silent {
@@ -787,6 +844,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
 
+		rlog := logger.FromContext(r.Context())
 		var err error
 
 		params := mux.Vars(r)
@@ -873,13 +931,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 
 		if externalValue == "" { // delete entire collection
-			sqlQuery = clearQuery + sqlWhereAll + ";"
+			sqlQuery = clearQuery + sqlWhereAll
 			queryParameters = make([]interface{}, propertiesIndex-1+4)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d);", externalColumn, propertiesIndex+4)
+			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+1)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
@@ -893,12 +951,35 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
 
-		_, err = tx.Exec(sqlQuery, queryParameters...)
+		rows, err := tx.Query(sqlQuery+sqlReturnMeta, queryParameters...)
 		if err != nil {
 			tx.Rollback()
 			rlog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
+		}
+		defer rows.Close()
+
+		if rc.needsKSS && b.KssDriver != nil {
+			for rows.Next() {
+				var timestamp time.Time
+				values, _ := createScanValuesAndObject(&timestamp)
+				err := rows.Scan(values...)
+				if err != nil {
+					rlog.WithError(err).Errorf("Error 4725: cannot scan values")
+					http.Error(w, "Error 4725", http.StatusInternalServerError)
+					return
+				}
+				var key string
+				for i := 0; i < propertiesIndex; i++ {
+					key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+				}
+
+				err = b.KssDriver.DeleteAllWithPrefix(key)
+				if err != nil {
+					rlog.WithError(err).Error("Could not delete key ", key)
+				}
+			}
 		}
 
 		// add collection identifiers to parameters for the notification
@@ -921,6 +1002,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	}
 
 	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		rlog := logger.FromContext(r.Context())
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -940,8 +1022,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		var id uuid.UUID
-		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnID, queryParameters...).Scan(&id)
+		var timestamp time.Time
+		values, object := createScanValuesAndObject(&timestamp)
+		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnMeta, queryParameters...).Scan(values...)
 		if err == sql.ErrNoRows {
 			tx.Rollback()
 			w.WriteHeader(http.StatusNotFound)
@@ -953,12 +1036,24 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 
-		notification := make(map[string]interface{})
-		for i := 0; i < propertiesIndex; i++ {
-			notification[columns[i]] = params[columns[i]]
+		if rc.needsKSS && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+			if err != nil {
+				rlog.WithError(err).Infof("Error 5324: deleting externally stored data `%s`", key)
+			}
+			err := b.KssDriver.DeleteAllWithPrefix(key)
+			if err != nil {
+				rlog.WithError(err).Errorf("Could not DeleteAllWithPrefix key `%s`", key)
+				return
+			}
 		}
-		jsonData, _ := json.Marshal(notification)
-		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, id, jsonData)
+		mergeProperties(object)
+		primaryID := values[0].(*uuid.UUID)
+		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, *primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

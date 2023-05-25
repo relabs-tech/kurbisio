@@ -443,7 +443,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 	for _, a := range artefacts {
 		status, _, err = readerClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status != http.StatusNotFound {
-			t.Fatal("Expecting deleted file", a.ArtefactID)
+			t.Fatalf("Expecting deleted file %v, got %d", a.ArtefactID, status)
 		}
 	}
 

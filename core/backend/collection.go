@@ -272,6 +272,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	sqlReturnObject := " RETURNING " + strings.Join(columns, ", ") + ", timestamp, revision"
+	sqlReturnMeta := " RETURNING " + strings.Join(columns[:propertiesIndex], ", ") + ", timestamp"
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", timestamp)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ")"
@@ -326,7 +327,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createScanValuesAndObjectMeta := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
-		values := make([]interface{}, propertiesIndex+2, propertiesIndex+2+len(extra))
+		n := propertiesIndex + 1
+		if revision != nil {
+			n++
+		}
+		values := make([]interface{}, n, n+len(extra))
 		object := map[string]interface{}{}
 		var i int
 		for ; i < propertiesIndex; i++ {
@@ -335,9 +340,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		values[i] = timestamp
 		object["timestamp"] = timestamp
-		i++
-		values[i] = revision
-		object["revision"] = revision
+		if revision != nil {
+			i++
+			values[i] = revision
+			object["revision"] = revision
+		}
 		values = append(values, extra...)
 		return values, object
 	}
@@ -551,12 +558,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 			if !metaonly {
 				var uploadURL string
-				if rc.WithCompanionFile && withCompanionUrls {
+				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
 					var key string
-					for i := propertiesIndex - 1; i >= ownerIndex; i-- {
-						key += "/" + columns[i] + "/" + selectors[columns[i]]
+					for i := 0; i < propertiesIndex; i++ {
+						key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 					}
-					key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
 
 					validitySeconds := 900
 					if rc.CompanionPresignedURLValidity > 0 {
@@ -658,6 +664,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	log := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+		rlog := logger.FromContext(r.Context())
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -834,7 +841,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
 				err := rows.Scan(values...)
 				if err != nil {
-					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+					rlog.WithError(err).Errorf("Error 4725: cannot scan values")
 					http.Error(w, "Error 4725", http.StatusInternalServerError)
 					return
 				}
@@ -931,7 +938,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
-		values, response := createScanValuesAndObject(&time.Time{}, new(int))
+		values, object := createScanValuesAndObject(&time.Time{}, new(int))
 		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
@@ -1001,23 +1008,21 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4727", status)
 			return
 		}
-		mergeProperties(response)
+		mergeProperties(object)
 
 		// apply defaults if applicable
 		if rc.Default != nil {
 			var defaultJSON map[string]interface{}
 			json.Unmarshal(rc.Default, &defaultJSON)
-			patchObject(defaultJSON, response)
-			response = defaultJSON
+			patchObject(defaultJSON, object)
+			object = defaultJSON
 		}
 
-		if rc.WithCompanionFile {
+		if rc.WithCompanionFile && b.KssDriver != nil {
 			var key string
-			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
-				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 			}
-			key += "/" + primary + "_id/" + params[primary+"_id"]
-			// key += "/" + core.Plural(primary) + "/" + params[primary+"_id"]
 
 			validitySeconds := 900
 			if rc.CompanionPresignedURLValidity > 0 {
@@ -1030,11 +1035,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "Error 1736", http.StatusInternalServerError)
 				return
 			}
-			response["companion_download_url"] = downloadURL
+			object["companion_download_url"] = downloadURL
 		}
 
 		// do request interceptors
-		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
+		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 		data, err := b.intercept(r.Context(), resource, core.OperationRead, *values[0].(*uuid.UUID), selectors, nil, jsonData)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4748: interceptor")
@@ -1052,7 +1057,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				break
 			case "children":
 				if data != nil { // data was changed in interceptor
-					err = json.Unmarshal(jsonData, &response)
+					err = json.Unmarshal(jsonData, &object)
 					if err != nil {
 						nillog.WithError(err).Errorf("Error 4749: interceptor")
 						http.Error(w, "Error 4749", http.StatusInternalServerError)
@@ -1060,12 +1065,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					}
 				}
 
-				status, err := b.addChildrenToGetResponse(array, noIntercept, r, response)
+				status, err := b.addChildrenToGetResponse(array, noIntercept, r, object)
 				if err != nil {
 					http.Error(w, err.Error(), status)
 					return
 				}
-				jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
+				jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 				return
@@ -1187,6 +1192,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		rlog := logger.FromContext(r.Context())
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := 0; i < propertiesIndex; i++ {
@@ -1237,7 +1243,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4729: cannot BeginTx")
+			rlog.WithError(err).Errorf("Error 4729: cannot BeginTx")
 			http.Error(w, "Error 4729", http.StatusInternalServerError)
 			return
 		}
@@ -1252,20 +1258,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 		if err != nil {
 			tx.Rollback()
-			nillog.WithError(err).Errorf("Error 4730: cannot QueryRow")
+			rlog.WithError(err).Errorf("Error 4730: cannot QueryRow")
 			http.Error(w, "Error 4730", http.StatusInternalServerError)
 			return
 		}
-		if b.KssDriver != nil {
+		if rc.needsKSS && b.KssDriver != nil {
 			var key string
-			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
-				key += "/" + columns[i] + "/" + selectors[columns[i]]
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 			}
-			key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
 
 			err = b.KssDriver.DeleteAllWithPrefix(key)
 			if err != nil {
-				nillog.WithError(err).Error("Could not DeleteAllWithPrefix key ", key)
+				rlog.WithError(err).Error("Could not DeleteAllWithPrefix key ", key)
 			}
 		}
 
@@ -1294,6 +1299,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		var err error
+		rlog := logger.FromContext(r.Context())
 
 		params := mux.Vars(r)
 		selectors := map[string]string{}
@@ -1357,7 +1363,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 
 			if err != nil {
-				nillog.Errorf("parameter '" + key + "': " + err.Error())
+				rlog.Errorf("parameter '" + key + "': " + err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1372,7 +1378,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4731: BeginTx")
+			rlog.WithError(err).Errorf("Error 4731: BeginTx")
 			http.Error(w, "Error 4731", http.StatusInternalServerError)
 			return
 		}
@@ -1398,35 +1404,32 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
 
-		sqlQuery += " RETURNING " + primary + "_id;"
-
-		rows, err := tx.Query(sqlQuery, queryParameters...)
+		rows, err := tx.Query(sqlQuery+sqlReturnMeta, queryParameters...)
 		if err != nil {
 			tx.Rollback()
-			nillog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
+			rlog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
 
-		if b.KssDriver != nil {
-			var basekey string
-			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
-				basekey += "/" + columns[i] + "/" + selectors[columns[i]]
-			}
-			basekey += "/" + primary + "_id/"
+		if rc.needsKSS && b.KssDriver != nil {
 			for rows.Next() {
-				values := []interface{}{&uuid.UUID{}}
+				var timestamp time.Time
+				values, _ := createScanValuesAndObjectWithMeta(true, &timestamp, nil)
 				err := rows.Scan(values...)
 				if err != nil {
-					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+					rlog.WithError(err).Errorf("Error 4725: cannot scan values")
 					http.Error(w, "Error 4725", http.StatusInternalServerError)
 					return
 				}
-				key := basekey + values[0].(*uuid.UUID).String()
+				var key string
+				for i := 0; i < propertiesIndex; i++ {
+					key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+				}
 				err = b.KssDriver.DeleteAllWithPrefix(key)
 				if err != nil {
-					nillog.WithError(err).Error("Could not delete key ", key)
+					rlog.WithError(err).Error("Could not delete key ", key)
 				}
 			}
 		}
@@ -1441,7 +1444,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		notificationJSON, _ := json.MarshalWithOption(parameters, json.DisableHTMLEscape())
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
-			nillog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
+			rlog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4770", http.StatusInternalServerError)
 			return
 		}
@@ -1674,7 +1677,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		// re-read data and return as json
-		values, response := createScanValuesAndObject(&timestamp, new(int))
+		values, object := createScanValuesAndObject(&timestamp, new(int))
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1;", id).Scan(values...)
 		if err != nil {
 			tx.Rollback()
@@ -1684,12 +1687,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		var uploadURL string
-		if rc.WithCompanionFile {
+		if rc.WithCompanionFile && b.KssDriver != nil {
 			var key string
 			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
 				key += "/" + columns[i] + "/" + selectors[columns[i]]
 			}
-			key += "/" + primary + "_id/" + response[primary+"_id"].(*uuid.UUID).String()
+			key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
 
 			validitySeconds := 900
 			if rc.CompanionPresignedURLValidity > 0 {
@@ -1705,8 +1708,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 		}
 
-		mergeProperties(response)
-		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
+		mergeProperties(object)
+		jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 
 		// write log
 		if rc.WithLog {
@@ -1733,8 +1736,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		// We add companion_upload_url after inserting in the database if needed
 		if uploadURL != "" {
-			response["companion_upload_url"] = uploadURL
-			jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
+			object["companion_upload_url"] = uploadURL
+			jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusCreated)
@@ -2071,7 +2074,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		}
 
 		var uploadURL string
-		if rc.WithCompanionFile {
+		if rc.WithCompanionFile && b.KssDriver != nil {
 			var key string
 			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
 				key += "/" + columns[i] + "/" + selectors[columns[i]]

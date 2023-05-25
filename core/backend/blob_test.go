@@ -7,6 +7,7 @@
 package backend_test
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"testing"
@@ -409,6 +410,105 @@ func TestDeleteBlob(t *testing.T) {
 	_, err = testService.client.RawDelete("/blobs") // clear entire collection
 	if err != nil {
 		t.Fatal(err)
+	}
+
+}
+
+func TestBlobExes(t *testing.T) {
+	blobData := []byte{0, 1}
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": `{"hello":"world"}`,
+	}
+	// We now create blobs for two separate owners and clear only all the blob of one owner
+	a1 := A{}
+	a2 := A{}
+	_, err := testService.client.RawPost("/as", &a1, &a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testService.client.RawPost("/as", &a2, &a2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b1 := BlobEx{}
+	if _, err := testService.client.RawPostBlob("/as/"+a1.AID.String()+"/blobexes", header, blobData, &b1); err != nil {
+		t.Fatal(err)
+	}
+	// check blob is stored
+	status, _, err := testService.client.RawGetBlobWithHeader(
+		"/as/"+a1.AID.String()+"/blobexes/"+b1.BlobExID.String(), map[string]string{}, &[]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatal(status)
+	}
+	// check kss file exists
+	if _, err := os.Stat("kssdata/a_id/" + a1.AID.String() + "/blobex_id/" + b1.BlobExID.String() + "/file"); errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+
+	b2 := BlobEx{}
+	if _, err := testService.client.RawPostBlob("/as/"+a2.AID.String()+"/blobexes", header, blobData, &b2); err != nil {
+		t.Fatal(err)
+	}
+	// check blob is stored
+	status, _, err = testService.client.RawGetBlobWithHeader(
+		"/as/"+a2.AID.String()+"/blobexes/"+b2.BlobExID.String(), map[string]string{}, &[]byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatal(status)
+	}
+	// check kss file exists
+	if _, err := os.Stat("kssdata/a_id/" + a2.AID.String() + "/blobex_id/" + b2.BlobExID.String() + "/file"); errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+
+	var collectionResult []Blob
+
+	// Then we clear a1's blobs
+	_, err = testService.client.RawDelete("/as/" + a1.AID.String() + "/blobexes") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+	// All a1's blobs should be deleted
+	_, err = testService.client.RawGet("/as/"+a1.AID.String()+"/blobexes", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 0 {
+		t.Fatalf("Expecting blobexes to be cleared but there is still %d items", len(collectionResult))
+	}
+
+	// a1's kss file should be deleted
+	if _, err := os.Stat("kssdata/a_id/" + a1.AID.String() + "/blobex_id/" + b1.BlobExID.String() + "/file"); err == nil {
+		t.Fatalf("Expecting kss file to be deleted, but still exists")
+	}
+
+	// a2's blobs should NOT be deleted
+	_, err = testService.client.RawGet("/as/"+a2.AID.String()+"/blobexes", &collectionResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collectionResult) != 1 {
+		t.Fatalf("Expecting a2's blobs to still be there but there are %d items", len(collectionResult))
+	}
+	// a2's kss file should still exists
+	if _, err := os.Stat("kssdata/a_id/" + a2.AID.String() + "/blobex_id/" + b2.BlobExID.String() + "/file"); errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+
+	_, err = testService.client.RawDelete("/as/all/blobexes") // clear entire collection
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a2's kss file should be deleted
+	if _, err := os.Stat("kssdata/a_id/" + a2.AID.String() + "/blobex_id/" + b2.BlobExID.String() + "/file"); err == nil {
+		t.Fatalf("Expecting kss file to be deleted, but still exists")
 	}
 
 }

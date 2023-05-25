@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -104,14 +103,15 @@ func (f *LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 
-		err := os.MkdirAll(path.Join(f.baseFolder, key), 0700)
+		dirPath := filepath.Dir(filePath)
+		err := os.MkdirAll(dirPath, 0700)
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1202: Could not create `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1202", http.StatusInternalServerError)
 			return
 		}
 
-		dstFile, err := os.Create(path.Join(f.baseFolder, key, "file"))
+		dstFile, err := os.Create(filePath)
 		if err != nil {
 			logger.Default().WithError(err).Errorf("Error 1203: Could not create `%s` key: '%s'", f.baseFolder+key, key)
 			http.Error(w, "Error 1203", http.StatusInternalServerError)
@@ -195,7 +195,7 @@ func (f *LocalFilesystem) DeleteAllWithPrefix(key string) error {
 	if err := os.RemoveAll(filePath); err != nil {
 		return err
 	}
-	f.recurseDeleteParentIfEmpty(filepath.Dir(filepath.Join(f.baseFolder, key)))
+	f.recurseDeleteParentIfEmpty(filepath.Join(f.baseFolder, key))
 	return nil
 }
 
@@ -269,4 +269,24 @@ func (f *LocalFilesystem) isValid(URL string) bool {
 		return false
 	}
 	return true
+}
+
+// UploadData uploads data into a new key object
+func (f *LocalFilesystem) UploadData(key string, data []byte) error {
+	logger.Default().Infoln("Writing ", key)
+	filePath := filepath.Join(f.baseFolder, key, "file")
+	dirPath := filepath.Dir(filePath)
+	err := os.MkdirAll(dirPath, 0700)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, data, 0666)
+}
+
+// DownloadData downloads data from key object
+func (f *LocalFilesystem) DownloadData(key string) ([]byte, error) {
+	logger.Default().Infoln("Reading ", key)
+	filePath := filepath.Join(f.baseFolder, key, "file")
+	return os.ReadFile(filePath)
 }
