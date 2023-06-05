@@ -129,7 +129,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._sch
 	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
 	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
 	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=5,context=$8,
-	scheduled_at=CASE WHEN _job_.implicit_schedule is true THEN _job_.scheduled_at ELSE $9 END::TIMESTAMP,
+	scheduled_at=CASE WHEN $9 is NULL AND _job_.implicit_schedule is true THEN _job_.scheduled_at ELSE $9 END::TIMESTAMP,
 	implicit_schedule=CASE WHEN $9 is NULL THEN _job_.implicit_schedule ELSE false END
 	RETURNING serial;`
 
