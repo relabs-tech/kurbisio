@@ -466,6 +466,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 			blob = file
+			w.Header().Set("Kurbisio-Source", "kss")
 		}
 
 		for i := propertiesIndex + 1; i < len(columns); i++ {
