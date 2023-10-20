@@ -1,7 +1,14 @@
-![Build & Test](https://github.com/relabs-tech/kurbisio/workflows/Build%20&%20Test/badge.svg)
+# Kurbisio 
 
-# Backends
-Generic repo for different backend work
+Kurbisio is a golang framework for developing backends. Core features are:
+
+- declarative infrastructure (in JSON)
+- auto generation of interfaces and relational database models
+- row-level based access control with different roles
+- full type safety (with JSON schema)
+- timer events and job processing
+- abstracts underlying core AWS services (such as RDS and S3)
+
 
 ## Unit Tests
 
