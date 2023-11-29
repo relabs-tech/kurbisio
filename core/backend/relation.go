@@ -466,7 +466,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		}
 
 		if count > 0 {
-			w.WriteHeader(http.StatusNoContent)
+			w.WriteHeader(http.StatusCreated)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
