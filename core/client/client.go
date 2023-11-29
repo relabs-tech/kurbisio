@@ -4,7 +4,8 @@
 // info@dalarub.com
 //
 
-/*Package client provides easy and fast in-process access to a REST api
+/*
+Package client provides easy and fast in-process access to a REST api
 
 Instead of marshalling HTTP, the client talks directly to the mux router. The client
 is the tool of choice if one request handler needs to call other handlers to fulfill
@@ -34,7 +35,6 @@ import (
 )
 
 // Client provides easy access to the REST API.
-//
 type Client struct {
 	router     *mux.Router
 	httpClient *http.Client
@@ -73,14 +73,16 @@ func (c Client) WithToken(token string) Client {
 
 // WithAdminAuthorization returns a new client with admin authorizations
 // (this works only directly against the mux router, for a normal client
-//  use WithToken()))
+//
+//	use WithToken()))
 func (c Client) WithAdminAuthorization() Client {
 	return c.WithRole("admin")
 }
 
 // WithRole returns a new client with role authorization
 // (this works only directly against the mux router, for a normal client
-//  use WithToken()))
+//
+//	use WithToken()))
 func (c Client) WithRole(role string) Client {
 	c.auth = &access.Authorization{
 		Roles: []string{role},
@@ -90,7 +92,8 @@ func (c Client) WithRole(role string) Client {
 
 // WithAuthorization returns a new client with specific authorizations
 // (this works only directly against the mux router, for a normal client
-//  use WithToken())
+//
+//	use WithToken())
 func (c Client) WithAuthorization(auth *access.Authorization) Client {
 	c.auth = auth
 	return c
@@ -357,7 +360,6 @@ func (r Collection) Clear() (int, error) {
 //
 // If you potentially need multiple pages, use FirstPage() instead.
 //
-//
 // The operation corresponds to a GET request.
 //
 // Expects http.StatusOK as response, otherwise it will
@@ -492,6 +494,16 @@ func (r Item) Upsert(body interface{}, result interface{}) (int, error) {
 // otherwise it will flag an error. Returns the actual http status code.
 func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
 	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
+}
+
+// Relate creates a realation to another resource, provided that the relation actually exists
+//
+// The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+func (r Item) Relate(resource string, id uuid.UUID) (int, error) {
+	return r.col.client.RawPut(r.Path()+"/"+core.Plural(resource)+"/"+id.String(), nil, nil)
 }
 
 // Patch updates selected fields of an item
@@ -767,7 +779,6 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
-//
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
