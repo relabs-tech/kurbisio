@@ -39,6 +39,7 @@ import (
 )
 
 // ConfigSchemaJSON contains the Json schemafor the backend's configuration file
+//
 //go:embed config_schema.json
 var ConfigSchemaJSON string
 

@@ -107,6 +107,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		searchableColumns = append(searchableColumns, that+"_id")
 		foreignColumns = append(foreignColumns, that+"_id")
 	}
+	majorSearchColumns := foreignColumns
+	if singleton {
+		majorSearchColumns = majorSearchColumns[1:]
+	}
 
 	if len(dependencies) > 0 {
 		foreign := strings.Join(foreignColumns, ",")
@@ -127,13 +131,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	createColumnsLog = append(createColumnsLog, "properties json NOT NULL")
 	// query to create all indices after the table creation
 	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
-		"sort_index_"+primary+"_timestamp",
+		"sort_index_"+this+"_timestamp",
 		schema, resource)
+
+	if len(majorSearchColumns) > 0 {
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,timestamp);",
+			"sort_index_"+this+"_"+strings.Join(majorSearchColumns, "_")+"_timestamp",
+			schema, resource, strings.Join(majorSearchColumns, ","))
+	}
 	createIndicesQueryLog := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s_id);",
-		"sort_index_"+primary+"_log_id",
-		schema, resource, primary)
+		"sort_index_"+this+"_log_id",
+		schema, resource, this)
 	createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(timestamp);",
-		"sort_index_"+primary+"_log_timestamp",
+		"sort_index_"+this+"_log_timestamp",
 		schema, resource)
 	propertiesIndex := len(columns) // where properties start
 	columns = append(columns, "properties")
@@ -262,10 +272,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
 		propertiesIndex-ownerIndex+1, propertiesIndex-ownerIndex+1+1, propertiesIndex-ownerIndex+1+2, propertiesIndex-ownerIndex+1+3)
-	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,revision DESC LIMIT $%d OFFSET $%d;",
+	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
 
-	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC,revision ASC LIMIT $%d OFFSET $%d;",
+	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
