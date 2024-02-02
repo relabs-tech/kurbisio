@@ -54,7 +54,8 @@ type IdentityIssuer struct {
 // the authorization for each identity as properties. An account identity
 // is a combination of the token issuer with the user's email,
 // separated by the pipe symbol '|'. Example:
-//   "https://securetoken.google.com/loyalty2u-ea4fd|test@example.com"
+//
+// "https://securetoken.google.com/loyalty2u-ea4fd|test@example.com"
 //
 // This is a final handler with regards to the bearer token. It will return
 // http.StatusUnauthorized when a token is available but insufficent to
@@ -164,7 +165,12 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			}
 
 			// identity is a combination of issuer and email
-			identity = claims.Issuer + "|" + claims.EMail
+			if claims.EMail != "" {
+				identity = claims.Issuer + "|" + claims.EMail
+			} else {
+				// unless we do not have an email, then we use the id
+				identity = claims.Issuer + "|" + claims.StandardClaims.Id
+			}
 
 			// now that we have authenticated the requester, we store their identity in the context
 			ctx := ContextWithIdentity(r.Context(), identity)
