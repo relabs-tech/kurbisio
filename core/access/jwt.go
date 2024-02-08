@@ -169,7 +169,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				identity = claims.Issuer + "|" + claims.EMail
 			} else {
 				// unless we do not have an email, then we use the id
-				identity = claims.Issuer + "|" + claims.StandardClaims.Id
+				identity = claims.Issuer + "|" + claims.Id
 			}
 
 			// now that we have authenticated the requester, we store their identity in the context
