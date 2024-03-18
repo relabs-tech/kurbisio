@@ -48,9 +48,6 @@
                             "minLength": 1
                         }
                     },
-                    "with_log": {
-                        "type": "boolean"
-                    },
                     "with_companion_file": {
                         "type": "boolean",
                         "description": "If true this resource will allow to add companion file stored externally"

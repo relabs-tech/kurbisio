@@ -105,10 +105,6 @@ var configurationJSON string = `{
 		"resource":"interception"
 	  },
 	  {
-		"resource":"logme",
-		"with_log":true
-	  },
-	  {
 		"resource": "with_schema",
 		"schema_id": "http://some_host.com/workout.json"
 	  },
@@ -131,10 +127,6 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource":"notification/single"
-	  },
-	  {
-		"resource":"logme/child",
-		"with_log":true
 	  },
 	  {
 		"resource":"interception/single"
@@ -1308,65 +1300,6 @@ func TestResourceDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, "restaurant", nres["foo"])
-
-}
-
-func TestWithLog(t *testing.T) {
-	type Logme struct {
-		LogmeID uuid.UUID `json:"logme_id"`
-		Secret  string
-	}
-	client := testService.client
-	nreq := Logme{Secret: "don't tell anyone"}
-	var nres Logme
-	_, err := client.RawPost("/logmes", &nreq, &nres)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nres.Secret = "stay tuned"
-	_, err = client.RawPut("/logmes", &nres, &nres)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// now get the log, we should have two objects with different secrets in the right order
-	var log []Logme
-	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/log?order=asc", &log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, 2, len(log), "number of items in log")
-	assert.Equal(t, "don't tell anyone", log[0].Secret, "oldest secret")
-	assert.Equal(t, "stay tuned", log[1].Secret, "newest secret")
-
-	// now the same thing with a singleton child
-	child := Logme{Secret: "lala"}
-	_, err = client.RawPut("/logmes/"+nres.LogmeID.String()+"/child", &child, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	child.Secret = "lulu"
-	_, err = client.RawPut("/logmes/"+nres.LogmeID.String()+"/child", &child, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// now get the singleton child log, we should have two objects with different secrets in the right order
-	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/child/log?order=asc", &log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, 2, len(log), "number of items in log")
-	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
-	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
-
-	// do the same test with the full collection path
-	_, err = client.RawGet("/logmes/"+nres.LogmeID.String()+"/children/all/log?order=asc", &log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, 2, len(log), "number of items in log")
-	assert.Equal(t, "lala", log[0].Secret, "oldest secret")
-	assert.Equal(t, "lulu", log[1].Secret, "newest secret")
 
 }
 

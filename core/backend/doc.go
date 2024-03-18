@@ -288,17 +288,6 @@ no identifier or a null identifier, then the system creates a new unique UUID fo
 a primary identifier in the request, which will be honored by the system. This feature - and the choice of UUID for
 primary identifiers - makes it possible to easily transfer data between different databases.
 
-# Logs
-
-The backend supports logs for any collection or singleton resource. If you specify "with_log":true for a resource in the
-configuration json, then an additional route is created. For example, if you requests logs for device, there will be
-an extra route
-
-	/devices/{device_id}/log GET
-
-which will return all versions of the device object ever created, with a timestamp when that creation or modification did
-happen. Querying the log supports all the standard collection query parameters, including pagination and filtering.
-
 # Notifications
 
 The backend supports notifications through the Notifier interface specified at construction time.
