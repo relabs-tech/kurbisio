@@ -175,8 +175,8 @@ func New(bb *Builder) *Backend {
 		logrus.SetOutput(bb.Logger.Out) // useful when you want to log to a file
 	} else {
 		logLevel := logrus.InfoLevel
-		if bb.LogLevel != "" {
-			switch strings.ToLower(bb.LogLevel) {
+		if lvl := strings.ToLower(bb.LogLevel); lvl != "" {
+			switch lvl {
 			case "info":
 				logLevel = logrus.InfoLevel
 			case "debug":
@@ -186,7 +186,7 @@ func New(bb *Builder) *Backend {
 			case "error":
 				logLevel = logrus.ErrorLevel
 			default:
-				fmt.Println("Unkown loglevel, using INFO")
+				fmt.Println("Unknown loglevel, using INFO")
 			}
 		}
 		logger.InitLogger(logLevel)
