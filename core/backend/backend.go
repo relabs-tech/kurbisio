@@ -108,7 +108,7 @@ type Builder struct {
 	// If populated with a logger, the logger will be used. Otherwise a logger with LogLevel will be created (see InitLogger).
 	Logger *logrus.Logger
 
-	// The loglevel to be used by the logger if Logger is nil. Default is "info""
+	// The loglevel to be used by the logger if Logger is nil. Default is "info"
 	LogLevel string
 
 	// if true, always update the schema. Otherwise only update when the schema json has changed.
