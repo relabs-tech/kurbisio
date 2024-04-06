@@ -30,7 +30,6 @@ type collectionConfiguration struct {
 	Permits                       []access.Permit `json:"permits"`
 	Description                   string          `json:"description"`
 	SchemaID                      string          `json:"schema_id"`
-	WithLog                       bool            `json:"with_log"`
 	Default                       json.RawMessage `json:"default"`
 	WithCompanionFile             bool            `json:"with_companion_file"`
 	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
@@ -45,7 +44,6 @@ type singletonConfiguration struct {
 	SchemaID             string          `json:"schema_id"`
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
-	WithLog              bool            `json:"with_log"`
 	Default              json.RawMessage `json:"default"`
 }
 

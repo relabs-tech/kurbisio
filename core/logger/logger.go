@@ -48,7 +48,7 @@ func AddRequestID(router *mux.Router) {
 
 	reqID := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, _ := ContextWithLogger(r.Context())
+			ctx, _ := ContextWithEmptyLogger(r.Context())
 			h.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -60,9 +60,20 @@ func Default() *logrus.Entry {
 	return logrus.NewEntry(logrus.StandardLogger())
 }
 
-// ContextWithLogger returns a new context with a logger if the given context has no logger yet. If
+// ContextWithLogger returns a new context with a logger. If the context already has a logger
+// it will be replaced with the given logger.
+func ContextWithLogger(ctx context.Context, rlog *logrus.Entry) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	id, _ := uuid.NewUUID()
+	rlog = rlog.WithField(requestIDLoggerKey, id.String())
+	return context.WithValue(ctx, contextKeyRequestLogger, rlog)
+}
+
+// ContextWithEmptyLogger returns a new context with a logger if the given context has no logger yet. If
 // the context already has a logger the given context will be returned.
-func ContextWithLogger(ctx context.Context) (context.Context, *logrus.Entry) {
+func ContextWithEmptyLogger(ctx context.Context) (context.Context, *logrus.Entry) {
 	if ctx == nil {
 		ctx = context.Background()
 	} else {
@@ -93,7 +104,7 @@ func ContextWithLoggerFromData(ctx context.Context, data []byte) context.Context
 	var ok bool
 	ctx, ok = deserializeLoggerContext(ctx, data)
 	if !ok {
-		ctx, _ = ContextWithLogger(ctx)
+		ctx, _ = ContextWithEmptyLogger(ctx)
 	}
 	return ctx
 }
@@ -126,7 +137,7 @@ func FromContext(ctx context.Context) *logrus.Entry {
 // ContextWithLoggerIdentity returns a new context with a logger and identity.
 func ContextWithLoggerIdentity(ctx context.Context, identity string) (context.Context, *logrus.Entry) {
 	var rlog *logrus.Entry
-	ctx, rlog = ContextWithLogger(ctx)
+	ctx, rlog = ContextWithEmptyLogger(ctx)
 	if rlog == nil {
 		return ctx, rlog
 	}
