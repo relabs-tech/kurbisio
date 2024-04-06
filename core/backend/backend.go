@@ -105,7 +105,10 @@ type Builder struct {
 	// JSONSchemasRefs is a list of references JSON Schemas as strings. It is exclusive with the JSONSchemasFS
 	JSONSchemasRefs []string
 
-	// The loglevel to be used by the logger. Default is "info""
+	// If populated with a logger, the logger will be used. Otherwise a logger with LogLevel will be created (see InitLogger).
+	Logger *logrus.Logger
+
+	// The loglevel to be used by the logger if Logger is nil. Default is "info"
 	LogLevel string
 
 	// if true, always update the schema. Otherwise only update when the schema json has changed.
@@ -166,29 +169,28 @@ func New(bb *Builder) *Backend {
 		updateSchema:             bb.UpdateSchema,
 	}
 
-	logLevel := logrus.InfoLevel
-
-	if bb.LogLevel != "" {
-		switch strings.ToLower(bb.LogLevel) {
-		case "info":
-			logLevel = logrus.InfoLevel
-			break
-		case "debug":
-			logLevel = logrus.DebugLevel
-			break
-		case "warning":
-		case "warn":
-			logLevel = logrus.WarnLevel
-			break
-		case "error":
-			logLevel = logrus.ErrorLevel
-			break
-		default:
-			fmt.Println("Unkown loglevel, using INFO")
-			break
+	if bb.Logger != nil {
+		logrus.SetFormatter(bb.Logger.Formatter)
+		logrus.SetLevel(bb.Logger.Level)
+		logrus.SetOutput(bb.Logger.Out) // useful when you want to log to a file
+	} else {
+		logLevel := logrus.InfoLevel
+		if lvl := strings.ToLower(bb.LogLevel); lvl != "" {
+			switch lvl {
+			case "info":
+				logLevel = logrus.InfoLevel
+			case "debug":
+				logLevel = logrus.DebugLevel
+			case "warning", "warn":
+				logLevel = logrus.WarnLevel
+			case "error":
+				logLevel = logrus.ErrorLevel
+			default:
+				fmt.Println("Unknown loglevel, using INFO")
+			}
 		}
+		logger.InitLogger(logLevel)
 	}
-	logger.InitLogger(logLevel)
 
 	if bb.JSONSchemasFS != nil {
 		if len(bb.JSONSchemas) > 0 || len(bb.JSONSchemasRefs) > 0 {
