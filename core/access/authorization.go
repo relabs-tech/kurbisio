@@ -32,7 +32,8 @@ const (
 // OnlyAdminAccess requires admin access for everything
 var OnlyAdminAccess bool
 
-/*Authorization is a context object which stores authorization information
+/*
+Authorization is a context object which stores authorization information
 for user, things, or machines.
 
 An authorization carries a list or roles and identifiers of resources from the
@@ -40,11 +41,11 @@ backend configuration. It can also carry additional properties.
 
 Authorizations are added to a request context with
 
-  ctx = auth.ContextWithAuthorization(ctx)
+	ctx = auth.ContextWithAuthorization(ctx)
 
 and retrieved with
 
-  auth := AuthorizationFromContext(ctx)
+	auth := AuthorizationFromContext(ctx)
 
 Authorization objects are added to the context by by different middleware
 implementations, depending on authorization tokens in the HTTP request.
@@ -52,7 +53,6 @@ Kurbisio supports JWT bearer token, Kurbisio-Device-Token,
 Kurbisio-Machine-Token and a pair of Kurbisio-Thing-Key/Kurbisio-Thing-Identifier.
 
 For the benefit of simple frontend development, it also supports a Kurbisio-JWT cookie.
-
 */
 type Authorization struct {
 	Roles     []string          `json:"roles"`
@@ -232,7 +232,7 @@ func HandleAuthorizationRoute(router *mux.Router) {
 	logger.Default().Debugln("authorization")
 	logger.Default().Debugln("  handle route: /authorization GET")
 	router.HandleFunc("/authorization", func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		auth := AuthorizationFromContext(r.Context())
 		if auth == nil {
 			w.WriteHeader(http.StatusNoContent)

@@ -40,7 +40,7 @@ func (b *Backend) handleStatistics(router *mux.Router) {
 	logger.Default().Debugln("statistics")
 	logger.Default().Debugln("  handle statistics route: /kuribisio/statistics GET")
 	router.Handle("/kurbisio/statistics", handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		b.statisticsWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 }

@@ -1878,26 +1878,26 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// CREATE
 	if !singleton {
 		router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 			createWithAuth(w, r)
 		}))).Methods(http.MethodOptions, http.MethodPost)
 	}
 
 	// UPDATE/CREATE with id in json
 	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		upsertWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// UPDATE/CREATE with fully qualified path
 	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		upsertWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// READ
 	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		readWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
@@ -1906,13 +1906,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		property := columns[i]
 		propertyRoute := fmt.Sprintf("%s/%s/{%s}", itemRoute, property, property)
 		router.Handle(propertyRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+			logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 			updatePropertyWithAuth(w, r, property)
 		}))).Methods(http.MethodOptions, http.MethodPut)
 		if singleton {
 			propertyRoute := fmt.Sprintf("%s/%s/{%s}", singletonRoute, property, property)
 			router.Handle(propertyRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+				logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 				updatePropertyWithAuth(w, r, property)
 			}))).Methods(http.MethodOptions, http.MethodPut)
 		}
@@ -1920,19 +1920,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// LIST
 	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		listWithAuth(w, r, nil)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
 	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
 	// CLEAR
 	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		clearWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
@@ -1942,20 +1942,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	// READ
 	router.Handle(singletonRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		readWithAuth(w, r)
 
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
 	// UPDATE
 	router.Handle(singletonRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		upsertWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
 
 	// DELETE
 	router.Handle(singletonRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		deleteWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
