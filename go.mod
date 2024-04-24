@@ -1,6 +1,6 @@
 module github.com/relabs-tech/kurbisio
 
-go 1.17
+go 1.21
 
 require (
 	github.com/DrmagicE/gmqtt v0.1.2
