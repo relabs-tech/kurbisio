@@ -184,16 +184,16 @@ WHERE serial = $1 RETURNING serial;`
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
 
 	router.HandleFunc("/kurbisio/events/{event}", func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		b.eventsWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 
 	router.HandleFunc("/kurbisio/health", func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		b.health(w, r, false)
 	}).Methods(http.MethodOptions, http.MethodGet)
 	router.HandleFunc("/kurbisio/health/purge", func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.HasRole("admin") {
@@ -204,7 +204,7 @@ WHERE serial = $1 RETURNING serial;`
 		b.purgeHealth(w, r)
 	}).Methods(http.MethodOptions, http.MethodPut)
 	router.HandleFunc("/kurbisio/health/details", func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method)
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
 			if !auth.HasRole("admin") && !auth.HasRole("admin viewer") {

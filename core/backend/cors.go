@@ -22,7 +22,7 @@ func (b *Backend) handleCORS() {
 			w.Header().Set("Access-Control-Expose-Headers", "*")
 
 			if r.Method == http.MethodOptions {
-				logger.FromContext(r.Context()).Infoln("called route for", r.URL, r.Method, " (handled by CORS middleware)")
+				logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method, " (handled by CORS middleware)")
 				w.WriteHeader(http.StatusOK)
 				return
 			}
