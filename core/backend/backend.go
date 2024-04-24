@@ -11,7 +11,6 @@ import (
 	"embed"
 	"fmt"
 	"log"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,7 +67,7 @@ type Backend struct {
 	pipelineConcurrency int
 
 	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
-	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery, jobsUpdateScheduleQuery, rateLimitQuery string
+	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery, jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery, rateLimitQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
@@ -121,7 +120,6 @@ type Builder struct {
 // New realizes the actual backend. It creates the sql relations (if they
 // do not exist) and adds actual routes to router
 func New(bb *Builder) *Backend {
-	rand.Seed(time.Now().UTC().UnixNano())
 
 	var config Configuration
 	err := json.Unmarshal([]byte(bb.Config), &config)
@@ -515,7 +513,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 
 	replaceHandler := func(w http.ResponseWriter, r *http.Request) {
 		rlog := logger.FromContext(r.Context())
-		rlog.Infoln("called shortcut route for", r.URL, r.Method)
+		rlog.Debugln("called shortcut route for", r.URL, r.Method)
 
 		tail := strings.TrimPrefix(r.URL.Path, prefix)
 
@@ -548,7 +546,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 			newPrefix += "/" + core.Plural(s) + "/" + id
 		}
 		r.URL.Path = newPrefix + tail
-		rlog.Info("redirect shortcut route to ", r.URL)
+		rlog.Debugln("redirect shortcut route to ", r.URL)
 		router.ServeHTTP(w, r)
 	}
 	router.HandleFunc(prefix, replaceHandler).Methods(http.MethodOptions, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete)

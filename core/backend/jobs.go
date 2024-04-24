@@ -171,6 +171,10 @@ RETURNING scheduled_at;
 	implicit_schedule = FALSE
 	WHERE serial = $1 AND implicit_schedule = true RETURNING serial;`
 
+	b.jobsRenewImplicitScheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
+	SET scheduled_at = CASE WHEN attempts_left>4 then $2 WHEN attempts_left=4 THEN $3 ELSE $4 END::TIMESTAMP
+	WHERE serial = $1 AND implicit_schedule = true RETURNING serial;`
+
 	b.jobsUpdateScheduleQuery = `UPDATE ` + b.db.Schema + `."_job_"
 SET scheduled_at = $2,
 implicit_schedule = FALSE
@@ -396,7 +400,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	rlog.Infof("raised event %s on resource \"%s\"", event, resource)
 }
 
-func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
+func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
 
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
@@ -407,12 +411,34 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 		var key string
 		rlog := logger.Default()
 
+		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
+		ticker := time.NewTicker(minTimeout - 5*time.Second)
+		tickerDone := make(chan bool)
+		go func() {
+			for {
+				select {
+				case <-tickerDone:
+					return
+				case <-ticker.C:
+					now := time.Now()
+					rlog.Debugln("renew schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					// job may be retried because timeout is reached, but processing is still going on. Hence we
+					// update the implicit scheduled
+					var serial int
+					err := b.db.QueryRow(b.jobsRenewImplicitScheduleQuery,
+						&jb.Serial,
+						now.Add(timeouts[0]), // first retry timeout
+						now.Add(timeouts[1]), // second retry timeout
+						now.Add(timeouts[2]), // third retry timeout before we give up
+					).Scan(&serial)
+					if err != nil && err != sql.ErrNoRows {
+						rlog.WithError(err).Error("could not renew schedule of currently processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					}
+				}
+			}
+		}()
+
 		// call the registered handler in a panic/recover envelope
-		errorMessage := ""
-		jobSerial := jb.Serial
-		timeout := time.AfterFunc(time.Duration(120*time.Second), func() {
-			rlog.Errorf("This (%s) is taking a long time...  #%d", errorMessage, jobSerial)
-		})
 		err := func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -424,7 +450,6 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 				notification, ctx := jb.notification()
 				rlog = logger.FromContext(ctx)
 				key = notificationJobKey(notification.Resource, notification.Operation)
-				errorMessage = fmt.Sprintf("Notification %s %v", key, notification.ResourceID)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(ctx, notification)
 				} else {
@@ -463,7 +488,6 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 					}
 				}
 
-				errorMessage = fmt.Sprintf("Event %v %v %v", event.Type, event.Resource, event.ResourceID)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.event(ctx, event)
 				} else {
@@ -474,7 +498,8 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool) {
 			}
 			return
 		}()
-		timeout.Stop()
+		ticker.Stop()
+		tickerDone <- true
 
 		if err == rescheduledError {
 			rlog.Info("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
@@ -605,7 +630,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	jobs := make(chan job, b.pipelineConcurrency)
 	ready := make(chan bool, b.pipelineConcurrency)
 	for i := 0; i < b.pipelineConcurrency; i++ {
-		go b.pipelineWorker(i, jobs, ready)
+		go b.pipelineWorker(i, jobs, ready, timeouts)
 	}
 
 	var maxedOut bool
