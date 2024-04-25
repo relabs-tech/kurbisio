@@ -10,6 +10,18 @@ Kurbisio is a golang framework for developing backends. Core features are:
 - abstracts underlying core AWS services (such as RDS and S3)
 
 
+## History
+
+Kurbisio was initially developed 2021 by Dalarub & Ettrich GmbH, a consultancy company founded
+by Daniel Alarcon-Rubio and Matthias Ettrich. It was used for internal projects, including a
+running and fitness app which later became twaiv.
+
+Contributors:
+Daniel Alarcon-Rubio
+Matthias Ettrich
+Gregory Lenoble
+Dima Shelamov
+
 ## Unit Tests
 
 You need a postgres database:
