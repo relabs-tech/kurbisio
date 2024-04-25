@@ -44,7 +44,7 @@ var ConfigSchemaJSON string
 
 // InternalDatabaseSchemaVersion is a sequential versioning number of the database schema.
 // If it increases, the backend will try to update the schema.
-const InternalDatabaseSchemaVersion = 2
+const InternalDatabaseSchemaVersion = 3
 
 // Backend is the generic rest backend
 type Backend struct {
@@ -66,8 +66,12 @@ type Backend struct {
 
 	pipelineConcurrency int
 
+	// these queries exist for foreground and background
 	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
-	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery, jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery, rateLimitQuery string
+	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery,
+	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery [2]string
+
+	rateLimitQuery string
 
 	processJobsAsyncRuns    bool
 	processJobsAsyncTrigger chan struct{}
