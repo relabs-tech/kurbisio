@@ -390,7 +390,6 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	eventType := params["event"]
 	rlog := logger.FromContext(r.Context())
-	rlog.Infoln("in events with auth")
 	if b.authorizationEnabled {
 		auth := access.AuthorizationFromContext(r.Context())
 		if !auth.HasRole("admin") {
@@ -551,12 +550,12 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 		tickerDone <- true
 
 		if err == rescheduledError {
-			rlog.Info("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			rlog.Debug("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 
 		} else if err != nil {
 			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 		} else {
-			rlog.Info("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
 			var serial int
 			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
