@@ -78,7 +78,7 @@ type Backend struct {
 	hasJobsToProcess        bool
 	hasJobsToProcessLock    sync.Mutex
 
-	jsonValidator *schema.Validator
+	JsonValidator *schema.Validator
 	KssDriver     kss.Driver
 }
 
