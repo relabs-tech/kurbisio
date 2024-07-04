@@ -198,12 +198,12 @@ func New(bb *Builder) *Backend {
 		if len(bb.JSONSchemas) > 0 || len(bb.JSONSchemasRefs) > 0 {
 			logger.Default().Fatal("Cannot use both JSONSchemas and JSONSchemasFS")
 		}
-		b.jsonValidator, err = schema.NewValidatorFromFS(*bb.JSONSchemasFS)
+		b.JsonValidator, err = schema.NewValidatorFromFS(*bb.JSONSchemasFS)
 		if err != nil {
 			logger.Default().Fatalf("Cannot create json Validator %v", err)
 		}
 	} else {
-		b.jsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
+		b.JsonValidator, err = schema.NewValidator(bb.JSONSchemas, bb.JSONSchemasRefs)
 		if err != nil {
 			logger.Default().Fatalf("Cannot create json Validator %v", err)
 		}

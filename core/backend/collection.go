@@ -46,7 +46,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	if rc.SchemaID != "" {
-		if !b.jsonValidator.HasSchema(rc.SchemaID) {
+		if !b.JsonValidator.HasSchema(rc.SchemaID) {
 			nillog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
 				rc.Resource, rc.SchemaID)
 		}
@@ -204,7 +204,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	// if we have a default object and a valid schema, validate the default object
-	if rc.Default != nil && rc.SchemaID != "" && b.jsonValidator.HasSchema(rc.SchemaID) {
+	if rc.Default != nil && rc.SchemaID != "" && b.JsonValidator.HasSchema(rc.SchemaID) {
 		var defaultJSON map[string]interface{}
 		err := json.Unmarshal(rc.Default, &defaultJSON)
 		if err != nil {
@@ -217,7 +217,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			defaultJSON[columns[i]] = id
 		}
 		jsonData, _ := json.Marshal(defaultJSON)
-		if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+		if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 			nillog.WithError(err).Errorf("validating default for %s: field does not follow schemaID %s",
 				resource, rc.SchemaID)
 			panic("invalid configuration default")
@@ -1323,9 +1323,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		validateSchema := rc.SchemaID != "" && !force
 
 		if validateSchema {
-			if !b.jsonValidator.HasSchema(rc.SchemaID) {
+			if !b.JsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
 					string(jsonData), rc.SchemaID)
 				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
@@ -1722,9 +1722,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		jsonData, _ := json.MarshalWithOption(bodyJSON, json.DisableHTMLEscape())
 		validateSchema := rc.SchemaID != "" && !force
 		if validateSchema {
-			if !b.jsonValidator.HasSchema(rc.SchemaID) {
+			if !b.JsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
-			} else if err := b.jsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
 				tx.Rollback()
 				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
 					string(jsonData), rc.SchemaID)
