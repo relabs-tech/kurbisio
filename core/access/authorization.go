@@ -27,6 +27,7 @@ type contextKey string
 const (
 	contextKeyAuthorization contextKey = "_authorization_"
 	contextKeyIdentity      contextKey = "_identity_"
+	contextKeyEmail         contextKey = "_email_"
 )
 
 // OnlyAdminAccess requires admin access for everything
@@ -181,6 +182,20 @@ func ContextWithIdentity(ctx context.Context, identity string) context.Context {
 // IdentityFromContext retrieves the (authenticated) identity from the context
 func IdentityFromContext(ctx context.Context) string {
 	a, ok := ctx.Value(contextKeyIdentity).(string)
+	if ok {
+		return a
+	}
+	return ""
+}
+
+// ContextWithEmail returns a new context with the (authenticated) email added to it
+func ContextWithEmail(ctx context.Context, identity string) context.Context {
+	return context.WithValue(ctx, contextKeyEmail, identity)
+}
+
+// EmailFromContext retrieves the (authenticated) email from the context
+func EmailFromContext(ctx context.Context) string {
+	a, ok := ctx.Value(contextKeyEmail).(string)
 	if ok {
 		return a
 	}
