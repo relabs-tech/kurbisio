@@ -398,9 +398,10 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var (
-		key        string
-		resource   string
-		resourceID uuid.UUID
+		key             string
+		resource        string
+		resourceID      uuid.UUID
+		runInBackground bool
 	)
 	urlQuery := r.URL.Query()
 	for param, array := range urlQuery {
@@ -417,6 +418,10 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 			resource = value
 		case "resource_id":
 			resourceID, err = uuid.Parse(value)
+		case "background":
+			if value != "" {
+				runInBackground, err = strconv.ParseBool(value)
+			}
 		default:
 			err = fmt.Errorf("unknown query parameter")
 		}
@@ -437,7 +442,17 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	} else {
 		payload = []byte("{}")
 	}
-	event := Event{Type: eventType, Key: key, Resource: resource, ResourceID: resourceID}.WithPayload(payload)
+	event := Event{
+		Type:       eventType,
+		Key:        key,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Priority:   PriorityBackground,
+	}.WithPayload(payload)
+	if runInBackground {
+		event.Priority = PriorityBackground
+	}
+
 	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, nil, false)
 
 	if err != nil {
