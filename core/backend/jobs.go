@@ -419,6 +419,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		case "resource_id":
 			resourceID, err = uuid.Parse(value)
 		case "background":
+			runInBackground = true
 			if value != "" {
 				runInBackground, err = strconv.ParseBool(value)
 			}
