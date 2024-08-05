@@ -448,7 +448,6 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		Key:        key,
 		Resource:   resource,
 		ResourceID: resourceID,
-		Priority:   PriorityBackground,
 	}.WithPayload(payload)
 	if runInBackground {
 		event.Priority = PriorityBackground
