@@ -86,17 +86,14 @@ type job struct {
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
-func (j *job) notification() (Notification, context.Context) {
-	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
-	return Notification{Resource: j.Resource, Operation: core.Operation(j.Type), ResourceID: j.ResourceID, Payload: j.Payload}, ctx
+func (j *job) notification() Notification {
+	return Notification{Resource: j.Resource, Operation: core.Operation(j.Type), ResourceID: j.ResourceID, Payload: j.Payload}
 }
 
 // event returns the job as high-level event. Only makes sense if the job type is "event"
-func (j *job) event() (Event, context.Context) {
-	ctx := logger.ContextWithLoggerFromData(context.Background(), j.ContextData)
+func (j *job) event() Event {
 	return Event{Type: j.Type, Key: j.Key, Resource: j.Resource, ResourceID: j.ResourceID,
-			Payload: j.Payload, ScheduledAt: j.ScheduledAt, Priority: j.Priority},
-		ctx
+		Payload: j.Payload, ScheduledAt: j.ScheduledAt, Priority: j.Priority}
 }
 
 func (b *Backend) prioritizedJobQueries(q string) [2]string {
@@ -473,7 +470,9 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 			continue
 		}
 		var key string
-		rlog := logger.Default().WithFields(logrus.Fields{
+
+		ctx := logger.ContextWithLoggerFromData(context.Background(), jb.ContextData)
+		rlog := logger.FromContext(ctx).WithFields(logrus.Fields{
 			"resource":     jb.Resource,
 			"key":          jb.Key,
 			"resource_id":  jb.ResourceID,
@@ -520,8 +519,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 			}()
 			switch jb.Job {
 			case "notification":
-				notification, ctx := jb.notification()
-				rlog = logger.FromContext(ctx)
+				notification := jb.notification()
 				key = notificationJobKey(notification.Resource, notification.Operation)
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(ctx, notification)
@@ -529,8 +527,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 					err = fmt.Errorf("no handler for key %s", key)
 				}
 			case "event", "queued-event":
-				event, ctx := jb.event()
-				rlog = logger.FromContext(ctx)
+				event := jb.event()
 				key = eventJobKey(event.Type)
 
 				if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
@@ -538,7 +535,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 					// schedule (happens at retry), or b) the event is too old
 					if pointers.SafeBool(jb.ImplicitSchedule) ||
 						(rateLimit.maxAge > 0 && event.ScheduledAt != nil &&
-							time.Now().Sub(*event.ScheduledAt) > rateLimit.maxAge) {
+							time.Since(*event.ScheduledAt) > rateLimit.maxAge) {
 						var rateLimitedSchedule time.Time
 						deltaPG := rateLimit.delta.Seconds()
 						err = b.db.QueryRow(b.rateLimitQuery,
