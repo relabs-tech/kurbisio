@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/sirupsen/logrus"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -472,7 +473,16 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 			continue
 		}
 		var key string
-		rlog := logger.Default()
+		rlog := logger.Default().WithFields(logrus.Fields{
+			"resource":     jb.Resource,
+			"key":          jb.Key,
+			"resource_id":  jb.ResourceID,
+			"type":         jb.Type,
+			"scheduled_at": jb.ScheduledAt,
+			"serial":       jb.Serial,
+			"attempts":     jb.AttemptsLeft,
+			"priority":     jb.Priority,
+		})
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
 		ticker := time.NewTicker(minTimeout - 5*time.Second)
