@@ -643,7 +643,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationList, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationList, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -862,7 +862,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -876,7 +876,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -971,7 +971,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1079,7 +1079,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationClear, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1507,7 +1507,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1566,7 +1566,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// now we have all parameters and can authorize
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1609,7 +1609,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			} else if b.authorizationEnabled {
 				// normal upsert, check whether we can create the object
 				auth := access.AuthorizationFromContext(r.Context())
-				if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+				if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
 					tx.Rollback()
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return

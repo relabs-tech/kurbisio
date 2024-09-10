@@ -375,7 +375,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationList, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationList, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -492,7 +492,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -505,7 +505,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -663,11 +663,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		authorizedForCreate := false
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
-			authorizedForCreate = auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits)
+			authorizedForCreate = auth.IsAuthorized(core.OperationCreate, params, rc.Permits)
 		}
 
 		blob, err := io.ReadAll(r.Body)
@@ -856,7 +856,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationClear, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1006,7 +1006,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}

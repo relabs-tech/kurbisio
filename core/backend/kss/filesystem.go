@@ -144,7 +144,6 @@ func (f *LocalFilesystem) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusMethodNotAllowed)
-	return
 
 }
 
@@ -255,7 +254,7 @@ func (f *LocalFilesystem) isValid(URL string) bool {
 		return false
 	}
 	t, err := time.Parse(time.RFC3339, timeStr)
-	if t.Before(time.Now()) {
+	if err != nil || t.Before(time.Now()) {
 		return false
 	}
 
@@ -264,11 +263,7 @@ func (f *LocalFilesystem) isValid(URL string) bool {
 
 	hashed := sha256.Sum256([]byte(v.Encode()))
 	err = rsa.VerifyPKCS1v15(&f.privateKey.PublicKey, crypto.SHA256, hashed[:], []byte(signature))
-	if err != nil {
-
-		return false
-	}
-	return true
+	return err == nil
 }
 
 // UploadData uploads data into a new key object

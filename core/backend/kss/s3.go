@@ -253,51 +253,48 @@ func (s *S3) listenSQS() {
 		return
 	}
 	go func() {
-		for {
-			select {
-			case <-s.listenToSQS:
-				for {
+		for range s.listenToSQS {
+			for {
 
-					gMInput := &sqs.ReceiveMessageInput{
-						MessageAttributeNames: []string{
-							string(types.QueueAttributeNameAll),
-						},
-						QueueUrl:            urlResult.QueueUrl,
-						MaxNumberOfMessages: 10,
-						WaitTimeSeconds:     10,
-					}
-
-					s.logger.Infoln("Calling ReceiveMessage")
-					msgResult, err := client.ReceiveMessage(context.TODO(), gMInput)
-					if err != nil {
-						s.logger.WithError(err).Errorln("Got an error receiving messages:")
-						continue
-					}
-					s.logger.Infof("Got %d SQS messages\n", len(msgResult.Messages))
-
-					var messages []events.SQSMessage
-
-					// ReceiveMessage gives back types.Message while we want vents.SQSMessage
-					for _, m := range msgResult.Messages {
-						messages = append(messages, events.SQSMessage{Body: pointers.SafeString(m.Body)})
-					}
-
-					s.ProcessIncomingSQSMessageRecords(messages)
-					for _, m := range msgResult.Messages {
-						if _, err = client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
-							QueueUrl:      urlResult.QueueUrl,
-							ReceiptHandle: m.ReceiptHandle,
-						}); err != nil {
-							s.logger.WithError(err).Error("Could not delete message ", *m.Body)
-						}
-					}
-
-					s.stopListeningAtMutex.Lock()
-					if time.Now().After(s.stopListeningAt) {
-						break
-					}
-					s.stopListeningAtMutex.Unlock()
+				gMInput := &sqs.ReceiveMessageInput{
+					MessageAttributeNames: []string{
+						string(types.QueueAttributeNameAll),
+					},
+					QueueUrl:            urlResult.QueueUrl,
+					MaxNumberOfMessages: 10,
+					WaitTimeSeconds:     10,
 				}
+
+				s.logger.Infoln("Calling ReceiveMessage")
+				msgResult, err := client.ReceiveMessage(context.TODO(), gMInput)
+				if err != nil {
+					s.logger.WithError(err).Errorln("Got an error receiving messages:")
+					continue
+				}
+				s.logger.Infof("Got %d SQS messages\n", len(msgResult.Messages))
+
+				var messages []events.SQSMessage
+
+				// ReceiveMessage gives back types.Message while we want vents.SQSMessage
+				for _, m := range msgResult.Messages {
+					messages = append(messages, events.SQSMessage{Body: pointers.SafeString(m.Body)})
+				}
+
+				s.ProcessIncomingSQSMessageRecords(messages)
+				for _, m := range msgResult.Messages {
+					if _, err = client.DeleteMessage(context.TODO(), &sqs.DeleteMessageInput{
+						QueueUrl:      urlResult.QueueUrl,
+						ReceiptHandle: m.ReceiptHandle,
+					}); err != nil {
+						s.logger.WithError(err).Error("Could not delete message ", *m.Body)
+					}
+				}
+
+				s.stopListeningAtMutex.Lock()
+				if time.Now().After(s.stopListeningAt) {
+					break
+				}
+				s.stopListeningAtMutex.Unlock()
 			}
 		}
 	}()
@@ -326,7 +323,7 @@ func (s *S3) ProcessIncomingSQSMessageRecords(messages []events.SQSMessage) {
 				s.logger.Infoln("Got unexpected event name" + e.EventName)
 				continue
 			}
-			if strings.Index(e.S3.Object.Key, s.baseKeyName) >= 0 && s.callback != nil {
+			if strings.Contains(e.S3.Object.Key, s.baseKeyName) && s.callback != nil {
 				s.logger.Infoln("Got Uploaded key " + e.S3.Object.Key)
 
 				if err := s.callback(FileUpdatedEvent{

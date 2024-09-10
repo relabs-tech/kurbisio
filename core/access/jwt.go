@@ -70,7 +70,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		if err != nil {
 			panic(err)
 		}
-		if time.Now().Sub(timestamp) > 6*time.Hour {
+		if time.Since(timestamp) > 6*time.Hour {
 			// time to check for new keys
 			res, err := http.Get(issuer.PublicKeyDownloadURL)
 			if err != nil {
@@ -240,7 +240,7 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		if err != nil {
 			panic(err)
 		}
-		if time.Now().Sub(timestamp) > 6*time.Hour {
+		if time.Since(timestamp) > 6*time.Hour {
 			// time to check for new keys
 			res, err := http.Get(issuer.PublicKeyDownloadURL)
 			if err != nil {
@@ -416,9 +416,4 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 		})
 	}
 
-}
-
-func asJSON(object interface{}) string {
-	j, _ := json.Marshal(object)
-	return string(j)
 }

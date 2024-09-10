@@ -86,7 +86,7 @@ func TestStatistics(t *testing.T) {
 		t.Fatalf("Expected %v resources statistics, got %v", expectedResources, receivedResources)
 	}
 
-	// Verify that we got non-null statistics for the resources we created at the begining
+	// Verify that we got non-null statistics for the resources we created at the beginning
 	for _, r := range []string{"a", "blob"} {
 		s := getResourceByName(r, stats)
 		if s == nil {
