@@ -1543,6 +1543,10 @@ func TestScheduleEvents(t *testing.T) {
 }
 
 func TestRecursion(t *testing.T) {
+	// This test uses an own testService to avoid having duplicated HandleResourceNotification for
+	// the recurser resource
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
 
 	type Recurser struct {
 		RecurserID uuid.UUID `json:"recurser_id"`
