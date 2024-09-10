@@ -86,11 +86,11 @@ func TestStatistics(t *testing.T) {
 		t.Fatalf("Expected %v resources statistics, got %v", expectedResources, receivedResources)
 	}
 
-	// Verify that we got non-null statistics for the resources we created at the begining
+	// Verify that we got non-null statistics for the resources we created at the beginning
 	for _, r := range []string{"a", "blob"} {
 		s := getResourceByName(r, stats)
 		if s == nil {
-			t.Fatal("No statistics found about resource: ", *s)
+			t.Fatal("No statistics found about resource: ")
 		}
 		if s.Count < int64(numberOfElements) {
 			t.Fatalf("Count is expected larger than %d for resource %v", numberOfElements, *s)

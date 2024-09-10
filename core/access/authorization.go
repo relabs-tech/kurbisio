@@ -112,7 +112,7 @@ type Permit struct {
 // then this permit applies to all roles but "public"
 //
 // The "admin viewer" role has a universal permit for read and list opersations
-func (a *Authorization) IsAuthorized(resources []string, operation core.Operation, params map[string]string, permits []Permit) bool {
+func (a *Authorization) IsAuthorized(operation core.Operation, params map[string]string, permits []Permit) bool {
 
 	if a.HasRole("admin") {
 		return true // admin is always authorized

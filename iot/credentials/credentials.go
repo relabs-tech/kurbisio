@@ -251,7 +251,8 @@ func (a *API) handleRoutes(caCertFile, caKeyFile string, router *mux.Router) {
 			}
 
 			if count != 1 {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				logger.Default().Errorf("Expected 1 row to be updated, got %d", count)
+				http.Error(w, "Could not find a single device for this device id", http.StatusBadRequest)
 				return
 			}
 

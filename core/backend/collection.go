@@ -643,11 +643,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationList, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationList, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -868,7 +868,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationRead, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -882,7 +882,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -977,7 +977,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationDelete, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1085,7 +1085,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationClear, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationClear, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1354,7 +1354,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if data != nil {
-				json.Unmarshal(data, &bodyJSON)
+				err = json.Unmarshal(data, &bodyJSON)
 				if err != nil {
 					rlog.WithError(err).Error("Error 2733: interceptor")
 					http.Error(w, "Error 2733", http.StatusInternalServerError)
@@ -1513,7 +1513,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1572,7 +1572,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		// now we have all parameters and can authorize
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(resources, core.OperationUpdate, params, rc.Permits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -1615,7 +1615,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			} else if b.authorizationEnabled {
 				// normal upsert, check whether we can create the object
 				auth := access.AuthorizationFromContext(r.Context())
-				if !auth.IsAuthorized(resources, core.OperationCreate, params, rc.Permits) {
+				if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
 					tx.Rollback()
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
@@ -1742,7 +1742,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if data != nil {
-				json.Unmarshal(data, &bodyJSON)
+				err = json.Unmarshal(data, &bodyJSON)
 				if err != nil {
 					tx.Rollback()
 					rlog.WithError(err).Errorf("Error 4738: interceptor")
@@ -1921,7 +1921,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// LIST
 	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-		listWithAuth(w, r, nil)
+		listWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE
