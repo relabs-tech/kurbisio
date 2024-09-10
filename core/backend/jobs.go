@@ -484,7 +484,12 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 		})
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
-		ticker := time.NewTicker(max(time.Second, minTimeout-5*time.Second))
+		minTimeout = minTimeout - 5*time.Second
+		if minTimeout <= 0 {
+			logger.Default().Errorf("minTimeout is negative %v", minTimeout)
+		}
+		minTimeout = max(minTimeout, time.Second)
+		ticker := time.NewTicker(minTimeout)
 		tickerDone := make(chan bool)
 		go func() {
 			for {
