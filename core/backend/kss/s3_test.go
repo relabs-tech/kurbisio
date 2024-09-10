@@ -9,6 +9,7 @@ package kss_test
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 	"time"
@@ -142,4 +143,48 @@ func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
 	if len(keys) != 0 {
 		t.Fatalf("Expecting %v, got %v", 0, len(keys))
 	}
+}
+
+func test_DeleteAllWithPrefix(t *testing.T, driver kss.Driver, cl client.Client) {
+	// Test that a file can be deleted
+
+	var urls []string
+	for _, key := range []string{"key/1", "key/2"} {
+		// Push some data
+		pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = cl.PostMultipart(pushURL, []byte("123"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Now try to read the data
+		getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		urls = append(urls, getURL)
+
+		var data []byte
+		_, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := driver.DeleteAllWithPrefix("key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range urls {
+		var data []byte
+		status, _, _ := cl.RawGetBlobWithHeader(u, map[string]string{}, &data)
+		if status != http.StatusNotFound {
+			t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
+		}
+	}
+
 }

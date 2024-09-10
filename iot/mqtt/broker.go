@@ -178,7 +178,7 @@ func (p *plugin) HookWrapper() gmqtt.HookWrapper {
 func (p *plugin) deviceIDFromConnection(conn net.Conn) uuid.UUID {
 	p.deviceIdsRwmux.RLock()
 	defer p.deviceIdsRwmux.RUnlock()
-	deviceID, _ := p.deviceIds[conn]
+	deviceID := p.deviceIds[conn]
 	return deviceID
 }
 

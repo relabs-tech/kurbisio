@@ -25,9 +25,8 @@ func TestAuthorization_Admin(t *testing.T) {
 	auth := &Authorization{
 		Roles: []string{"admin"},
 	}
-	resources := []string{"fleet", "user"}
 
-	if !auth.IsAuthorized(resources, core.OperationCreate, nil, nil) {
+	if !auth.IsAuthorized(core.OperationCreate, nil, nil) {
 		t.Fatal("admin not authorized")
 	}
 }
@@ -36,21 +35,20 @@ func TestAuthorization_AdminViewer(t *testing.T) {
 	auth := &Authorization{
 		Roles: []string{"admin viewer"},
 	}
-	resources := []string{"fleet", "user"}
 
-	if auth.IsAuthorized(resources, core.OperationCreate, nil, nil) {
+	if auth.IsAuthorized(core.OperationCreate, nil, nil) {
 		t.Fatal("admin viewer authorized to create")
 	}
-	if auth.IsAuthorized(resources, core.OperationDelete, nil, nil) {
+	if auth.IsAuthorized(core.OperationDelete, nil, nil) {
 		t.Fatal("admin viewer authorized to create")
 	}
-	if auth.IsAuthorized(resources, core.OperationUpdate, nil, nil) {
+	if auth.IsAuthorized(core.OperationUpdate, nil, nil) {
 		t.Fatal("admin viewer authorized to create")
 	}
-	if !auth.IsAuthorized(resources, core.OperationList, nil, nil) {
+	if !auth.IsAuthorized(core.OperationList, nil, nil) {
 		t.Fatal("admin viewer not authorized to create")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, nil, nil) {
+	if !auth.IsAuthorized(core.OperationRead, nil, nil) {
 		t.Fatal("admin viewer not authorized to create")
 	}
 }
@@ -60,26 +58,25 @@ func TestAuthorization_Public(t *testing.T) {
 	auth := &Authorization{
 		Roles: []string{"someone"},
 	}
-	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "public",
 		Operations: []core.Operation{"read"},
 	}
 	permits := []Permit{permit}
 
-	if auth.IsAuthorized(resources, core.OperationCreate, nil, permits) {
+	if auth.IsAuthorized(core.OperationCreate, nil, permits) {
 		t.Fatal("public should not create")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, nil, permits) {
+	if !auth.IsAuthorized(core.OperationRead, nil, permits) {
 		t.Fatal("public not authorized for read")
 	}
 
 	// now try without any authorization, this should also work
 	auth = nil
-	if auth.IsAuthorized(resources, core.OperationCreate, nil, permits) {
+	if auth.IsAuthorized(core.OperationCreate, nil, permits) {
 		t.Fatal("public should not create")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, nil, permits) {
+	if !auth.IsAuthorized(core.OperationRead, nil, permits) {
 		t.Fatal("public not authorized for read")
 	}
 
@@ -90,26 +87,25 @@ func TestAuthorization_Everybody(t *testing.T) {
 	auth := &Authorization{
 		Roles: []string{"someone"},
 	}
-	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "everybody",
 		Operations: []core.Operation{"read"},
 	}
 	permits := []Permit{permit}
 
-	if auth.IsAuthorized(resources, core.OperationCreate, nil, permits) {
+	if auth.IsAuthorized(core.OperationCreate, nil, permits) {
 		t.Fatal("everybody should not create")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, nil, permits) {
+	if !auth.IsAuthorized(core.OperationRead, nil, permits) {
 		t.Fatal("everybody not authorized for read")
 	}
 
 	// now try without any authorization, this should not work
 	auth = nil
-	if auth.IsAuthorized(resources, core.OperationCreate, nil, permits) {
+	if auth.IsAuthorized(core.OperationCreate, nil, permits) {
 		t.Fatal("public should not create")
 	}
-	if auth.IsAuthorized(resources, core.OperationRead, nil, permits) {
+	if auth.IsAuthorized(core.OperationRead, nil, permits) {
 		t.Fatal("public should not be authorized for read")
 	}
 
@@ -126,7 +122,6 @@ func TestAuthorization_Selector(t *testing.T) {
 		},
 	}
 
-	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "userrole",
 		Operations: []core.Operation{"read"},
@@ -138,10 +133,10 @@ func TestAuthorization_Selector(t *testing.T) {
 		"user_id": userID.String(),
 	}
 
-	if auth.IsAuthorized(resources, core.OperationUpdate, params, permits) {
+	if auth.IsAuthorized(core.OperationUpdate, params, permits) {
 		t.Fatal("user should not update")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if !auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("user not authorized for read")
 	}
 
@@ -152,7 +147,7 @@ func TestAuthorization_Selector(t *testing.T) {
 		"user_id": userID.String(),
 	}
 
-	if auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("this user should not be authorized for read")
 	}
 
@@ -170,7 +165,6 @@ func TestAuthorization_ParentSelector(t *testing.T) {
 		},
 	}
 
-	resources := []string{"fleet", "user"}
 	permit := Permit{
 		Role:       "fleetadmin",
 		Operations: []core.Operation{"read"},
@@ -183,13 +177,13 @@ func TestAuthorization_ParentSelector(t *testing.T) {
 		"user_id":  userID.String(),
 	}
 
-	if auth.IsAuthorized(resources, core.OperationUpdate, params, permits) {
+	if auth.IsAuthorized(core.OperationUpdate, params, permits) {
 		t.Fatal("fleetadmin should not update")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if !auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("fleetadmin not authorized for read on single user")
 	}
-	if !auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if !auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("fleetadmin not authorized for read all users")
 	}
 
@@ -202,7 +196,7 @@ func TestAuthorization_ParentSelector(t *testing.T) {
 		},
 	}
 
-	if auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("this fleetadmin should not be authorized for read")
 	}
 
@@ -211,7 +205,7 @@ func TestAuthorization_ParentSelector(t *testing.T) {
 		Roles: []string{"fleetadmin"},
 	}
 
-	if auth.IsAuthorized(resources, core.OperationRead, params, permits) {
+	if auth.IsAuthorized(core.OperationRead, params, permits) {
 		t.Fatal("this fleetadmin should not be authorized for read")
 	}
 

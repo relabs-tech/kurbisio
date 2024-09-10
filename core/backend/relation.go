@@ -200,7 +200,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(leftResources, core.OperationList, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(core.OperationList, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -290,7 +290,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationList, params, rc.RightPermits) {
+			if !auth.IsAuthorized(core.OperationList, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -379,7 +379,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(leftResources, core.OperationRead, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -404,7 +404,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationRead, params, rc.RightPermits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -468,11 +468,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(leftResources, core.OperationCreate, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(core.OperationCreate, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
-			if !auth.IsAuthorized(rightResources[:len(rightResources)-1], core.OperationRead, params, rightCollection.permits) {
+			if !auth.IsAuthorized(core.OperationRead, params, rightCollection.permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -487,11 +487,11 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationCreate, params, rc.RightPermits) {
+			if !auth.IsAuthorized(core.OperationCreate, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
-			if !auth.IsAuthorized(leftResources[:len(leftResources)-1], core.OperationRead, params, leftCollection.permits) {
+			if !auth.IsAuthorized(core.OperationRead, params, leftCollection.permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -531,7 +531,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(leftResources, core.OperationDelete, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.LeftPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
@@ -546,7 +546,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc relationConfigur
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(rightResources, core.OperationDelete, params, rc.RightPermits) {
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.RightPermits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}

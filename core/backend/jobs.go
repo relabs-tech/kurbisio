@@ -583,7 +583,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 		} else {
 			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
+			// job handled successfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
 			var serial int
 			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
 			if err != nil && err != sql.ErrNoRows {
