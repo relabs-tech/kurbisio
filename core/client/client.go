@@ -455,6 +455,27 @@ func (r Item) Read(result interface{}, children ...string) (int, error) {
 	return r.col.client.RawGet(r.Path(), result)
 }
 
+// Read reads a blob item from a collection
+//
+// The operation corresponds to a GET request.
+//
+// Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// meta can also be map[string]interface{} or a raw *[]byte.
+
+func (r Item) ReadBlobWithMeta(blob *[]byte, meta interface{}) (int, error) {
+	status, header, err := r.col.client.RawGetBlobWithHeader(r.Path(), nil, blob)
+	if md := header.Get("Kurbisio-Meta-Data"); meta != "" {
+		if raw, ok := meta.(*[]byte); ok {
+			*raw = []byte(md)
+		} else {
+			err = json.Unmarshal([]byte(md), meta)
+		}
+	}
+	return status, err
+}
+
 // Delete deletes an item from a collection
 //
 // The operation corresponds to a DELETE request.
