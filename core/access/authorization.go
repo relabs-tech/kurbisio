@@ -235,7 +235,7 @@ func (a *AuthorizationCache) Read(token string) *Authorization {
 // This function is go-routine safe
 func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 	if auth != nil {
-		logger.Default().WithField("auth", *auth).Errorln("write authorization for", token)
+		logger.Default().Errorf("write authorization for %s; roles: %v", token[:8], auth.Roles)
 	}
 	a.mutex.Lock()
 	a.cache[token] = auth
