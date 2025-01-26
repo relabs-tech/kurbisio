@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/google/uuid"
@@ -644,8 +645,7 @@ func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 
 	go func() {
 		b.ProcessJobsSync(5 * time.Minute)
-		for {
-			<-b.processJobsAsyncTrigger
+		for range b.processJobsAsyncTrigger {
 			b.ProcessJobsSync(5 * time.Minute)
 		}
 	}()
@@ -696,6 +696,38 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			rlog.Errorln("failed to retrieve job:", err.Error())
 		}
 		return
+	}
+
+	if len(b.kafkaReaderByTopic) > 0 {
+		for topic, reader := range b.kafkaReaderByTopic {
+			go func(topic string, reader *kafka.Reader) {
+				defer reader.Close()
+				for {
+					m, err := reader.FetchMessage(context.Background())
+					if err != nil {
+						rlog.WithError(err).Errorln("could not fetch message from kafka")
+						continue
+					}
+					var job job
+					err = json.Unmarshal(m.Value, &job)
+					if err != nil {
+						rlog.WithError(err).Errorln("could not unmarshal message from kafka")
+						continue
+					}
+					ctx := logger.ContextWithLoggerFromData(context.Background(), job.ContextData)
+
+					fn, ok := b.callbacks[topic]
+					if !ok {
+						panic("no handler for topic " + topic)
+					}
+					err = fn.event(ctx, job.event())
+					if err != nil {
+						// reader.
+					}
+					reader.CommitMessages(context.Background(), m)
+				}
+			}(topic, reader)
+		}
 	}
 
 	jobs := make(chan job, b.pipelineConcurrency)
@@ -752,11 +784,44 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
+type handleEventConfig struct {
+	consumerGroup string
+}
+
+type HandleEventOpt func(*handleEventConfig)
+
+func WithConsumerGroup(consumerGroup string) HandleEventOpt {
+	return func(o *handleEventConfig) {
+		o.consumerGroup = consumerGroup
+	}
+}
+
 // HandleEvent installs a callback handler the specified event. Handlers are executed
 // out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
 // a few times with increasing timeout.
-func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
+func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error, opts ...HandleEventOpt) {
+	var cfg handleEventConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	key := eventJobKey(event)
+	if cfg.consumerGroup != "" && len(b.kafkaBrokers) > 0 {
+		key = key + ":" + cfg.consumerGroup
+	}
+
+	if len(b.kafkaBrokers) > 0 {
+		if _, ok := b.kafkaReaderByTopic[key]; !ok {
+			reader := kafka.NewReader(kafka.ReaderConfig{
+				Brokers: b.kafkaBrokers,
+				GroupID: cfg.consumerGroup,
+				Topic:   event,
+			})
+			b.kafkaReaderByTopic[key] = reader
+		} else {
+			log.Fatalf("reader for topic %s is already installed", key)
+		}
+	}
 	if _, ok := b.callbacks[key]; ok {
 		log.Fatalf("callback handler for %s already installed", key)
 	}
@@ -933,6 +998,46 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 			}
 			scheduleAtUTC = &rateLimitedSchedule
 		}
+	}
+
+	if scheduleAtUTC == nil && len(b.kafkaBrokers) > 0 {
+		// if we have a kafka client, we must serialize the event data to json
+		// and send it to the kafka topic
+		data, err = json.Marshal(event)
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("json marshal: %w", err)
+		}
+
+		w := b.kafkaWriterByTopic[event.Type]
+		if w == nil {
+			var kafkaHashBalancer kafka.Hash
+			w = &kafka.Writer{
+				Addr:  kafka.TCP(b.kafkaBrokers...),
+				Topic: event.Type,
+				Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
+					// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
+					m.Key = []byte(strings.Split(string(m.Key), "_")[0])
+					return kafkaHashBalancer.Balance(m, i...)
+				}),
+			}
+			b.kafkaWriterByTopic[event.Type] = w
+		}
+
+		key := event.Resource + ":" + event.ResourceID.String()
+		if job == "queued-event" {
+			// since topics are configured to compact and keep the last message for each,
+			// we must make the key unique for queued-events
+			key = key + "_" + uuid.New().String()
+		}
+
+		err = w.WriteMessages(ctx, kafka.Message{
+			Key:   []byte(key),
+			Value: data,
+		})
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("kafka write: %w", err)
+		}
+		return http.StatusNoContent, nil
 	}
 
 	var serial int
