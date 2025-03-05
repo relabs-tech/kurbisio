@@ -182,7 +182,7 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 
 	// Check that reader role does not allow to create an artefact
 	var artefacts []Artefact
-	status, err := readerClient.RawPost(releaseArtefactsString, Artefact{}, nil)
+	status, _ := readerClient.RawPost(releaseArtefactsString, Artefact{}, nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("Expecting unauthorized access, got '%v'", status)
 	}
@@ -237,7 +237,7 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 
 	// We check that the list operation returns download urls if with_companion_urls=true
 	artefacts = []Artefact{}
-	status, err = readerClient.RawGet(releaseArtefactsString+"?with_companion_urls=true&order=asc", &artefacts)
+	_, err = readerClient.RawGet(releaseArtefactsString+"?with_companion_urls=true&order=asc", &artefacts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	var data []byte
-	status, _, err := readerClient.RawGetBlobWithHeader(artefacts[0].DownloadURL, map[string]string{}, &data)
+	status, _, _ := readerClient.RawGetBlobWithHeader(artefacts[0].DownloadURL, map[string]string{}, &data)
 	if status != http.StatusNotFound {
 		t.Fatalf("Expecting deleted file")
 	}
@@ -415,11 +415,11 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, _, err = readerClient.RawGetBlobWithHeader(artefacts[1].DownloadURL, map[string]string{}, &data)
+	status, _, _ = readerClient.RawGetBlobWithHeader(artefacts[1].DownloadURL, map[string]string{}, &data)
 	if status != http.StatusNotFound {
 		t.Fatalf("Expecting deleted file")
 	}
-	status, _, err = readerClient.RawGetBlobWithHeader(artefacts[2].DownloadURL, map[string]string{}, &data)
+	status, _, _ = readerClient.RawGetBlobWithHeader(artefacts[2].DownloadURL, map[string]string{}, &data)
 	if status != http.StatusNotFound {
 		t.Fatalf("Expecting deleted file")
 	}
@@ -441,7 +441,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	for _, a := range artefacts {
-		status, _, err = readerClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = readerClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status != http.StatusNotFound {
 			t.Fatalf("Expecting deleted file %v, got %d", a.ArtefactID, status)
 		}
@@ -463,7 +463,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	for _, a := range artefacts {
-		status, _, err = readerClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = readerClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status != http.StatusNotFound {
 			t.Fatalf("Expecting deleted file")
 		}
@@ -481,7 +481,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	for _, a := range artefacts1 {
-		status, _, err = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status > 299 {
 			t.Fatalf("Expecting OK, got %v", status)
 		}
@@ -497,7 +497,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	for _, a := range artefacts2 {
-		status, _, err = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status > 299 {
 			t.Fatalf("Expecting OK, got %v", status)
 		}
@@ -508,13 +508,13 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		t.Fatal(err)
 	}
 	for _, a := range artefacts1 {
-		status, _, err = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status != http.StatusNotFound {
 			t.Fatalf("Expecting deleted file")
 		}
 	}
 	for _, a := range artefacts2 {
-		status, _, err = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
+		status, _, _ = externalClient.RawGetBlobWithHeader(a.DownloadURL, map[string]string{}, &data)
 		if status > 299 {
 			t.Fatalf("Expecting OK, got %v", status)
 		}

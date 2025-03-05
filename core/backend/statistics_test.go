@@ -90,7 +90,7 @@ func TestStatistics(t *testing.T) {
 	for _, r := range []string{"a", "blob"} {
 		s := getResourceByName(r, stats)
 		if s == nil {
-			t.Fatal("No statistics found about resource: ", *s)
+			t.Fatalf("No statistics found about resource: %s", r)
 		}
 		if s.Count < int64(numberOfElements) {
 			t.Fatalf("Count is expected larger than %d for resource %v", numberOfElements, *s)

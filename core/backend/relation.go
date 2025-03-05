@@ -27,17 +27,6 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-type stringlist []string
-
-func (list stringlist) contains(s string) bool {
-	for _, l := range list {
-		if l == s {
-			return true
-		}
-	}
-	return false
-}
-
 func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
 	schema := b.db.Schema
 	leftResources := strings.Split(rc.Left, "/")

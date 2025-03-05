@@ -7,6 +7,7 @@
 package backend
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -31,7 +32,7 @@ import (
 func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
-	nillog := logger.FromContext(nil)
+	nillog := logger.FromContext(context.Background())
 	nillog.Debugln("create blob:", resource)
 	if rc.Description != "" {
 		nillog.Debugln("  description:", rc.Description)
@@ -287,7 +288,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				err = fmt.Errorf("unknown")
 			}
 			if err != nil {
-				nillog.Errorf("parameter '" + key + "': " + err.Error())
+				nillog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -327,10 +328,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		response := []interface{}{}
 		defer rows.Close()
@@ -372,7 +371,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	}
 
-	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -539,7 +538,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		i++
 
 		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
-			param, _ := params[columns[i]]
+			param := params[columns[i]]
 			if param == "all" || len(param) == 0 {
 				var id, null uuid.UUID
 				if j, ok := metaJSON[columns[i]]; ok {
@@ -693,7 +692,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		var i int
 
 		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
-			param, _ := params[columns[i]]
+			param := params[columns[i]]
 			if param == "all" || len(param) == 0 {
 				var id, null uuid.UUID
 				if j, ok := metaJSON[columns[i]]; ok {
@@ -790,7 +789,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			return
 		}
 		log.Printf("%v\n", values)
-		log.Printf(query)
+		log.Println(query)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -911,7 +910,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			}
 
 			if err != nil {
-				rlog.Errorf("parameter '" + key + "': " + err.Error())
+				rlog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1042,9 +1041,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			for i := 0; i < propertiesIndex; i++ {
 				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 			}
-			if err != nil {
-				rlog.WithError(err).Infof("Error 5324: deleting externally stored data `%s`", key)
-			}
 			err := b.KssDriver.DeleteAllWithPrefix(key)
 			if err != nil {
 				rlog.WithError(err).Errorf("Could not DeleteAllWithPrefix key `%s`", key)
@@ -1090,7 +1086,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	// LIST
 	router.HandleFunc(listRoute, func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-		listWithAuth(w, r, nil)
+		listWithAuth(w, r)
 	}).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE

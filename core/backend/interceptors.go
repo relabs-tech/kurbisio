@@ -49,7 +49,7 @@ func (b *Backend) HandleResourceRequest(resource string,
 	handler func(ctx context.Context, request Request, data []byte) ([]byte, error),
 	operations ...core.Operation) {
 	if !b.hasCollectionOrSingleton(resource) {
-		logger.FromContext(nil).Fatalf("handle resource request for %s: no such collection or singleton", resource)
+		logger.FromContext(context.Background()).Fatalf("handle resource request for %s: no such collection or singleton", resource)
 	}
 
 	if len(operations) == 0 {
@@ -58,9 +58,9 @@ func (b *Backend) HandleResourceRequest(resource string,
 	for _, operation := range operations {
 		key := requestKey(resource, operation)
 		if _, ok := b.interceptors[key]; ok {
-			logger.FromContext(nil).Fatalf("resource request handler for %s already installed", key)
+			logger.FromContext(context.Background()).Fatalf("resource request handler for %s already installed", key)
 		}
-		logger.FromContext(nil).Debugf("install resource request handler for %s", key)
+		logger.FromContext(context.Background()).Debugf("install resource request handler for %s", key)
 		b.interceptors[key] = handler
 	}
 }

@@ -7,6 +7,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/sha1"
 	"embed"
 	"fmt"
@@ -23,9 +24,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
-
-	// To allow the use of go:embed
-	_ "embed"
 
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
@@ -294,7 +292,7 @@ func (r byDepth) Less(i, j int) bool {
 // handleResourceRoutes adds all necessary handlers for the specified configuration
 func (b *Backend) handleResourceRoutes() {
 
-	nillog := logger.FromContext(nil)
+	nillog := logger.FromContext(context.Background())
 	nillog.Debugln("backend: handle resource routes")
 	router := b.router
 
@@ -511,7 +509,7 @@ func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
 		matchPrefix += "/" + core.Plural(s) + "/" + s + "_id"
 	}
 
-	rlog := logger.FromContext(nil)
+	rlog := logger.FromContext(context.Background())
 	rlog.Debugln("create shortcut from", shortcut, "to", targetDoc)
 	rlog.Debugln("  handle shortcut routes: "+prefix+"[/...]", "GET,POST,PUT,PATCH,DELETE")
 
