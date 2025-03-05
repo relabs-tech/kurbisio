@@ -7,6 +7,7 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -122,13 +123,13 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 	queryStatisticsFromDB := func(stats *[]ResourceStatistics, resources sort.StringSlice) {
 		*stats = []ResourceStatistics{} // do not return null in json, but empty array
 		for _, resource := range resources {
-			if len(filter) > 0 && filter[resource] == false {
+			if len(filter) > 0 && !filter[resource] {
 				continue
 			}
 			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
 			var size, count int64
 			if err := row.Scan(&size, &count); err != nil {
-				logger.FromContext(nil).WithError(err).Errorln("Error 4028: Scan")
+				logger.FromContext(context.Background()).WithError(err).Errorln("Error 4028: Scan")
 				http.Error(w, "Error 4028: ", http.StatusInternalServerError)
 				return
 			}

@@ -17,6 +17,9 @@ import (
 
 func TestEtagGetBlob(t *testing.T) {
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	if err != nil {
+		t.Fatal(err)
+	}
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -71,7 +74,7 @@ func TestEtagGetBlob(t *testing.T) {
 			// Expires, and Vary.
 			fields := []string{"Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Vary"}
 			for _, f := range fields {
-				if h.Get(f) != h.Get(f) {
+				if firstHeader.Get(f) != h.Get(f) {
 					t.Fatalf("Expected same headers field for %s, got: '%s' instead of '%s'", f, h.Get(f), firstHeader.Get(f))
 				}
 			}
@@ -85,6 +88,9 @@ func TestEtagGetBlob(t *testing.T) {
 
 func TestEtagGetBlobCollection(t *testing.T) {
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	if err != nil {
+		t.Fatal(err)
+	}
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -152,6 +158,7 @@ func TestEtagGetBlobCollection(t *testing.T) {
 // PUT request, the ETag is modified
 func TestEtagBlobRegenerated(t *testing.T) {
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	assert.Nil(t, err)
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -193,6 +200,7 @@ func TestEtagBlobRegenerated(t *testing.T) {
 // a POST request, then ETag is modified
 func TestEtagBlobCollectionRegenerated(t *testing.T) {
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	assert.Nil(t, err)
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -235,13 +243,15 @@ func TestBlobExternalID(t *testing.T) {
 	}
 
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	assert.Nil(t, err)
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
 		"External-Id":        "1",
 	}
+	_, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
+	assert.Nil(t, err)
 	status, err := testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
-	status, err = testService.client.RawPostBlob("/blob3s", header, blobData, &B3{})
 	assert.Equal(t, http.StatusConflict, status, err)
 }
 

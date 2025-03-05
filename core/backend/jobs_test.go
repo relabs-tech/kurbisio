@@ -89,7 +89,7 @@ func TestEventRetry(t *testing.T) {
 	timeout := 10 * time.Second
 
 	for {
-		if time.Now().Sub(t0) > timeout {
+		if time.Since(t0) > timeout {
 			break
 		}
 		select {
@@ -168,7 +168,7 @@ func TestRateLimitEvent(t *testing.T) {
 	timeout := 4 * time.Second
 
 	for {
-		if time.Now().Sub(t0) > timeout {
+		if time.Since(t0) > timeout {
 			break
 		}
 		if len(events) == numExpectedEvents {
@@ -231,7 +231,7 @@ func TestRateLimitEventRetry(t *testing.T) {
 	timeout := 5 * time.Second
 
 	for {
-		if time.Now().Sub(t0) > timeout {
+		if time.Since(t0) > timeout {
 			break
 		}
 		if len(events) == numExpectedEvents {
@@ -291,7 +291,7 @@ func TestRateLimitEventMaxAge(t *testing.T) {
 	timeout := 5 * time.Second
 
 	for {
-		if time.Now().Sub(t0) > timeout {
+		if time.Since(t0) > timeout {
 			break
 		}
 		if len(events) == numExpectedEvents {
@@ -373,7 +373,7 @@ func TestRaiseEventRecursive(t *testing.T) {
 	timeout := 3 * time.Second
 
 	for {
-		if time.Now().Sub(t0) > timeout {
+		if time.Since(t0) > timeout {
 			break
 		}
 		if len(events) == numExpectedEvents {
