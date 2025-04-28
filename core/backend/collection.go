@@ -32,7 +32,7 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration, singleton bool) {
+func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConfiguration, singleton bool) {
 	schema := b.db.Schema
 	resource := rc.Resource
 
