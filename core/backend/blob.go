@@ -29,7 +29,7 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
+func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 	schema := b.db.Schema
 	resource := rc.Resource
 	nillog := logger.FromContext(context.Background())
