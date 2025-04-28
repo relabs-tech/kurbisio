@@ -749,15 +749,14 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	return status, res.Header, nil
 }
 
-// RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// RawPostWithHeader posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
 //
 // body can also be a []byte, result can also be raw *[]byte.
 // result can be nil.
-func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
-
+func (c Client) RawPostWithHeader(path string, headers map[string]string, body interface{}, result interface{}) (int, error) {
 	var err error
 	j, ok := body.([]byte)
 	if !ok {
@@ -768,6 +767,11 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 	}
 
 	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+
+	for key, value := range headers {
+		r.Header.Add(key, value)
+	}
+
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -800,6 +804,17 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 		}
 	}
 	return status, err
+}
+
+// RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// The path can be extend with query strings.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
+func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
+	return c.RawPostWithHeader(path, nil, body, result)
 }
 
 // RawPostBlob posts a resource to path. Expects http.StatusCreated as response, otherwise it will
