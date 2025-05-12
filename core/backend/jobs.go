@@ -451,8 +451,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 		event.Priority = PriorityBackground
 	}
 
-	now := time.Now()
-	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, &now, false)
+	status, err := b.raiseEventWithResourceInternal(r.Context(), "event", event, nil, false)
 
 	if err != nil {
 		http.Error(w, err.Error(), status)
