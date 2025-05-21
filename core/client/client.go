@@ -43,6 +43,8 @@ type Client struct {
 	token      string
 	auth       *access.Authorization
 	ctx        context.Context
+
+	defaultHeaders map[string]string
 }
 
 // NewWithRouter creates a client to make pseudo-REST requests to the backend,
@@ -52,8 +54,15 @@ type Client struct {
 // WithContext() specifies a different base context all together.
 func NewWithRouter(router *mux.Router) Client {
 	return Client{
-		router: router,
+		router:         router,
+		defaultHeaders: map[string]string{},
 	}
+}
+
+// WithHeader returns a new client with a default header added
+func (c Client) WithHeader(key string, value string) Client {
+	c.defaultHeaders[key] = value
+	return c
 }
 
 // NewWithURL creates a client to make REST requests to the backend
@@ -106,7 +115,7 @@ func (c Client) WithContext(ctx context.Context) Client {
 	return c
 }
 
-func (c Client) context() context.Context {
+func (c Client) Context() context.Context {
 	ctx := c.ctx
 	if c.ctx == nil {
 		ctx = context.Background()
@@ -601,7 +610,10 @@ func (p Page) Next() Page {
 // result can be map[string]interface{} or a raw *[]byte.
 // result can be nil.
 func (c Client) RawGet(path string, result interface{}) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 
 	var err error
 	var res *http.Response
@@ -650,7 +662,11 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 // result can be map[string]interface{} or a raw *[]byte.
 // result can be nil.
 func (c Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
+
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -702,7 +718,10 @@ func (c Client) RawGetWithHeader(path string, header map[string]string, result i
 //
 // Returns the actual http status code and the return header
 func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blob *[]byte) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -761,7 +780,10 @@ func (c Client) RawPostWithHeader(path string, headers map[string]string, body i
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 
 	for key, value := range headers {
 		r.Header.Add(key, value)
@@ -818,7 +840,10 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 // The path can be extend with query strings.
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -873,7 +898,10 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPut, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -920,7 +948,10 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 // result can be nil.
 func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -972,7 +1003,10 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPatch, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPatch, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -1012,7 +1046,10 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 //
 // Returns the actual http status code.
 func (c Client) RawDelete(path string) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodDelete, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var err error
 	var res *http.Response
 	var resBody []byte
@@ -1059,6 +1096,10 @@ func (c Client) PostMultipart(url string, data []byte) (status int, err error) {
 	if err != nil {
 		return
 	}
+	for key, value := range c.defaultHeaders {
+		req.Header.Add(key, value)
+	}
+
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	var res *http.Response
