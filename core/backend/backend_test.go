@@ -118,7 +118,11 @@ var configurationJSON string = `{
 			"foo_value":42,
 			"foo_bool":true
 		}
-	  } 
+	  },
+      {
+	  	"resource":"recurser"
+	  }
+ 
 	],
 	"singletons": [
 	  {
@@ -379,7 +383,7 @@ func TestCollectionA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := testService.client.RawGet("/as/"+a.AID.String(), &aGet)
+	status, _ := testService.client.RawGet("/as/"+a.AID.String(), &aGet)
 	if status != http.StatusNotFound {
 		t.Fatal("not deleted")
 	}
@@ -437,7 +441,7 @@ func TestResourceBCD(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, _ = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -499,7 +503,7 @@ func TestResourceBCD_Shortcuts(t *testing.T) {
 	}
 	// cross check that the cascade worked: deleting b has also deleted c and d
 	dGet := D{}
-	status, err = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
+	status, _ = testService.client.RawGet("/bs/"+b.BID.String()+"/cs/"+c.CID.String()+"/ds/"+d.DID.String(), &dGet)
 	if status != http.StatusNotFound {
 		t.Fatal("cascade delete failed")
 		if err != nil {
@@ -576,7 +580,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 	sUpdateResult := S{}
 
-	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,11 +592,11 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// now update with direct property update
-	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s/name/updated_again", nil, nil)
+	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s/name/updated_again", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sUpdateResult)
+	_, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,11 +608,11 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// now update with direct property update, but flip the ids
-	status, err = testService.client.RawPut("/os/all/ses/"+o.OID.String()+"/name/third_update", nil, nil)
+	_, err = testService.client.RawPut("/os/all/ses/"+o.OID.String()+"/name/third_update", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = testService.client.RawGet("/os/all/ses/"+o.OID.String(), &sUpdateResult)
+	_, err = testService.client.RawGet("/os/all/ses/"+o.OID.String(), &sUpdateResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +627,7 @@ func TestSingletonOS(t *testing.T) {
 
 	// // put another update to s and try to give it a new id. This will fail.
 	sUpdate.OID = newUID
-	status, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
+	_, err = testService.client.RawPut("/os/"+o.OID.String()+"/s", &sUpdate, &sUpdateResult)
 	if err == nil {
 		t.Fatal("was allowed to change the primary id")
 	}
@@ -639,7 +643,7 @@ func TestSingletonOS(t *testing.T) {
 
 	// cross check that the delete worked
 	sGet := S{}
-	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
+	status, _ = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNoContent {
 		t.Fatal("delete failed, got status ", status)
 		if err != nil {
@@ -667,7 +671,7 @@ func TestSingletonOS(t *testing.T) {
 	}
 
 	// cross check that the cascade worked: deleting o has also deleted s
-	status, err = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
+	status, _ = testService.client.RawGet("/os/"+o.OID.String()+"/s", &sGet)
 	if status != http.StatusNotFound {
 		t.Fatalf("cascade delete failed")
 		if err != nil {
@@ -862,7 +866,7 @@ func TestBlob(t *testing.T) {
 		t.Fatal("no blob_id in meta data")
 	}
 
-	if bytes.Compare(data, dataReturn) != 0 {
+	if !bytes.Equal(data, dataReturn) {
 		t.Fatal("returned binary data is not equal")
 	}
 
@@ -892,7 +896,7 @@ func TestBlob(t *testing.T) {
 		t.Fatal("got meta data for hello, but should have been cleared: " + uHeaderReturn.Get("Kurbisio-Meta-Data"))
 	}
 
-	if bytes.Compare(uData, uDataReturn) != 0 {
+	if !bytes.Equal(uData, uDataReturn) {
 		t.Fatal("returned binary data is not equal")
 	}
 
@@ -1400,6 +1404,9 @@ func TestPaginationBlob(t *testing.T) {
 	numberOfElements := 10
 	beforeCreation := time.Now().UTC().Add(-time.Second)
 	blobData, err := os.ReadFile("./testdata/dalarubettrich.png")
+	if err != nil {
+		t.Fatal(err)
+	}
 	header := map[string]string{
 		"Content-Type":       "image/png",
 		"Kurbisio-Meta-Data": `{"hello":"world"}`,
@@ -1533,4 +1540,130 @@ func TestScheduleEvents(t *testing.T) {
 	ok, err = b.CancelEvent(ctx, event)
 	assert.Nil(t, err, "cancel handled event")
 	assert.Equal(t, true, ok, "cancel handled event")
+}
+
+func TestRecursion(t *testing.T) {
+
+	type Recurser struct {
+		RecurserID uuid.UUID `json:"recurser_id"`
+		Value      int       `json:"value"`
+		CopyValue  int       `json:"copy_value"`
+	}
+
+	wasCalledWithIdenticalValues := false
+
+	changeHandler := func(ctx context.Context, n backend.Notification) error {
+		client := testService.client
+		var object Recurser
+		err := json.Unmarshal(n.Payload, &object)
+		if err != nil {
+			return err
+		}
+
+		if object.Value == object.CopyValue {
+			wasCalledWithIdenticalValues = true
+			return nil
+		}
+
+		object.CopyValue = object.Value
+		nid := object.RecurserID.String()
+		_, err = client.RawPut("/recursers/"+nid, &object, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	}
+
+	backend := testService.backend
+
+	backend.HandleResourceNotification("recurser", changeHandler, core.OperationCreate, core.OperationUpdate)
+
+	client := testService.client
+	// create root object
+	nid := uuid.New()
+	nreq := Recurser{
+		RecurserID: nid,
+		Value:      1,
+	}
+	var nres Recurser
+	_, err := client.RawPut("/recursers", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// do notification processing
+	backend.ProcessJobsSync(0)
+
+	var result Recurser
+	_, err = client.RawGet("/recursers/"+nid.String(), &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 1, result.CopyValue)
+
+	assert.True(t, wasCalledWithIdenticalValues)
+
+}
+
+func TestRecursionSilent(t *testing.T) {
+
+	type Recurser struct {
+		RecurserID uuid.UUID `json:"recurser_id"`
+		Value      int       `json:"value"`
+		CopyValue  int       `json:"copy_value"`
+	}
+
+	wasCalledWithIdenticalValues := false
+
+	changeHandler := func(ctx context.Context, n backend.Notification) error {
+		client := testService.client
+		var object Recurser
+		err := json.Unmarshal(n.Payload, &object)
+		if err != nil {
+			return err
+		}
+
+		if object.Value == object.CopyValue {
+			wasCalledWithIdenticalValues = true
+			return nil
+		}
+
+		object.CopyValue = object.Value
+		nid := object.RecurserID.String()
+		_, err = client.RawPut("/recursers/"+nid+"?silent=true", &object, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nil
+	}
+
+	backend := testService.backend
+
+	backend.HandleResourceNotification("recurser", changeHandler, core.OperationCreate, core.OperationUpdate)
+
+	client := testService.client
+	// create root object
+	nid := uuid.New()
+	nreq := Recurser{
+		RecurserID: nid,
+		Value:      1,
+	}
+	var nres Recurser
+	_, err := client.RawPut("/recursers", &nreq, &nres)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// do notification processing
+	backend.ProcessJobsSync(0)
+
+	var result Recurser
+	_, err = client.RawGet("/recursers/"+nid.String(), &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 1, result.CopyValue)
+
+	assert.False(t, wasCalledWithIdenticalValues)
+
 }

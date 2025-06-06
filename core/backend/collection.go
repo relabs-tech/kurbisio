@@ -8,6 +8,7 @@ package backend
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	schema := b.db.Schema
 	resource := rc.Resource
 
-	nillog := logger.FromContext(nil)
+	nillog := logger.FromContext(context.Background())
 	if singleton {
 		nillog.Debugln("create singleton collection:", resource)
 	} else {
@@ -80,7 +81,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	dependencies := resources[:len(resources)-1]
 
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
-	var createColumns, createColumnsLog []string
+	var createColumns []string
 	var columns []string
 	searchableColumns := []string{}
 
@@ -88,20 +89,16 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		columns = append(columns, this+"_id")
 		searchableColumns = append(searchableColumns, this+"_id")
 		createColumns = append(createColumns, this+"_id uuid NOT NULL DEFAULT uuid_generate_v4() PRIMARY KEY")
-		createColumnsLog = append(createColumnsLog, this+"_id uuid NOT NULL")
 	}
 
 	createColumns = append(createColumns, "timestamp timestamp NOT NULL DEFAULT now()")
-	createColumnsLog = append(createColumnsLog, "timestamp timestamp NOT NULL DEFAULT now()")
 	createColumns = append(createColumns, "revision INTEGER NOT NULL DEFAULT 1")
-	createColumnsLog = append(createColumnsLog, "revision INTEGER NOT NULL")
 
 	var foreignColumns []string
 	for i := len(dependencies) - 1; i >= 0; i-- {
 		that := dependencies[i]
 		createColumn := fmt.Sprintf("%s_id uuid NOT NULL", that)
 		createColumns = append(createColumns, createColumn)
-		createColumnsLog = append(createColumnsLog, createColumn)
 		columns = append(columns, that+"_id")
 		searchableColumns = append(searchableColumns, that+"_id")
 		foreignColumns = append(foreignColumns, that+"_id")
@@ -127,7 +124,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
-	createColumnsLog = append(createColumnsLog, "properties json NOT NULL")
 	// query to create all indices after the table creation
 	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
 		"sort_index_"+this+"_timestamp",
@@ -475,7 +471,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 			parameters[key] = value
 			if err != nil {
-				nillog.Errorf("parameter '" + key + "': " + err.Error())
+				nillog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -643,7 +639,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	}
 
-	listWithAuth := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	listWithAuth := func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
@@ -671,7 +667,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 					return
 				}
 			case "children":
-				break
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 				return
@@ -830,7 +825,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		for key, array := range urlQuery {
 			switch key {
 			case "nointercept":
-				break
 			case "children":
 				if data != nil { // data was changed in interceptor
 					err = json.Unmarshal(jsonData, &object)
@@ -1139,7 +1133,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			}
 
 			if err != nil {
-				rlog.Errorf("parameter '" + key + "': " + err.Error())
+				rlog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -1289,7 +1283,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			// zero uuid counts as no uuid for creation
 			ok = ok && value != "00000000-0000-0000-0000-000000000000"
 
-			param, _ := params[k]
+			param := params[k]
 			// identifiers in the url parameters must match the ones in the json document
 			if ok && param != "all" && param != value.(string) {
 				http.Error(w, "illegal "+k, http.StatusBadRequest)
@@ -1354,7 +1348,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if data != nil {
-				json.Unmarshal(data, &bodyJSON)
+				err = json.Unmarshal(data, &bodyJSON)
 				if err != nil {
 					rlog.WithError(err).Error("Error 2733: interceptor")
 					http.Error(w, "Error 2733", http.StatusInternalServerError)
@@ -1636,7 +1630,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				retried = true
 				goto Retry
 			}
-			err = tx.Rollback()
+			tx.Rollback()
 			http.Error(w, rec.Body.String(), rec.Code)
 			return
 		}
@@ -1742,7 +1736,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 			if data != nil {
-				json.Unmarshal(data, &bodyJSON)
+				err = json.Unmarshal(data, &bodyJSON)
 				if err != nil {
 					tx.Rollback()
 					rlog.WithError(err).Errorf("Error 4738: interceptor")
@@ -1921,7 +1915,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 	// LIST
 	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-		listWithAuth(w, r, nil)
+		listWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
 	// DELETE

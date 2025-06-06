@@ -203,7 +203,7 @@ func TestRelation(t *testing.T) {
 	}
 
 	// Check that role2 allows to delete a/b
-	status, err = role2Client.RawDelete(fmt.Sprintf("/as/%s/bs/%s", a.AID, b.BID))
+	_, err = role2Client.RawDelete(fmt.Sprintf("/as/%s/bs/%s", a.AID, b.BID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestRelationNamed(t *testing.T) {
 	}
 
 	// Check that role2 allows to delete a/b
-	status, err = role2Client.RawDelete(fmt.Sprintf("/myrelation/as/%s/bs/%s", a.AID, b.BID))
+	_, err = role2Client.RawDelete(fmt.Sprintf("/myrelation/as/%s/bs/%s", a.AID, b.BID))
 	if err != nil {
 		t.Fatal(err)
 	}

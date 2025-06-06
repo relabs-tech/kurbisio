@@ -462,7 +462,7 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 	rlog.Debugf("raised event %s on resource \"%s\"", event.Type, resource)
 }
 
-func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
+func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
 
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
@@ -485,7 +485,7 @@ func (b *Backend) pipelineWorker(n int, jobs <-chan job, ready chan<- bool, time
 		})
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
-		ticker := time.NewTicker(minTimeout - 5*time.Second)
+		ticker := time.NewTicker(max(time.Second, minTimeout-5*time.Second))
 		tickerDone := make(chan bool)
 		go func() {
 			for {
@@ -667,7 +667,7 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 //
 // Jobs will be tried up to 3 times according to the timeouts specified.
 func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]time.Duration) bool {
-	rlog := logger.FromContext(nil)
+	rlog := logger.FromContext(context.Background())
 	startTime := time.Now()
 
 	getJob := func(priority EventPriority) (j job, err error) {
@@ -733,7 +733,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	jobs := make(chan job, b.pipelineConcurrency)
 	ready := make(chan bool, b.pipelineConcurrency)
 	for i := 0; i < b.pipelineConcurrency; i++ {
-		go b.pipelineWorker(i, jobs, ready, timeouts)
+		go b.pipelineWorker(jobs, ready, timeouts)
 	}
 
 	var maxedOut bool
@@ -752,7 +752,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 		<-ready
 		readyCount++
 
-		if maxedOut = max > 0 && time.Now().Sub(startTime) >= max; !maxedOut {
+		if maxedOut = max > 0 && time.Since(startTime) >= max; !maxedOut {
 			// we have time for more jobs, check if there are any in the database
 			job, err := getJob(PriorityForeground)
 			if err == nil {
@@ -1088,11 +1088,11 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 func (b *Backend) HandleResourceNotification(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
 
 	if !b.hasCollectionOrSingleton(resource) {
-		logger.FromContext(nil).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
+		logger.FromContext(context.Background()).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
 	}
 
 	if !b.hasCollectionOrSingleton(resource) {
-		logger.FromContext(nil).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
+		logger.FromContext(context.Background()).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
 	}
 
 	if len(operations) == 0 {
@@ -1100,13 +1100,13 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 	}
 	for _, operation := range operations {
 		if operation == core.OperationRead || operation == core.OperationList {
-			logger.FromContext(nil).Fatalf("resource notifications only work for mutable operations. Do you want HandleResourceRequest instead?")
+			logger.FromContext(context.Background()).Fatalf("resource notifications only work for mutable operations. Do you want HandleResourceRequest instead?")
 		}
 		if operation == core.OperationCompanionUploaded {
 			for _, c := range b.config.Collections {
 				if c.Resource == resource {
 					if !c.WithCompanionFile {
-						logger.FromContext(nil).Fatalf("handle resource notification for %s: operation %s only supported when companion feature is enabled", resource, operation)
+						logger.FromContext(context.Background()).Fatalf("handle resource notification for %s: operation %s only supported when companion feature is enabled", resource, operation)
 					}
 					break
 				}
@@ -1115,9 +1115,9 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 
 		key := notificationJobKey(resource, operation)
 		if _, ok := b.callbacks[key]; ok {
-			logger.FromContext(nil).Fatalf("resource notification handler for %s already installed", key)
+			logger.FromContext(context.Background()).Fatalf("resource notification handler for %s already installed", key)
 		}
-		logger.FromContext(nil).Debugf("install resource notification handler for %s", key)
+		logger.FromContext(context.Background()).Debugf("install resource notification handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
 	}
 }
@@ -1129,10 +1129,6 @@ func notificationJobKey(resource string, operation core.Operation) string {
 
 func eventJobKey(event string) string {
 	return "event: " + event
-}
-
-func taskJobKey(event string) string {
-	return "task: " + event
 }
 
 func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
