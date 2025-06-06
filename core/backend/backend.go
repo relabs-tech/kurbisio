@@ -25,6 +25,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	// To allow the use of go:embed
+	_ "embed"
+
+	kafka "github.com/segmentio/kafka-go"
+
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
 	"github.com/relabs-tech/kurbisio/core/backend/kss"
@@ -69,6 +74,10 @@ type Backend struct {
 	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery,
 	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery [2]string
 
+	kafkaBrokers       []string
+	kafkaWriterByTopic map[string]*kafka.Writer
+	kafkaReaderByTopic map[string]*kafka.Reader
+
 	rateLimitQuery string
 
 	processJobsAsyncRuns    bool
@@ -86,6 +95,8 @@ type Builder struct {
 	Config string
 	// DB is a postgres database. This is mandatory.
 	DB *csql.DB
+
+	KafkaBrokers []string
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// Optional public URL of the deployment
@@ -167,6 +178,12 @@ func New(bb *Builder) *Backend {
 		collectionsAndSingletons: make(map[string]bool),
 		pipelineConcurrency:      pipelineConcurrency,
 		updateSchema:             bb.UpdateSchema,
+	}
+	if len(bb.KafkaBrokers) > 0 {
+		// enabling kafka if brokers are set
+		b.kafkaBrokers = bb.KafkaBrokers
+		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
+		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
 	}
 
 	if bb.Logger != nil {
