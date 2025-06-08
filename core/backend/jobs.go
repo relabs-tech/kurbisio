@@ -733,7 +733,8 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 				defer reader.Close()
 
 				rlog := rlog.WithField("callback_key", topic)
-				rlog = rlog.WithField("kafka_reader", reader.Config())
+				rlog = rlog.WithField("kafka_topic", reader.Config().Topic)
+				rlog = rlog.WithField("kafka_group_id", reader.Config().GroupID)
 
 				for {
 					select {
