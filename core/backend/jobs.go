@@ -1215,7 +1215,7 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 				reader := kafka.NewReader(kafka.ReaderConfig{
 					Brokers: b.kafkaBrokers,
 					GroupID: consumerGroup,
-					Topic:   "notification:" + resource,
+					Topic:   "notification." + resource,
 				})
 				b.kafkaReaderByTopic[key] = reader
 			} else {
