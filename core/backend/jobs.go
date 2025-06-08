@@ -744,7 +744,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						return
 					default:
 						m, err := reader.FetchMessage(ctx)
-						if err != nil && !errors.Is(err, context.Canceled) && err != io.EOF {
+						if err != nil && !errors.Is(err, context.DeadlineExceeded) && err != io.EOF {
 							rlog.WithError(err).Errorln("could not fetch message from kafka")
 							continue
 						}
