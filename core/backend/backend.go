@@ -96,7 +96,8 @@ type Builder struct {
 	// Config is the JSON description of all resources and relations. This is mandatory.
 	Config string
 	// DB is a postgres database. This is mandatory.
-	DB *csql.DB
+	DB    *csql.DB
+	DBDSN string // Data Source Name for the database, used for goharvest
 
 	KafkaBrokers []string
 	// Router is a mux router. This is mandatory.
@@ -206,7 +207,7 @@ func New(bb *Builder) *Backend {
 			BaseKafkaConfig: goharvest.KafkaConfigMap{
 				"bootstrap.servers": strings.Join(bb.KafkaBrokers, ","),
 			},
-			DataSource:  "host=fitness-db.ccwoilwmd1az.eu-central-1.rds.amazonaws.com port=5432 user=postgres dbname=twaiv_testing sslmode=disable",
+			DataSource:  bb.DBDSN,
 			OutboxTable: "_resource_notification_outbox_",
 		}
 
