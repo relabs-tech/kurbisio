@@ -901,7 +901,7 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 			reader := kafka.NewReader(kafka.ReaderConfig{
 				Brokers: b.kafkaBrokers,
 				GroupID: cfg.consumerGroup,
-				Topic:   event,
+				Topic:   "event." + event,
 			})
 			b.kafkaReaderByTopic[key] = reader
 		} else {
