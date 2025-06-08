@@ -87,6 +87,7 @@ type job struct {
 	Priority         EventPriority
 	kafkaReader      *kafka.Reader
 	kafkaMsg         *kafka.Message
+	kafkaCallbackKey string // only set if this job was read from kafka
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
@@ -528,6 +529,9 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			case "notification":
 				notification := jb.notification()
 				key = notificationJobKey(notification.Resource, notification.Operation)
+				if jb.kafkaCallbackKey != "" {
+					key = jb.kafkaCallbackKey
+				}
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(ctx, notification)
 				} else {
@@ -536,6 +540,9 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			case "event", "queued-event":
 				event := jb.event()
 				key = eventJobKey(event.Type)
+				if jb.kafkaCallbackKey != "" {
+					key = jb.kafkaCallbackKey
+				}
 
 				if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
 					// we have a rate limited event. We must reschedule if a) the event has an implicit
@@ -731,6 +738,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					}
 					j.kafkaReader = reader
 					j.kafkaMsg = &m
+					j.kafkaCallbackKey = topic
 					kafkaJobs <- j
 				}
 			}(topic, reader)
