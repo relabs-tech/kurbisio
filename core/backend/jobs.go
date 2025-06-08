@@ -1156,7 +1156,7 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 		var kafkaHashBalancer kafka.Hash
 		w = &kafka.Writer{
 			Addr:  kafka.TCP(b.kafkaBrokers...),
-			Topic: j.Type,
+			Topic: "event." + j.Type,
 			Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
 				// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
 				m.Key = []byte(strings.Split(string(m.Key), "_")[0])
