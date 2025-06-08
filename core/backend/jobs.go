@@ -9,6 +9,7 @@ package backend
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -743,9 +744,13 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						return
 					default:
 						m, err := reader.FetchMessage(ctx)
-						if err != nil {
+						if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 							rlog.WithError(err).Errorln("could not fetch message from kafka")
 							continue
+						}
+						if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+							rlog.Debugf("kafka reader for topic %s finished", topic)
+							return
 						}
 
 						var j job
@@ -758,9 +763,6 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						j.kafkaMsg = &m
 						j.kafkaCallbackKey = topic
 						kafkaJobs <- j
-					}
-					if max == 0 {
-						break
 					}
 				}
 			}(topic, reader)
