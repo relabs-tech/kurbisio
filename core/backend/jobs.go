@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -717,32 +718,50 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	startTime := time.Now()
 
 	var kafkaJobs chan job
+	kafkaJobsWg := &sync.WaitGroup{}
 	if len(b.kafkaReaderByTopic) > 0 {
 		kafkaJobs = make(chan job, b.pipelineConcurrency)
+		var timeoutCh <-chan time.Time
+		if max > 0 {
+			timeoutCh = time.After(max)
+		}
 
 		for topic, reader := range b.kafkaReaderByTopic {
+			kafkaJobsWg.Add(1)
 			go func(topic string, reader *kafka.Reader) {
+				defer kafkaJobsWg.Done()
+				defer reader.Close()
+
 				rlog := rlog.WithField("callback_key", topic)
 				rlog = rlog.WithField("kafka_reader", reader.Config())
 
-				defer reader.Close()
 				for {
-					m, err := reader.FetchMessage(context.Background())
-					if err != nil {
-						rlog.WithError(err).Errorln("could not fetch message from kafka")
-						continue
-					}
+					select {
+					case <-timeoutCh:
+						rlog.Debugf("kafka reader for topic %s timed out", topic)
+						return
+					default:
+						m, err := reader.FetchMessage(context.Background())
+						if err != nil {
+							rlog.WithError(err).Errorln("could not fetch message from kafka")
+							continue
+						}
 
-					var j job
-					err = json.Unmarshal(m.Value, &j)
-					if err != nil {
-						rlog.WithError(err).Errorln("could not unmarshal message from kafka")
-						continue
+						var j job
+						err = json.Unmarshal(m.Value, &j)
+						if err != nil {
+							rlog.WithError(err).Errorln("could not unmarshal message from kafka")
+							continue
+						}
+						j.kafkaReader = reader
+						j.kafkaMsg = &m
+						j.kafkaCallbackKey = topic
+						kafkaJobs <- j
 					}
-					j.kafkaReader = reader
-					j.kafkaMsg = &m
-					j.kafkaCallbackKey = topic
-					kafkaJobs <- j
+					if timeoutCh == nil {
+						// if we do not have a timeout channel, we can break the loop after one message
+						break
+					}
 				}
 			}(topic, reader)
 		}
@@ -831,7 +850,8 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			}
 		}
 	}
-
+	kafkaJobsWg.Wait()
+	close(kafkaJobs)
 	close(ready)
 	close(jobs)
 	maxedOutString := ""
