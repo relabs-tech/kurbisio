@@ -714,6 +714,7 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 //
 // Jobs will be tried up to 3 times according to the timeouts specified.
 func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]time.Duration) bool {
+	ctx := context.Background()
 	rlog := logger.FromContext(context.Background())
 	startTime := time.Now()
 
@@ -721,9 +722,8 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	kafkaJobsWg := &sync.WaitGroup{}
 	if len(b.kafkaReaderByTopic) > 0 {
 		kafkaJobs = make(chan job, b.pipelineConcurrency)
-		var timeoutCh <-chan time.Time
 		if max > 0 {
-			timeoutCh = time.After(max)
+			ctx, _ = context.WithTimeout(ctx, max)
 		}
 
 		for topic, reader := range b.kafkaReaderByTopic {
@@ -737,11 +737,11 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 
 				for {
 					select {
-					case <-timeoutCh:
+					case <-ctx.Done():
 						rlog.Debugf("kafka reader for topic %s timed out", topic)
 						return
 					default:
-						m, err := reader.FetchMessage(context.Background())
+						m, err := reader.FetchMessage(ctx)
 						if err != nil {
 							rlog.WithError(err).Errorln("could not fetch message from kafka")
 							continue
@@ -758,8 +758,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						j.kafkaCallbackKey = topic
 						kafkaJobs <- j
 					}
-					if timeoutCh == nil {
-						// if we do not have a timeout channel, we can break the loop after one message
+					if max == 0 {
 						break
 					}
 				}
@@ -851,7 +850,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 		}
 	}
 	kafkaJobsWg.Wait()
-	close(kafkaJobs)
+	if kafkaJobs != nil {
+		close(kafkaJobs)
+	}
+
 	close(ready)
 	close(jobs)
 	maxedOutString := ""
