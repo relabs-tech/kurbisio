@@ -1292,19 +1292,25 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var err error
 
+	j := job{
+		Job:         "notification",
+		Type:        string(operation),
+		Resource:    resource,
+		ResourceID:  resourceID,
+		Payload:     payload,
+		Timestamp:   time.Now().UTC(),
+		ContextData: contextData,
+	}
 	if len(b.kafkaBrokers) == 0 {
 		var serial int
 		err = tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
 			"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
 			"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
-			operation,
-			resource,
-			resourceID,
-			payload,
-			time.Now().UTC(),
-			contextData,
+			j.Type, j.Resource, j.ResourceID, j.Payload, j.Timestamp, j.ContextData,
 		).Scan(&serial)
 	} else {
+		j.AttemptsLeft = 1 // we don't retry kafka jobs
+		jobBytes, _ := json.Marshal(j)
 		err = tx.QueryRow(`
 		INSERT INTO _resource_notification_outbox_ (
 			create_time, 
@@ -1315,7 +1321,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 			kafka_header_values
 		) VALUES (
 			 $1, $2, $3, $4, $5, $6
-		)`, time.Now().UTC(), "notification."+strings.ReplaceAll(resource, "/", "."), resourceID, payload, pq.StringArray([]string{"operation"}), pq.StringArray([]string{string(operation)})).Err()
+		)`, time.Now().UTC(), "notification."+strings.ReplaceAll(j.Resource, "/", "."), j.ResourceID, jobBytes, pq.StringArray([]string{"operation"}), pq.StringArray([]string{j.Type})).Err()
 	}
 	if err != nil {
 		rlog.Debugf("commitWithNotification before: tx.Rollback()")
