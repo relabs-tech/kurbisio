@@ -722,6 +722,9 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 
 		for topic, reader := range b.kafkaReaderByTopic {
 			go func(topic string, reader *kafka.Reader) {
+				rlog := rlog.WithField("callback_key", topic)
+				rlog = rlog.WithField("kafka_reader", reader.Config())
+
 				defer reader.Close()
 				for {
 					m, err := reader.FetchMessage(context.Background())
