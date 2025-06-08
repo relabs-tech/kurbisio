@@ -1313,7 +1313,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 			kafka_header_values
 		) VALUES (
 			 $1, $2, $3, $4, $5, $6
-		)`, time.Now().UTC(), "notification:"+resource, resourceID, payload, pq.StringArray([]string{"operation"}), pq.StringArray([]string{string(operation)})).Err()
+		)`, time.Now().UTC(), "notification."+resource, resourceID, payload, pq.StringArray([]string{"operation"}), pq.StringArray([]string{string(operation)})).Err()
 	}
 	if err != nil {
 		rlog.Debugf("commitWithNotification before: tx.Rollback()")
