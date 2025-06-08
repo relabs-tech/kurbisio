@@ -589,6 +589,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 
 		if jb.kafkaReader != nil && jb.kafkaMsg != nil {
 			if err != nil {
+				rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 				var serial int
 				err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
 					jb.Serial,
@@ -616,6 +617,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 					jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg)
 				}
 			} else {
+				rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 				jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg)
 			}
 		} else {
