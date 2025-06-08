@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/obsidiandynamics/goharvest"
 
 	"net/http"
 
@@ -72,7 +73,8 @@ type Backend struct {
 	// these queries exist for foreground and background
 	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
 	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery,
-	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery [2]string
+	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery,
+	jobsInsertKafkaQuery [2]string
 
 	kafkaBrokers       []string
 	kafkaWriterByTopic map[string]*kafka.Writer
@@ -184,6 +186,46 @@ func New(bb *Builder) *Backend {
 		b.kafkaBrokers = bb.KafkaBrokers
 		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
 		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
+		_, err := b.db.Exec(`
+		CREATE TABLE IF NOT EXISTS _resource_notification_outbox_ (
+			id                  BIGSERIAL PRIMARY KEY,
+			create_time         TIMESTAMP WITH TIME ZONE NOT NULL,
+			kafka_topic         VARCHAR(249) NOT NULL,
+			kafka_key           VARCHAR(1024) NOT NULL,
+			kafka_value         VARCHAR(100000),
+			kafka_header_keys   TEXT[] NOT NULL,
+			kafka_header_values TEXT[] NOT NULL,
+			leader_id           UUID
+		)`)
+		if err != nil {
+			log.Fatalf("Cannot create outbox table for kafka: %v", err)
+		}
+
+		config := goharvest.Config{
+			// TODO: make this configurable
+			BaseKafkaConfig: goharvest.KafkaConfigMap{
+				"bootstrap.servers": strings.Join(bb.KafkaBrokers, ","),
+			},
+			DataSource:  "host=fitness-db.ccwoilwmd1az.eu-central-1.rds.amazonaws.com port=5432 user=postgres dbname=twaiv_testing sslmode=disable",
+			OutboxTable: "_resource_notification_outbox_",
+		}
+
+		// Create a new harvester.
+		harvest, err := goharvest.New(config)
+		if err != nil {
+			log.Fatalf("Cannot create harvester: %v", err)
+		}
+
+		// Start harvesting in the background.
+		err = harvest.Start()
+		if err != nil {
+			log.Fatalf("Cannot start harvester: %v", err)
+		}
+
+		go func() {
+			// Wait indefinitely for the harvester to end.
+			log.Fatal(harvest.Await())
+		}()
 	}
 
 	if bb.Logger != nil {

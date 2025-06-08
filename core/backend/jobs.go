@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/lib/pq"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
@@ -84,6 +85,8 @@ type job struct {
 	ScheduledAt      *time.Time
 	ImplicitSchedule *bool
 	Priority         EventPriority
+	kafkaReader      *kafka.Reader
+	kafkaMsg         *kafka.Message
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
@@ -154,16 +157,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._sch
 	}
 
 	b.jobsInsertQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
-	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
-	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=5,context=$8,
+	(job,type,key,resource,resource_id,payload,timestamp,context, scheduled_at, attempts_left) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=$10,context=$8,
 	scheduled_at=CASE WHEN $9 is NULL AND _$JUSTTABLENAME_.implicit_schedule is true THEN _$JUSTTABLENAME_.scheduled_at ELSE $9 END::TIMESTAMP,
 	implicit_schedule=CASE WHEN $9 is NULL THEN _$JUSTTABLENAME_.implicit_schedule ELSE false END
 	RETURNING serial;`)
 
 	b.jobsInsertIfNotExistQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
-	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	(job,type,key,resource,resource_id,payload,timestamp,context, scheduled_at,attempts_left) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
 	DO NOTHING RETURNING serial;`)
 
 	b.jobsUpdateQuery = b.prioritizedJobQueries(`UPDATE $TABLENAME
@@ -207,6 +210,10 @@ RETURNING scheduled_at;
 SET scheduled_at = $2,
 implicit_schedule = FALSE
 WHERE serial = $1 RETURNING serial;`)
+
+	b.jobsInsertKafkaQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
+	(serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context, last_scheduled_at, last_implicit_schedule)
+	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (serial) DO NOTHING RETURNING serial;`)
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
@@ -463,7 +470,6 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
-
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
 		if jb.AttemptsLeft == 0 {
@@ -572,23 +578,56 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 		ticker.Stop()
 		tickerDone <- true
 
-		if err == rescheduledError {
-			rlog.Debug("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-
-		} else if err != nil {
-			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+		if jb.kafkaReader != nil && jb.kafkaMsg != nil {
+			if err != nil {
+				var serial int
+				err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
+					jb.Serial,
+					jb.Job,
+					jb.Type,
+					jb.Key,
+					jb.Resource,
+					jb.ResourceID,
+					jb.Payload,
+					jb.Timestamp,
+					jb.AttemptsLeft,
+					jb.ContextData,
+					jb.ScheduledAt,
+					jb.ImplicitSchedule,
+				).Scan(&serial)
+				if err != nil {
+					if err == sql.ErrNoRows {
+						// job was already processed, we can ignore it
+						rlog.Debug("job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial) + " was already processed")
+					} else {
+						rlog.WithError(err).Error("could not insert job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					}
+				} else {
+					rlog.Debug("successfully rescheduled job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg)
+				}
+			} else {
+				jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg)
+			}
 		} else {
-			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
-			var serial int
-			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
-			if err != nil && err != sql.ErrNoRows {
-				rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			} else if err == sql.ErrNoRows {
-				// job was recursively raised again, if we still have an impicit schedule, we must reset it
-				err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
+			if err == rescheduledError {
+				rlog.Debug("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+
+			} else if err != nil {
+				rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			} else {
+				rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+				// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
+				var serial int
+				err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
 				if err != nil && err != sql.ErrNoRows {
-					rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+				} else if err == sql.ErrNoRows {
+					// job was recursively raised again, if we still have an impicit schedule, we must reset it
+					err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
+					if err != nil && err != sql.ErrNoRows {
+						rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					}
 				}
 			}
 		}
@@ -670,35 +709,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	rlog := logger.FromContext(context.Background())
 	startTime := time.Now()
 
-	getJob := func(priority EventPriority) (j job, err error) {
-		j.Priority = priority
-		now := time.Now().UTC()
-		err = b.db.QueryRow(b.jobsUpdateQuery[priority],
-			now,
-			now.Add(timeouts[0]), // first retry timeout
-			now.Add(timeouts[1]), // second retry timeout
-			now.Add(timeouts[2]), // third retry timeout before we give up
-		).Scan(
-			&j.Serial,
-			&j.Job,
-			&j.Type,
-			&j.Key,
-			&j.Resource,
-			&j.ResourceID,
-			&j.Payload,
-			&j.Timestamp,
-			&j.AttemptsLeft,
-			&j.ContextData,
-			&j.ScheduledAt,
-			&j.ImplicitSchedule,
-		)
-		if err != nil && err != sql.ErrNoRows {
-			rlog.Errorln("failed to retrieve job:", err.Error())
-		}
-		return
-	}
-
+	var kafkaJobs chan job
 	if len(b.kafkaReaderByTopic) > 0 {
+		kafkaJobs = make(chan job, b.pipelineConcurrency)
+
 		for topic, reader := range b.kafkaReaderByTopic {
 			go func(topic string, reader *kafka.Reader) {
 				defer reader.Close()
@@ -708,26 +722,63 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						rlog.WithError(err).Errorln("could not fetch message from kafka")
 						continue
 					}
-					var job job
-					err = json.Unmarshal(m.Value, &job)
+
+					var j job
+					err = json.Unmarshal(m.Value, &j)
 					if err != nil {
 						rlog.WithError(err).Errorln("could not unmarshal message from kafka")
 						continue
 					}
-					ctx := logger.ContextWithLoggerFromData(context.Background(), job.ContextData)
-
-					fn, ok := b.callbacks[topic]
-					if !ok {
-						panic("no handler for topic " + topic)
-					}
-					err = fn.event(ctx, job.event())
-					if err != nil {
-						// reader.
-					}
-					reader.CommitMessages(context.Background(), m)
+					j.kafkaReader = reader
+					j.kafkaMsg = &m
+					kafkaJobs <- j
 				}
 			}(topic, reader)
 		}
+	}
+
+	getJob := func(priority EventPriority) (j job, err error) {
+		select {
+		case j = <-kafkaJobs:
+		default:
+			j.Priority = priority
+			now := time.Now().UTC()
+			err = b.db.QueryRow(b.jobsUpdateQuery[priority],
+				now,
+				now.Add(timeouts[0]), // first retry timeout
+				now.Add(timeouts[1]), // second retry timeout
+				now.Add(timeouts[2]), // third retry timeout before we give up
+			).Scan(
+				&j.Serial,
+				&j.Job,
+				&j.Type,
+				&j.Key,
+				&j.Resource,
+				&j.ResourceID,
+				&j.Payload,
+				&j.Timestamp,
+				&j.AttemptsLeft,
+				&j.ContextData,
+				&j.ScheduledAt,
+				&j.ImplicitSchedule,
+			)
+			if err != nil && err != sql.ErrNoRows {
+				rlog.Errorln("failed to retrieve job:", err.Error())
+			}
+			if j.ScheduledAt != nil {
+				if err := b.writeJobToKafka(context.Background(), j); err != nil {
+					rlog.WithError(err).Errorln("failed to write job to kafka")
+				}
+				// deleting the job from the database
+				err = b.db.QueryRow(b.jobsDeleteQuery[priority], &j.Serial).Scan(&j.Serial)
+				if err != nil && err != sql.ErrNoRows {
+					rlog.WithError(err).Errorln("failed to delete job from database")
+				} else {
+					rlog.Debugf("deleted job %d from database", j.Serial)
+				}
+			}
+		}
+		return j, err
 	}
 
 	jobs := make(chan job, b.pipelineConcurrency)
@@ -959,7 +1010,7 @@ func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, jobName string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
 	if event.Priority != PriorityForeground && event.Priority != PriorityBackground {
 		return http.StatusBadRequest, fmt.Errorf("bogus priority")
 	}
@@ -984,7 +1035,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	if scheduleAt != nil {
 		tmp := scheduleAt.UTC()
 		scheduleAtUTC = &tmp
-	} else if job == "event" || job == "queued-event" {
+	} else if jobName == "event" || jobName == "queued-event" {
 		if rateLimit, ok := b.rateLimits[event.Type]; ok {
 			var rateLimitedSchedule time.Time
 			deltaPG := rateLimit.delta.Seconds()
@@ -1001,71 +1052,97 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	}
 
 	if scheduleAtUTC == nil && len(b.kafkaBrokers) > 0 {
-		// if we have a kafka client, we must serialize the event data to json
-		// and send it to the kafka topic
-		data, err = json.Marshal(event)
+		if err = b.writeJobToKafka(ctx, job{
+			Job:          jobName,
+			Type:         event.Type,
+			Key:          event.Key,
+			Resource:     event.Resource,
+			ResourceID:   event.ResourceID,
+			Payload:      data,
+			ContextData:  contextData,
+			Timestamp:    time.Now().UTC(),
+			AttemptsLeft: 5,
+		}); err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("write job to kafka: %w", err)
+		}
+	} else {
+		var serial int
+		query := b.jobsInsertQuery
+		if ifNotExist {
+			query = b.jobsInsertIfNotExistQuery
+		}
+		err = b.db.QueryRow(query[event.Priority],
+			jobName,
+			event.Type,
+			event.Key,
+			event.Resource,
+			event.ResourceID,
+			data,
+			time.Now().UTC(),
+			contextData,
+			scheduleAtUTC,
+			5, // attempts left
+		).Scan(&serial)
+
+		if err == csql.ErrNoRows {
+			return http.StatusConflict, nil
+		}
+
 		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("json marshal: %w", err)
+			return http.StatusInternalServerError, err
 		}
-
-		w := b.kafkaWriterByTopic[event.Type]
-		if w == nil {
-			var kafkaHashBalancer kafka.Hash
-			w = &kafka.Writer{
-				Addr:  kafka.TCP(b.kafkaBrokers...),
-				Topic: event.Type,
-				Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
-					// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
-					m.Key = []byte(strings.Split(string(m.Key), "_")[0])
-					return kafkaHashBalancer.Balance(m, i...)
-				}),
-			}
-			b.kafkaWriterByTopic[event.Type] = w
-		}
-
-		key := event.Resource + ":" + event.ResourceID.String()
-		if job == "queued-event" {
-			// since topics are configured to compact and keep the last message for each,
-			// we must make the key unique for queued-events
-			key = key + "_" + uuid.New().String()
-		}
-
-		err = w.WriteMessages(ctx, kafka.Message{
-			Key:   []byte(key),
-			Value: data,
-		})
-		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("kafka write: %w", err)
-		}
-		return http.StatusNoContent, nil
 	}
 
-	var serial int
-	query := b.jobsInsertQuery
-	if ifNotExist {
-		query = b.jobsInsertIfNotExistQuery
-	}
-	err = b.db.QueryRow(query[event.Priority],
-		job,
-		event.Type,
-		event.Key,
-		event.Resource,
-		event.ResourceID,
-		data,
-		time.Now().UTC(),
-		contextData,
-		scheduleAtUTC,
-	).Scan(&serial)
-
-	if err == csql.ErrNoRows {
-		return http.StatusConflict, nil
-	}
-
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
 	b.TriggerJobs()
 	return http.StatusNoContent, nil
+}
+
+func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
+	if len(b.kafkaBrokers) == 0 {
+		return fmt.Errorf("no kafka brokers configured")
+	}
+
+	// if we have a kafka client, we must serialize the event data to json
+	// and send it to the kafka topic
+
+	jobBytes, err := json.Marshal(j)
+	if err != nil {
+		return fmt.Errorf("json marshal: %w", err)
+	}
+
+	w := b.kafkaWriterByTopic[j.Type]
+	if w == nil {
+		var kafkaHashBalancer kafka.Hash
+		w = &kafka.Writer{
+			Addr:  kafka.TCP(b.kafkaBrokers...),
+			Topic: j.Type,
+			Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
+				// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
+				m.Key = []byte(strings.Split(string(m.Key), "_")[0])
+				if len(m.Key) == 0 {
+					m.Key = []byte(uuid.Must(uuid.NewRandom()).String())
+				}
+				return kafkaHashBalancer.Balance(m, i...)
+			}),
+		}
+		b.kafkaWriterByTopic[j.Type] = w
+	}
+
+	key := j.Resource + ":" + j.ResourceID.String()
+	if j.Job == "queued-event" {
+		// since topics are configured to compact and keep the last message for each,
+		// we must make the key unique for queued-events
+		key = key + "_" + uuid.New().String()
+	}
+
+	err = w.WriteMessages(ctx, kafka.Message{
+		Key:   []byte(key),
+		Value: jobBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("kafka write: %w", err)
+	}
+	return nil
 }
 
 // HandleResourceNotification installs a callback handler for out-of-band notifications for a given resource
@@ -1148,18 +1225,33 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	contextData := logger.SerializeLoggerContext(ctx)
 
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
-	var serial int
-	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
-		operation,
-		resource,
-		resourceID,
-		payload,
-		time.Now().UTC(),
-		contextData,
-	).Scan(&serial)
+	var err error
 
+	if len(b.kafkaBrokers) == 0 {
+		var serial int
+		err = tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
+			"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
+			"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
+			operation,
+			resource,
+			resourceID,
+			payload,
+			time.Now().UTC(),
+			contextData,
+		).Scan(&serial)
+	} else {
+		err = tx.QueryRow(`
+		INSERT INTO _resource_notification_outbox_ (
+			create_time, 
+			kafka_topic, 
+			kafka_key, 
+			kafka_value, 
+			kafka_header_keys, 
+			kafka_header_values
+		) VALUES (
+			 $1, $2, $3, $4, $5, $6
+		)`, time.Now().UTC(), "notification:"+resource, resourceID, payload, pq.StringArray([]string{"operation"}), pq.StringArray([]string{string(operation)})).Err()
+	}
 	if err != nil {
 		rlog.Debugf("commitWithNotification before: tx.Rollback()")
 		tx.Rollback()
