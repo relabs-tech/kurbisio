@@ -1203,7 +1203,7 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		parts := strings.Split(resource, "->")
 		resource = parts[0]
 		if len(parts) > 1 {
-			consumerGroup = ":" + parts[1]
+			consumerGroup = parts[1]
 		}
 	}
 
@@ -1232,13 +1232,16 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 				}
 			}
 		}
-		key := notificationJobKey(resource, operation) + consumerGroup
+		key := notificationJobKey(resource, operation)
+		if consumerGroup != "" {
+			key = key + ":" + consumerGroup
+		}
 		if len(b.kafkaBrokers) > 0 {
 			if _, ok := b.kafkaReaderByTopic[key]; !ok {
 				reader := kafka.NewReader(kafka.ReaderConfig{
 					Brokers: b.kafkaBrokers,
 					GroupID: consumerGroup,
-					Topic:   "notification." + resource,
+					Topic:   "notification." + strings.ReplaceAll(resource, "/", "."),
 				})
 				b.kafkaReaderByTopic[key] = reader
 			} else {
