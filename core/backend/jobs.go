@@ -773,16 +773,17 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			if err != nil && err != sql.ErrNoRows {
 				rlog.Errorln("failed to retrieve job:", err.Error())
 			}
-			if j.ScheduledAt != nil {
+			if j.ScheduledAt != nil && len(b.kafkaBrokers) > 0 {
 				if err := b.writeJobToKafka(context.Background(), j); err != nil {
 					rlog.WithError(err).Errorln("failed to write job to kafka")
-				}
-				// deleting the job from the database
-				err = b.db.QueryRow(b.jobsDeleteQuery[priority], &j.Serial).Scan(&j.Serial)
-				if err != nil && err != sql.ErrNoRows {
-					rlog.WithError(err).Errorln("failed to delete job from database")
 				} else {
-					rlog.Debugf("deleted job %d from database", j.Serial)
+					// deleting the job from the database
+					err = b.db.QueryRow(b.jobsDeleteQuery[priority], &j.Serial).Scan(&j.Serial)
+					if err != nil && err != sql.ErrNoRows {
+						rlog.WithError(err).Errorln("failed to delete job from database")
+					} else {
+						rlog.Debugf("deleted job %d from database", j.Serial)
+					}
 				}
 			}
 		}
