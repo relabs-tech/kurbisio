@@ -748,9 +748,13 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							rlog.WithError(err).Errorln("could not fetch message from kafka")
 							continue
 						}
-						if errors.Is(err, context.Canceled) || err == io.EOF {
-							rlog.Debugf("kafka reader for topic %s finished", topic)
+						if errors.Is(err, context.DeadlineExceeded) {
+							rlog.Debugf("kafka reader for topic %s timed out", topic)
+							// we have reached the timeout, we can stop reading from this topic
 							return
+						}
+						if err == io.EOF {
+							continue
 						}
 
 						var j job
