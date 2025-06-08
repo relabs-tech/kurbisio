@@ -1171,6 +1171,14 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 // If you need to intercept operations - including the immutable read and list operations -, then you can do that
 // in-band with a request handler, see HandleResourceRequest()
 func (b *Backend) HandleResourceNotification(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
+	var consumerGroup string
+	if strings.Contains(resource, "->") {
+		parts := strings.Split(resource, "->")
+		resource = parts[0]
+		if len(parts) > 1 {
+			consumerGroup = ":" + parts[1]
+		}
+	}
 
 	if !b.hasCollectionOrSingleton(resource) {
 		logger.FromContext(context.Background()).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
@@ -1197,8 +1205,19 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 				}
 			}
 		}
-
-		key := notificationJobKey(resource, operation)
+		key := notificationJobKey(resource, operation) + consumerGroup
+		if len(b.kafkaBrokers) > 0 {
+			if _, ok := b.kafkaReaderByTopic[key]; !ok {
+				reader := kafka.NewReader(kafka.ReaderConfig{
+					Brokers: b.kafkaBrokers,
+					GroupID: consumerGroup,
+					Topic:   resource,
+				})
+				b.kafkaReaderByTopic[key] = reader
+			} else {
+				log.Fatalf("reader for topic %s is already installed", key)
+			}
+		}
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(context.Background()).Fatalf("resource notification handler for %s already installed", key)
 		}
