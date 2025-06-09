@@ -963,17 +963,21 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	consumerGroup := cfg.consumerGroup
 
 	key := eventJobKey(event)
-	if cfg.consumerGroup != "" && len(b.kafkaBrokers) > 0 {
-		key = key + ":" + cfg.consumerGroup
+	if consumerGroup != "" && len(b.kafkaBrokers) > 0 {
+		key = key + ":" + consumerGroup
 	}
 
 	if len(b.kafkaBrokers) > 0 {
 		if _, ok := b.kafkaReaderByTopic[key]; !ok {
+			if consumerGroup == "" {
+				consumerGroup = "default"
+			}
 			reader := kafka.NewReader(kafka.ReaderConfig{
 				Brokers:  b.kafkaBrokers,
-				GroupID:  cfg.consumerGroup,
+				GroupID:  consumerGroup,
 				Topic:    "event." + event,
 				MaxBytes: 10e6, // 10 MB
 			})
@@ -1323,6 +1327,9 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		}
 		if len(b.kafkaBrokers) > 0 {
 			if _, ok := b.kafkaReaderByTopic[key]; !ok {
+				if consumerGroup == "" {
+					consumerGroup = "default"
+				}
 				reader := kafka.NewReader(kafka.ReaderConfig{
 					Brokers:  b.kafkaBrokers,
 					GroupID:  consumerGroup,
