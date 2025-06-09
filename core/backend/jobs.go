@@ -1175,7 +1175,7 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 			<-b.ctx.Done()
 			if w != nil {
 				if err := w.Close(); err != nil {
-					log.Println("error closing kafka reader for topic", j.Type, ":", err)
+					logger.FromContext(ctx).WithError(err).Errorf("error closing kafka writer for topic %s", j.Type)
 				}
 			}
 		}()
