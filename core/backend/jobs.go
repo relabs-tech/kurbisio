@@ -23,6 +23,8 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/lib/pq"
 	"github.com/obsidiandynamics/goharvest"
+	"github.com/obsidiandynamics/libstdgo/scribe"
+	scribelogrus "github.com/obsidiandynamics/libstdgo/scribe/logrus"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
@@ -239,6 +241,7 @@ WHERE serial = $1 RETURNING serial;`)
 			BaseKafkaConfig: goharvest.KafkaConfigMap{
 				"bootstrap.servers": strings.Join(b.kafkaBrokers, ","),
 			},
+			Scribe:      scribe.New(scribelogrus.Bind()),
 			DataSource:  b.dbDSN,
 			OutboxTable: "_resource_notification_outbox_",
 		}
@@ -1218,8 +1221,9 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 	if w == nil {
 		var kafkaHashBalancer kafka.Hash
 		w = &kafka.Writer{
-			Addr:  kafka.TCP(b.kafkaBrokers...),
-			Topic: "event." + j.Type,
+			Addr:      kafka.TCP(b.kafkaBrokers...),
+			BatchSize: 1,
+			Topic:     "event." + j.Type,
 			Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
 				// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
 				m.Key = []byte(strings.Split(string(m.Key), "_")[0])
