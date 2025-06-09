@@ -52,6 +52,7 @@ const InternalDatabaseSchemaVersion = 3
 
 // Backend is the generic rest backend
 type Backend struct {
+	ctx                 context.Context
 	config              Configuration
 	db                  *csql.DB
 	router              *mux.Router
@@ -98,6 +99,7 @@ type Builder struct {
 	// DB is a postgres database. This is mandatory.
 	DB    *csql.DB
 	DBDSN string // Data Source Name for the database, used for goharvest
+	Ctx   context.Context
 
 	KafkaBrokers []string
 	// Router is a mux router. This is mandatory.
@@ -167,6 +169,7 @@ func New(bb *Builder) *Backend {
 	}
 	bb.Router.UseEncodedPath()
 	b := &Backend{
+		ctx:                      bb.Ctx,
 		config:                   config,
 		db:                       bb.DB,
 		router:                   bb.Router,
@@ -222,6 +225,13 @@ func New(bb *Builder) *Backend {
 		if err != nil {
 			log.Fatalf("Cannot start harvester: %v", err)
 		}
+
+		go func() {
+			<-b.ctx.Done()
+			// Stop the harvester when the context is done.
+			log.Println("Stopping harvester...")
+			harvest.Stop()
+		}()
 
 		go func() {
 			// Wait indefinitely for the harvester to end.

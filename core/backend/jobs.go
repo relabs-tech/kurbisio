@@ -733,7 +733,6 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			kafkaJobsWg.Add(1)
 			go func(topic string, reader *kafka.Reader) {
 				defer kafkaJobsWg.Done()
-				defer reader.Close()
 
 				rlog := rlog.WithField("callback_key", topic)
 				rlog = rlog.WithField("kafka_topic", reader.Config().Topic)
@@ -750,13 +749,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							rlog.WithError(err).Errorln("could not fetch message from kafka")
 							continue
 						}
-						if errors.Is(err, context.DeadlineExceeded) {
-							rlog.Debugf("kafka reader for topic %s timed out", topic)
+						if errors.Is(err, context.DeadlineExceeded) || err == io.EOF {
+							rlog.Debugf("kafka reader for topic %s finished", topic)
 							// we have reached the timeout, we can stop reading from this topic
 							return
-						}
-						if err == io.EOF {
-							continue
 						}
 
 						var j job
@@ -1171,6 +1167,14 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 			}),
 		}
 		b.kafkaWriterByTopic[j.Type] = w
+		go func() {
+			<-b.ctx.Done()
+			if w != nil {
+				if err := w.Close(); err != nil {
+					log.Println("error closing kafka reader for topic", j.Type, ":", err)
+				}
+			}
+		}()
 	}
 
 	key := j.Resource
@@ -1258,6 +1262,14 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 					MaxBytes: 10e6, // 10 MB
 				})
 				b.kafkaReaderByTopic[key] = reader
+				go func() {
+					<-b.ctx.Done()
+					if reader != nil {
+						if err := reader.Close(); err != nil {
+							log.Println("error closing kafka reader for topic", key, ":", err)
+						}
+					}
+				}()
 				log.Println("installed kafka reader for topic:", key, "brokers:", b.kafkaBrokers)
 			} else {
 				log.Fatalf("reader for topic %s is already installed", key)
