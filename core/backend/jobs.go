@@ -1396,7 +1396,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 			j.Type, j.Resource, j.ResourceID, j.Payload, j.Timestamp, j.ContextData,
 		).Scan(&serial)
 	} else {
-		j.AttemptsLeft = 1 // we don't retry kafka jobs
+		j.AttemptsLeft = 2 // we don't retry kafka jobs
 		jobBytes, _ := json.Marshal(j)
 		err = tx.QueryRow(`
 		INSERT INTO _resource_notification_outbox_ (
