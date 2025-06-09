@@ -787,7 +787,6 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							return
 						}
 
-						var key string
 						func() {
 							defer func() {
 								if r := recover(); r != nil {
@@ -798,25 +797,23 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							switch jb.Job {
 							case "notification":
 								notification := jb.notification()
-								key = notificationJobKey(notification.Resource, notification.Operation)
-								if handler, ok := b.callbacks[key]; ok {
+								if handler, ok := b.callbacks[topic]; ok {
 									err = handler.notification(ctx, notification)
 								} else {
-									err = fmt.Errorf("no handler for key %s", key)
+									err = fmt.Errorf("no handler for key %s", topic)
 								}
 							case "event", "queued-event":
 								event := jb.event()
-								key = eventJobKey(event.Type)
 
 								if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
 									// we have a rate limited event. We must reschedule if a) the event has an implicit
 									// schedule (happens at retry), or b) the event is too old
 								}
 
-								if handler, ok := b.callbacks[key]; ok {
+								if handler, ok := b.callbacks[topic]; ok {
 									err = handler.event(ctx, event)
 								} else {
-									err = fmt.Errorf("no handler for key %s", key)
+									err = fmt.Errorf("no handler for key %s", topic)
 								}
 							default:
 								err = fmt.Errorf("unknown job type %s", jb.Job)
@@ -824,7 +821,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						}()
 
 						if err != nil {
-							rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+							rlog.WithError(err).Error("error processing " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 							var serial int
 							err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
 								jb.Serial,
@@ -841,12 +838,12 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 								jb.ImplicitSchedule,
 							).Scan(&serial)
 							if err != nil {
-								rlog.WithError(err).Error("could not insert job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+								rlog.WithError(err).Error("could not insert job " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 								continue
 							}
 						}
 						if err := reader.CommitMessages(ctx, m); err != nil {
-							rlog.WithError(err).Error("could not commit kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+							rlog.WithError(err).Error("could not commit kafka message for job " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 						}
 					}
 				}
