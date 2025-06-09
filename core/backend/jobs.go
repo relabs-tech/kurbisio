@@ -797,7 +797,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	var kafkaJobs chan job
 	kafkaJobsWg := &sync.WaitGroup{}
 	if len(b.kafkaReaderByTopic) > 0 {
-		kafkaJobs = make(chan job, len(b.kafkaReaderByTopic))
+		kafkaJobs = make(chan job, len(b.kafkaReaderByTopic)*10) // number of topics * number of partitions
 		if max > 0 {
 			ctx, _ = context.WithTimeout(ctx, max)
 		}
