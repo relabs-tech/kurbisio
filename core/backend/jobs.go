@@ -848,7 +848,11 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	getJob := func(priority EventPriority) (job, error) {
 		for {
 			select {
-			case kafkaJob := <-kafkaJobs:
+			case kafkaJob, ok := <-kafkaJobs:
+				if !ok {
+					rlog.Debugf("kafka jobs channel closed, no more jobs to process from kafka")
+					return job{}, sql.ErrNoRows
+				}
 				rlog.Debugf("returned from getJob job %d from kafka topic %s", kafkaJob.Serial, kafkaJob.kafkaCallbackKey)
 				return kafkaJob, nil
 			default:
@@ -892,7 +896,6 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					}
 					continue
 				}
-				return j, err
 			}
 		}
 	}
