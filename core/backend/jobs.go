@@ -817,6 +817,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					}
 					continue
 				}
+				return j, err
 			}
 		}
 	}
