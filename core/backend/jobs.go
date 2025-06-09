@@ -88,9 +88,6 @@ type job struct {
 	ScheduledAt      *time.Time
 	ImplicitSchedule *bool
 	Priority         EventPriority
-	kafkaReader      *kafka.Reader
-	kafkaMsg         *kafka.Message
-	kafkaCallbackKey string // only set if this job was read from kafka
 }
 
 // notification returns the job as database notification. Only makes sense if the job type is "notification"
@@ -538,19 +535,26 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			"serial":       jb.Serial,
 			"attempts":     jb.AttemptsLeft,
 			"priority":     jb.Priority,
-			"callback_key": jb.kafkaCallbackKey,
 		})
-		if jb.kafkaReader != nil {
-			// this job was read from kafka, we must not update the schedule
-			rlog.Debug("processing kafka job")
-		} else {
-			rlog.Debug("processing normal job")
-		}
+		rlog.Debug("processing normal job")
 
 		if jb.AttemptsLeft == 0 {
 			rlog.Debug("job has no more left attempts, skipping")
 			ready <- true
 			continue
+		}
+		if len(b.kafkaBrokers) > 0 {
+			if err := b.writeJobToKafka(ctx, jb); err == nil {
+				// deleting the job from the database
+				err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&jb.Serial)
+				if err != nil && err != sql.ErrNoRows {
+					rlog.WithError(err).Errorln("failed to delete job from database")
+				} else {
+					rlog.Debugf("deleted job %d from database", jb.Serial)
+					ready <- true
+					continue
+				}
+			}
 		}
 		var key string
 
@@ -563,21 +567,19 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 				case <-tickerDone:
 					return
 				case <-ticker.C:
-					if jb.kafkaReader == nil {
-						now := time.Now()
-						rlog.Debugln("renew schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-						// job may be retried because timeout is reached, but processing is still going on. Hence we
-						// update the implicit scheduled
-						var serial int
-						err := b.db.QueryRow(b.jobsRenewImplicitScheduleQuery[jb.Priority],
-							&jb.Serial,
-							now.Add(timeouts[0]), // first retry timeout
-							now.Add(timeouts[1]), // second retry timeout
-							now.Add(timeouts[2]), // third retry timeout before we give up
-						).Scan(&serial)
-						if err != nil && err != sql.ErrNoRows {
-							rlog.WithError(err).Error("could not renew schedule of currently processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-						}
+					now := time.Now()
+					rlog.Debugln("renew schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+					// job may be retried because timeout is reached, but processing is still going on. Hence we
+					// update the implicit scheduled
+					var serial int
+					err := b.db.QueryRow(b.jobsRenewImplicitScheduleQuery[jb.Priority],
+						&jb.Serial,
+						now.Add(timeouts[0]), // first retry timeout
+						now.Add(timeouts[1]), // second retry timeout
+						now.Add(timeouts[2]), // third retry timeout before we give up
+					).Scan(&serial)
+					if err != nil && err != sql.ErrNoRows {
+						rlog.WithError(err).Error("could not renew schedule of currently processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 					}
 				}
 			}
@@ -595,9 +597,6 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			case "notification":
 				notification := jb.notification()
 				key = notificationJobKey(notification.Resource, notification.Operation)
-				if jb.kafkaCallbackKey != "" {
-					key = jb.kafkaCallbackKey
-				}
 				if handler, ok := b.callbacks[key]; ok {
 					err = handler.notification(ctx, notification)
 				} else {
@@ -606,9 +605,6 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			case "event", "queued-event":
 				event := jb.event()
 				key = eventJobKey(event.Type)
-				if jb.kafkaCallbackKey != "" {
-					key = jb.kafkaCallbackKey
-				}
 
 				if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
 					// we have a rate limited event. We must reschedule if a) the event has an implicit
@@ -652,66 +648,23 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 		ticker.Stop()
 		tickerDone <- true
 
-		if jb.kafkaReader != nil {
-			if err != nil {
-				rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				var serial int
-				err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
-					jb.Serial,
-					jb.Job,
-					jb.Type,
-					jb.Key,
-					jb.Resource,
-					jb.ResourceID,
-					jb.Payload,
-					jb.Timestamp,
-					jb.AttemptsLeft,
-					jb.ContextData,
-					jb.ScheduledAt,
-					jb.ImplicitSchedule,
-				).Scan(&serial)
-				if err != nil {
-					if err == sql.ErrNoRows {
-						// job was already processed, we can ignore it
-						rlog.Debug("job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial) + " was already processed")
-					} else {
-						rlog.WithError(err).Error("could not insert job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-					}
-				} else {
-					rlog.Debug("successfully rescheduled job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-					if err := jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg); err != nil {
-						rlog.WithError(err).Error("could not commit kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-					} else {
-						rlog.Debug("successfully committed kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-					}
-				}
-			} else {
-				rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				if err := jb.kafkaReader.CommitMessages(ctx, *jb.kafkaMsg); err != nil {
-					rlog.WithError(err).Error("could not commit kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				} else {
-					rlog.Debug("successfully committed kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				}
-			}
-		} else {
-			if err == rescheduledError {
-				rlog.Debug("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+		if err == rescheduledError {
+			rlog.Debug("successfully rescheduled rate limited event " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 
-			} else if err != nil {
-				rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			} else {
-				rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
-				var serial int
-				err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
+		} else if err != nil {
+			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+		} else {
+			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
+			var serial int
+			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
+			if err != nil && err != sql.ErrNoRows {
+				rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+			} else if err == sql.ErrNoRows {
+				// job was recursively raised again, if we still have an impicit schedule, we must reset it
+				err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
 				if err != nil && err != sql.ErrNoRows {
-					rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-				} else if err == sql.ErrNoRows {
-					// job was recursively raised again, if we still have an impicit schedule, we must reset it
-					err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
-					if err != nil && err != sql.ErrNoRows {
-						rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-					}
+					rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 				}
 			}
 		}
@@ -794,10 +747,9 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	rlog := logger.FromContext(context.Background())
 	startTime := time.Now()
 
-	var kafkaJobs chan job
 	kafkaJobsWg := &sync.WaitGroup{}
 	if len(b.kafkaReaderByTopic) > 0 {
-		kafkaJobs = make(chan job, len(b.kafkaReaderByTopic)*10) // number of topics * number of partitions
+		b.pipelineConcurrency = 1 // leaving only one thread for kurbisio queue processing for scheduled jobs
 		if max > 0 {
 			ctx, _ = context.WithTimeout(ctx, max)
 		}
@@ -828,79 +780,106 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							return
 						}
 
-						var j job
-						err = json.Unmarshal(m.Value, &j)
+						var jb job
+						err = json.Unmarshal(m.Value, &jb)
 						if err != nil {
 							rlog.WithError(err).Errorln("could not unmarshal message from kafka")
-							continue
+							return
 						}
-						j.kafkaReader = reader
-						j.kafkaMsg = &m
-						j.kafkaCallbackKey = topic
-						kafkaJobs <- j
-						rlog.Debugf("received job %d from kafka topic %s", j.Serial, topic)
+
+						var key string
+						func() {
+							defer func() {
+								if r := recover(); r != nil {
+									err = fmt.Errorf("recovered from panic: %s. stacktrace:\n%s", r, string(debug.Stack()))
+								}
+							}()
+
+							switch jb.Job {
+							case "notification":
+								notification := jb.notification()
+								key = notificationJobKey(notification.Resource, notification.Operation)
+								if handler, ok := b.callbacks[key]; ok {
+									err = handler.notification(ctx, notification)
+								} else {
+									err = fmt.Errorf("no handler for key %s", key)
+								}
+							case "event", "queued-event":
+								event := jb.event()
+								key = eventJobKey(event.Type)
+
+								if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
+									// we have a rate limited event. We must reschedule if a) the event has an implicit
+									// schedule (happens at retry), or b) the event is too old
+								}
+
+								if handler, ok := b.callbacks[key]; ok {
+									err = handler.event(ctx, event)
+								} else {
+									err = fmt.Errorf("no handler for key %s", key)
+								}
+							default:
+								err = fmt.Errorf("unknown job type %s", jb.Job)
+							}
+						}()
+
+						if err != nil {
+							rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+							var serial int
+							err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
+								jb.Serial,
+								jb.Job,
+								jb.Type,
+								jb.Key,
+								jb.Resource,
+								jb.ResourceID,
+								jb.Payload,
+								jb.Timestamp,
+								jb.AttemptsLeft,
+								jb.ContextData,
+								jb.ScheduledAt,
+								jb.ImplicitSchedule,
+							).Scan(&serial)
+							if err != nil {
+								rlog.WithError(err).Error("could not insert job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+								continue
+							}
+						}
+						if err := reader.CommitMessages(ctx, m); err != nil {
+							rlog.WithError(err).Error("could not commit kafka message for job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+						}
 					}
 				}
 			}(topic, reader)
 		}
 	}
 
-	getJob := func(priority EventPriority) (job, error) {
-		for {
-			select {
-			case kafkaJob, ok := <-kafkaJobs:
-				if !ok {
-					rlog.Debugf("kafka jobs channel closed, no more jobs to process from kafka")
-					return job{}, sql.ErrNoRows
-				}
-				rlog.Debugf("returned from getJob job %d from kafka topic %s", kafkaJob.Serial, kafkaJob.kafkaCallbackKey)
-				return kafkaJob, nil
-			default:
-				var j job
-				j.Priority = priority
-				now := time.Now().UTC()
-				err := b.db.QueryRow(b.jobsUpdateQuery[priority],
-					now,
-					now.Add(timeouts[0]), // first retry timeout
-					now.Add(timeouts[1]), // second retry timeout
-					now.Add(timeouts[2]), // third retry timeout before we give up
-				).Scan(
-					&j.Serial,
-					&j.Job,
-					&j.Type,
-					&j.Key,
-					&j.Resource,
-					&j.ResourceID,
-					&j.Payload,
-					&j.Timestamp,
-					&j.AttemptsLeft,
-					&j.ContextData,
-					&j.ScheduledAt,
-					&j.ImplicitSchedule,
-				)
-				if err != nil && err != sql.ErrNoRows {
-					rlog.Errorln("failed to retrieve job:", err.Error())
-					continue
-				}
-				if kafkaJobs == nil {
-					return j, err
-				}
-				if j.ScheduledAt != nil {
-					if err := b.writeJobToKafka(context.Background(), j); err != nil {
-						rlog.WithError(err).Errorln("failed to write job to kafka")
-						return j, nil
-					}
-					// deleting the job from the database
-					err = b.db.QueryRow(b.jobsDeleteQuery[priority], &j.Serial).Scan(&j.Serial)
-					if err != nil && err != sql.ErrNoRows {
-						rlog.WithError(err).Errorln("failed to delete job from database")
-					} else {
-						rlog.Debugf("deleted job %d from database", j.Serial)
-					}
-					continue
-				}
-			}
+	getJob := func(priority EventPriority) (j job, err error) {
+		j.Priority = priority
+		now := time.Now().UTC()
+		err = b.db.QueryRow(b.jobsUpdateQuery[priority],
+			now,
+			now.Add(timeouts[0]), // first retry timeout
+			now.Add(timeouts[1]), // second retry timeout
+			now.Add(timeouts[2]), // third retry timeout before we give up
+		).Scan(
+			&j.Serial,
+			&j.Job,
+			&j.Type,
+			&j.Key,
+			&j.Resource,
+			&j.ResourceID,
+			&j.Payload,
+			&j.Timestamp,
+			&j.AttemptsLeft,
+			&j.ContextData,
+			&j.ScheduledAt,
+			&j.ImplicitSchedule,
+		)
+		if err != nil && err != sql.ErrNoRows {
+			rlog.Errorln("failed to retrieve job:", err.Error())
 		}
+		return
 	}
 
 	jobs := make(chan job, b.pipelineConcurrency)
@@ -942,12 +921,9 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 		}
 	}
 	kafkaJobsWg.Wait()
-	if kafkaJobs != nil {
-		close(kafkaJobs)
-	}
-
 	close(ready)
 	close(jobs)
+
 	maxedOutString := ""
 	if maxedOut {
 		maxedOutString = " (maxed out)"
