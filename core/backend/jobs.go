@@ -845,16 +845,17 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 		}
 	}
 
-	getJob := func(priority EventPriority) (j job, err error) {
+	getJob := func(priority EventPriority) (job, error) {
 		for {
 			select {
-			case j = <-kafkaJobs:
-				rlog.Debugf("returned from getJob job %d from kafka topic %s", j.Serial, j.kafkaCallbackKey)
-				return j, nil
+			case kafkaJob := <-kafkaJobs:
+				rlog.Debugf("returned from getJob job %d from kafka topic %s", kafkaJob.Serial, kafkaJob.kafkaCallbackKey)
+				return kafkaJob, nil
 			default:
+				var j job
 				j.Priority = priority
 				now := time.Now().UTC()
-				err = b.db.QueryRow(b.jobsUpdateQuery[priority],
+				err := b.db.QueryRow(b.jobsUpdateQuery[priority],
 					now,
 					now.Add(timeouts[0]), // first retry timeout
 					now.Add(timeouts[1]), // second retry timeout
