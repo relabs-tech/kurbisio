@@ -22,6 +22,7 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/lib/pq"
+	"github.com/obsidiandynamics/goharvest"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
@@ -217,6 +218,59 @@ WHERE serial = $1 RETURNING serial;`)
 	b.jobsInsertKafkaQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
 	(serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context, last_scheduled_at, last_implicit_schedule)
 	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (serial) DO NOTHING RETURNING serial;`)
+
+	if len(b.kafkaBrokers) > 0 {
+		// enabling kafka if brokers are set
+		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
+		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
+		_, err := b.db.Exec(`
+		CREATE TABLE IF NOT EXISTS _resource_notification_outbox_ (
+			id                  BIGSERIAL PRIMARY KEY,
+			create_time         TIMESTAMP WITH TIME ZONE NOT NULL,
+			kafka_topic         VARCHAR(249) NOT NULL,
+			kafka_key           VARCHAR(1024) NOT NULL,
+			kafka_value         VARCHAR(100000),
+			kafka_header_keys   TEXT[] NOT NULL,
+			kafka_header_values TEXT[] NOT NULL,
+			leader_id           UUID
+		)`)
+		if err != nil {
+			log.Fatalf("Cannot create outbox table for kafka: %v", err)
+		}
+
+		config := goharvest.Config{
+			// TODO: make this configurable
+			BaseKafkaConfig: goharvest.KafkaConfigMap{
+				"bootstrap.servers": strings.Join(b.kafkaBrokers, ","),
+			},
+			DataSource:  b.dbDSN,
+			OutboxTable: "_resource_notification_outbox_",
+		}
+
+		// Create a new harvester.
+		harvest, err := goharvest.New(config)
+		if err != nil {
+			log.Fatalf("Cannot create harvester: %v", err)
+		}
+
+		// Start harvesting in the background.
+		err = harvest.Start()
+		if err != nil {
+			log.Fatalf("Cannot start harvester: %v", err)
+		}
+
+		go func() {
+			<-b.ctx.Done()
+			// Stop the harvester when the context is done.
+			log.Println("Stopping harvester...")
+			harvest.Stop()
+		}()
+
+		go func() {
+			// Wait indefinitely for the harvester to end.
+			log.Fatal(harvest.Await())
+		}()
+	}
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")

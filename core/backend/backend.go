@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/obsidiandynamics/goharvest"
 
 	"net/http"
 
@@ -55,6 +54,7 @@ type Backend struct {
 	ctx                 context.Context
 	config              Configuration
 	db                  *csql.DB
+	dbDSN               string // Data Source Name for the database, used for goharvest
 	router              *mux.Router
 	publicURL           string
 	collectionFunctions map[string]*collectionFunctions
@@ -172,6 +172,8 @@ func New(bb *Builder) *Backend {
 		ctx:                      bb.Ctx,
 		config:                   config,
 		db:                       bb.DB,
+		dbDSN:                    bb.DBDSN,
+		kafkaBrokers:             bb.KafkaBrokers,
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
 		collectionFunctions:      make(map[string]*collectionFunctions),
@@ -184,59 +186,6 @@ func New(bb *Builder) *Backend {
 		collectionsAndSingletons: make(map[string]bool),
 		pipelineConcurrency:      pipelineConcurrency,
 		updateSchema:             bb.UpdateSchema,
-	}
-	if len(bb.KafkaBrokers) > 0 {
-		// enabling kafka if brokers are set
-		b.kafkaBrokers = bb.KafkaBrokers
-		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
-		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
-		_, err := b.db.Exec(`
-		CREATE TABLE IF NOT EXISTS _resource_notification_outbox_ (
-			id                  BIGSERIAL PRIMARY KEY,
-			create_time         TIMESTAMP WITH TIME ZONE NOT NULL,
-			kafka_topic         VARCHAR(249) NOT NULL,
-			kafka_key           VARCHAR(1024) NOT NULL,
-			kafka_value         VARCHAR(100000),
-			kafka_header_keys   TEXT[] NOT NULL,
-			kafka_header_values TEXT[] NOT NULL,
-			leader_id           UUID
-		)`)
-		if err != nil {
-			log.Fatalf("Cannot create outbox table for kafka: %v", err)
-		}
-
-		config := goharvest.Config{
-			// TODO: make this configurable
-			BaseKafkaConfig: goharvest.KafkaConfigMap{
-				"bootstrap.servers": strings.Join(bb.KafkaBrokers, ","),
-			},
-			DataSource:  bb.DBDSN,
-			OutboxTable: "_resource_notification_outbox_",
-		}
-
-		// Create a new harvester.
-		harvest, err := goharvest.New(config)
-		if err != nil {
-			log.Fatalf("Cannot create harvester: %v", err)
-		}
-
-		// Start harvesting in the background.
-		err = harvest.Start()
-		if err != nil {
-			log.Fatalf("Cannot start harvester: %v", err)
-		}
-
-		go func() {
-			<-b.ctx.Done()
-			// Stop the harvester when the context is done.
-			log.Println("Stopping harvester...")
-			harvest.Stop()
-		}()
-
-		go func() {
-			// Wait indefinitely for the harvester to end.
-			log.Fatal(harvest.Await())
-		}()
 	}
 
 	if bb.Logger != nil {
