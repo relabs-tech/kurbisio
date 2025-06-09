@@ -769,6 +769,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						j.kafkaMsg = &m
 						j.kafkaCallbackKey = topic
 						kafkaJobs <- j
+						rlog.Debugf("received job %d from kafka topic %s", j.Serial, topic)
 					}
 				}
 			}(topic, reader)
