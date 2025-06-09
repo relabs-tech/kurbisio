@@ -823,7 +823,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							continue
 						}
 						if errors.Is(err, context.DeadlineExceeded) || err == io.EOF {
-							rlog.Debugf("kafka reader for topic %s finished", topic)
+							rlog.Debugf("kafka reader for topic %s finished: %v", topic, err)
 							// we have reached the timeout, we can stop reading from this topic
 							return
 						}
