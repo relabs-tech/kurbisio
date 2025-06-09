@@ -242,10 +242,6 @@ WHERE serial = $1 RETURNING serial;`)
 			DataSource:  b.dbDSN,
 			OutboxTable: "_resource_notification_outbox_",
 		}
-		for i := 0; i < len(b.kafkaBrokers); i++ {
-			// segmentio lib requires the tcp:// prefix for brokers
-			b.kafkaBrokers[i] = "tcp://" + b.kafkaBrokers[i]
-		}
 
 		// Create a new harvester.
 		harvest, err := goharvest.New(config)
