@@ -882,7 +882,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					rlog.Errorln("failed to retrieve job:", err.Error())
 					continue
 				}
-				if j.ScheduledAt != nil && kafkaJobs != nil {
+				if kafkaJobs == nil {
+					return j, err
+				}
+				if j.ScheduledAt != nil {
 					if err := b.writeJobToKafka(context.Background(), j); err != nil {
 						rlog.WithError(err).Errorln("failed to write job to kafka")
 						return j, nil
@@ -895,9 +898,6 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 						rlog.Debugf("deleted job %d from database", j.Serial)
 					}
 					continue
-				}
-				if kafkaJobs == nil {
-					return j, err
 				}
 			}
 		}
