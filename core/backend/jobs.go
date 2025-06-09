@@ -549,13 +549,13 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
 		ticker := time.NewTicker(max(time.Second, minTimeout-5*time.Second))
 		tickerDone := make(chan bool)
-		if jb.kafkaReader == nil {
-			go func() {
-				for {
-					select {
-					case <-tickerDone:
-						return
-					case <-ticker.C:
+		go func() {
+			for {
+				select {
+				case <-tickerDone:
+					return
+				case <-ticker.C:
+					if jb.kafkaReader == nil {
 						now := time.Now()
 						rlog.Debugln("renew schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 						// job may be retried because timeout is reached, but processing is still going on. Hence we
@@ -572,8 +572,8 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 						}
 					}
 				}
-			}()
-		}
+			}
+		}()
 
 		// call the registered handler in a panic/recover envelope
 		err := func() (err error) {
