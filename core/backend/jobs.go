@@ -773,37 +773,41 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	}
 
 	getJob := func(priority EventPriority) (j job, err error) {
-		select {
-		case j = <-kafkaJobs:
-		default:
-			j.Priority = priority
-			now := time.Now().UTC()
-			err = b.db.QueryRow(b.jobsUpdateQuery[priority],
-				now,
-				now.Add(timeouts[0]), // first retry timeout
-				now.Add(timeouts[1]), // second retry timeout
-				now.Add(timeouts[2]), // third retry timeout before we give up
-			).Scan(
-				&j.Serial,
-				&j.Job,
-				&j.Type,
-				&j.Key,
-				&j.Resource,
-				&j.ResourceID,
-				&j.Payload,
-				&j.Timestamp,
-				&j.AttemptsLeft,
-				&j.ContextData,
-				&j.ScheduledAt,
-				&j.ImplicitSchedule,
-			)
-			if err != nil && err != sql.ErrNoRows {
-				rlog.Errorln("failed to retrieve job:", err.Error())
-			}
-			if j.ScheduledAt != nil && len(b.kafkaBrokers) > 0 {
-				if err := b.writeJobToKafka(context.Background(), j); err != nil {
-					rlog.WithError(err).Errorln("failed to write job to kafka")
-				} else {
+		for {
+			select {
+			case j = <-kafkaJobs:
+				return j, nil
+			default:
+				j.Priority = priority
+				now := time.Now().UTC()
+				err = b.db.QueryRow(b.jobsUpdateQuery[priority],
+					now,
+					now.Add(timeouts[0]), // first retry timeout
+					now.Add(timeouts[1]), // second retry timeout
+					now.Add(timeouts[2]), // third retry timeout before we give up
+				).Scan(
+					&j.Serial,
+					&j.Job,
+					&j.Type,
+					&j.Key,
+					&j.Resource,
+					&j.ResourceID,
+					&j.Payload,
+					&j.Timestamp,
+					&j.AttemptsLeft,
+					&j.ContextData,
+					&j.ScheduledAt,
+					&j.ImplicitSchedule,
+				)
+				if err != nil && err != sql.ErrNoRows {
+					rlog.Errorln("failed to retrieve job:", err.Error())
+					continue
+				}
+				if j.ScheduledAt != nil && len(b.kafkaBrokers) > 0 {
+					if err := b.writeJobToKafka(context.Background(), j); err != nil {
+						rlog.WithError(err).Errorln("failed to write job to kafka")
+						return j, nil
+					}
 					// deleting the job from the database
 					err = b.db.QueryRow(b.jobsDeleteQuery[priority], &j.Serial).Scan(&j.Serial)
 					if err != nil && err != sql.ErrNoRows {
@@ -811,10 +815,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					} else {
 						rlog.Debugf("deleted job %d from database", j.Serial)
 					}
+					continue
 				}
 			}
 		}
-		return j, err
 	}
 
 	jobs := make(chan job, b.pipelineConcurrency)
