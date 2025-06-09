@@ -908,9 +908,10 @@ func (b *Backend) HandleEvent(event string, handler func(context.Context, Event)
 	if len(b.kafkaBrokers) > 0 {
 		if _, ok := b.kafkaReaderByTopic[key]; !ok {
 			reader := kafka.NewReader(kafka.ReaderConfig{
-				Brokers: b.kafkaBrokers,
-				GroupID: cfg.consumerGroup,
-				Topic:   "event." + event,
+				Brokers:  b.kafkaBrokers,
+				GroupID:  cfg.consumerGroup,
+				Topic:    "event." + event,
+				MaxBytes: 10e6, // 10 MB
 			})
 			b.kafkaReaderByTopic[key] = reader
 		} else {
@@ -1251,11 +1252,13 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		if len(b.kafkaBrokers) > 0 {
 			if _, ok := b.kafkaReaderByTopic[key]; !ok {
 				reader := kafka.NewReader(kafka.ReaderConfig{
-					Brokers: b.kafkaBrokers,
-					GroupID: consumerGroup,
-					Topic:   "notification." + strings.ReplaceAll(resource, "/", "."),
+					Brokers:  b.kafkaBrokers,
+					GroupID:  consumerGroup,
+					Topic:    "notification." + strings.ReplaceAll(resource, "/", "."),
+					MaxBytes: 10e6, // 10 MB
 				})
 				b.kafkaReaderByTopic[key] = reader
+				log.Println("installed kafka reader for topic:", key, "brokers:", b.kafkaBrokers)
 			} else {
 				log.Fatalf("reader for topic %s is already installed", key)
 			}
