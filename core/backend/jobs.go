@@ -896,6 +896,9 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					}
 					continue
 				}
+				if kafkaJobs == nil {
+					return j, err
+				}
 			}
 		}
 	}
