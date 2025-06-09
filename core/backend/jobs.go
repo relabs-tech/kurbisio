@@ -528,12 +528,6 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
-		if jb.AttemptsLeft == 0 {
-			ready <- true
-			continue
-		}
-		var key string
-
 		ctx := logger.ContextWithLoggerFromData(context.Background(), jb.ContextData)
 		rlog := logger.FromContext(ctx).WithFields(logrus.Fields{
 			"resource":     jb.Resource,
@@ -544,7 +538,21 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			"serial":       jb.Serial,
 			"attempts":     jb.AttemptsLeft,
 			"priority":     jb.Priority,
+			"callback_key": jb.kafkaCallbackKey,
 		})
+		if jb.kafkaReader != nil {
+			// this job was read from kafka, we must not update the schedule
+			rlog.Debug("processing kafka job")
+		} else {
+			rlog.Debug("processing normal job")
+		}
+
+		if jb.AttemptsLeft == 0 {
+			rlog.Debug("job has no more left attempts, skipping")
+			ready <- true
+			continue
+		}
+		var key string
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
 		ticker := time.NewTicker(max(time.Second, minTimeout-5*time.Second))
@@ -575,6 +583,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			}
 		}()
 
+		rlog.Debug("executing handler")
 		// call the registered handler in a panic/recover envelope
 		err := func() (err error) {
 			defer func() {
@@ -639,6 +648,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			}
 			return
 		}()
+		rlog.Debug("handler returned", err)
 		ticker.Stop()
 		tickerDone <- true
 
@@ -839,6 +849,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 		for {
 			select {
 			case j = <-kafkaJobs:
+				rlog.Debugf("returned from getJob job %d from kafka topic %s", j.Serial, j.kafkaCallbackKey)
 				return j, nil
 			default:
 				j.Priority = priority
@@ -866,7 +877,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 					rlog.Errorln("failed to retrieve job:", err.Error())
 					continue
 				}
-				if j.ScheduledAt != nil && len(b.kafkaBrokers) > 0 {
+				if j.ScheduledAt != nil && kafkaJobs != nil {
 					if err := b.writeJobToKafka(context.Background(), j); err != nil {
 						rlog.WithError(err).Errorln("failed to write job to kafka")
 						return j, nil
