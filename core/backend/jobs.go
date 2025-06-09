@@ -1327,15 +1327,15 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		}
 		if len(b.kafkaBrokers) > 0 {
 			if _, ok := b.kafkaReaderByTopic[key]; !ok {
-				if consumerGroup == "" {
-					consumerGroup = "default"
-				}
-				reader := kafka.NewReader(kafka.ReaderConfig{
+				cfg := kafka.ReaderConfig{
 					Brokers:  b.kafkaBrokers,
-					GroupID:  consumerGroup,
 					Topic:    "notification." + strings.ReplaceAll(resource, "/", "."),
 					MaxBytes: 10e6, // 10 MB
-				})
+				}
+				if consumerGroup == "" {
+					cfg.GroupID = "default"
+				}
+				reader := kafka.NewReader(cfg)
 				b.kafkaReaderByTopic[key] = reader
 				go func() {
 					<-b.ctx.Done()
