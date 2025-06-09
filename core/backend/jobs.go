@@ -1172,7 +1172,10 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 		b.kafkaWriterByTopic[j.Type] = w
 	}
 
-	key := j.Resource + ":" + j.ResourceID.String()
+	key := j.Resource
+	if j.ResourceID != uuid.Nil {
+		key = key + "_" + j.ResourceID.String()
+	}
 	if j.Job == "queued-event" {
 		// since topics are configured to compact and keep the last message for each,
 		// we must make the key unique for queued-events
