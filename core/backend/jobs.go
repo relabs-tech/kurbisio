@@ -239,7 +239,6 @@ WHERE serial = $1 RETURNING serial;`)
 		}
 
 		config := goharvest.Config{
-			// TODO: make this configurable
 			BaseKafkaConfig: goharvest.KafkaConfigMap{
 				"bootstrap.servers": strings.Join(b.kafkaBrokers, ","),
 			},
@@ -778,7 +777,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	var kafkaJobs chan job
 	kafkaJobsWg := &sync.WaitGroup{}
 	if len(b.kafkaReaderByTopic) > 0 {
-		kafkaJobs = make(chan job, b.pipelineConcurrency)
+		kafkaJobs = make(chan job, len(b.kafkaReaderByTopic))
 		if max > 0 {
 			ctx, _ = context.WithTimeout(ctx, max)
 		}
