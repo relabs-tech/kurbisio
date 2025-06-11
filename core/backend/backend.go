@@ -54,7 +54,6 @@ type Backend struct {
 	ctx                 context.Context
 	config              Configuration
 	db                  *csql.DB
-	dbDSN               string // Data Source Name for the database, used for goharvest
 	router              *mux.Router
 	publicURL           string
 	collectionFunctions map[string]*collectionFunctions
@@ -77,6 +76,7 @@ type Backend struct {
 	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery,
 	jobsInsertKafkaQuery [2]string
 
+	outBoxTableName    string // the name of the outbox table, used for kafka
 	kafkaBrokers       []string
 	kafkaWriterByTopic map[string]*kafka.Writer
 	kafkaReaderByTopic map[string]*kafka.Reader
@@ -97,11 +97,12 @@ type Builder struct {
 	// Config is the JSON description of all resources and relations. This is mandatory.
 	Config string
 	// DB is a postgres database. This is mandatory.
-	DB    *csql.DB
-	DBDSN string // Data Source Name for the database, used for goharvest
-	Ctx   context.Context
+	DB *csql.DB
 
-	KafkaBrokers []string
+	Ctx context.Context
+
+	KafkaBrokers    []string
+	OutboxTableName string
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// Optional public URL of the deployment
@@ -172,8 +173,8 @@ func New(bb *Builder) *Backend {
 		ctx:                      bb.Ctx,
 		config:                   config,
 		db:                       bb.DB,
-		dbDSN:                    bb.DBDSN,
 		kafkaBrokers:             bb.KafkaBrokers,
+		outBoxTableName:          bb.OutboxTableName,
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
 		collectionFunctions:      make(map[string]*collectionFunctions),

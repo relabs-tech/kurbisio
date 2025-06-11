@@ -22,9 +22,6 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/lib/pq"
-	"github.com/obsidiandynamics/goharvest"
-	"github.com/obsidiandynamics/libstdgo/scribe"
-	scribelogrus "github.com/obsidiandynamics/libstdgo/scribe/logrus"
 	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
@@ -222,8 +219,8 @@ WHERE serial = $1 RETURNING serial;`)
 		// enabling kafka if brokers are set
 		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
 		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
-		_, err := b.db.Exec(`
-		CREATE TABLE IF NOT EXISTS _resource_notification_outbox_ (
+		_, err := b.db.Exec(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
 			id                  BIGSERIAL PRIMARY KEY,
 			create_time         TIMESTAMP WITH TIME ZONE NOT NULL,
 			kafka_topic         VARCHAR(249) NOT NULL,
@@ -232,43 +229,10 @@ WHERE serial = $1 RETURNING serial;`)
 			kafka_header_keys   TEXT[] NOT NULL,
 			kafka_header_values TEXT[] NOT NULL,
 			leader_id           UUID
-		)`)
+		)`, b.outBoxTableName))
 		if err != nil {
 			log.Fatalf("Cannot create outbox table for kafka: %v", err)
 		}
-
-		config := goharvest.Config{
-			BaseKafkaConfig: goharvest.KafkaConfigMap{
-				"bootstrap.servers": strings.Join(b.kafkaBrokers, ","),
-			},
-			Scribe:      scribe.New(scribelogrus.Bind()),
-			DataSource:  b.dbDSN,
-			OutboxTable: "_resource_notification_outbox_",
-		}
-
-		// Create a new harvester.
-		harvest, err := goharvest.New(config)
-		if err != nil {
-			log.Fatalf("Cannot create harvester: %v", err)
-		}
-
-		// Start harvesting in the background.
-		err = harvest.Start()
-		if err != nil {
-			log.Fatalf("Cannot start harvester: %v", err)
-		}
-
-		go func() {
-			<-b.ctx.Done()
-			// Stop the harvester when the context is done.
-			log.Println("Stopping harvester...")
-			harvest.Stop()
-		}()
-
-		go func() {
-			// Wait indefinitely for the harvester to end.
-			log.Fatal(harvest.Await())
-		}()
 	}
 
 	logger.Default().Debugln("job processing pipelines")
@@ -1400,8 +1364,8 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	} else {
 		j.AttemptsLeft = 2 // we don't retry kafka jobs
 		jobBytes, _ := json.Marshal(j)
-		err = tx.QueryRow(`
-		INSERT INTO _resource_notification_outbox_ (
+		err = tx.QueryRow(fmt.Sprintf(`
+		INSERT INTO %s (
 			create_time, 
 			kafka_topic, 
 			kafka_key, 
@@ -1410,7 +1374,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 			kafka_header_values
 		) VALUES (
 			 $1, $2, $3, $4, $5, $6
-		)`, time.Now().UTC(), "notification."+strings.ReplaceAll(j.Resource, "/", "."), j.ResourceID, jobBytes, pq.StringArray([]string{"operation"}), pq.StringArray([]string{j.Type})).Err()
+		)`, b.outBoxTableName), time.Now().UTC(), "notification."+strings.ReplaceAll(j.Resource, "/", "."), j.ResourceID, jobBytes, pq.StringArray([]string{"operation"}), pq.StringArray([]string{j.Type})).Err()
 	}
 	if err != nil {
 		rlog.Debugf("commitWithNotification before: tx.Rollback()")
