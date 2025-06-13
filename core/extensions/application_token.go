@@ -120,9 +120,7 @@ func (a *ApplicationToken) UpdateMux(router *mux.Router) error {
 
 			currentAuth := access.AuthorizationFromContext(r.Context())
 
-			if currentAuth == nil || len(currentAuth.Roles) == 0 {
-				return
-			} else {
+			if currentAuth != nil && len(currentAuth.Roles) > 0 {
 				// Filter existing roles based on what the application token allows.
 				allowedRolesMap := make(map[string]bool)
 				for _, role := range allowedRoles {
