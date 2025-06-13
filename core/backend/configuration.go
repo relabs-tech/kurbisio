@@ -14,15 +14,15 @@ import (
 
 // Configuration holds a complete backend configuration
 type Configuration struct {
-	Collections []collectionConfiguration `json:"collections"`
-	Singletons  []singletonConfiguration  `json:"singletons"`
-	Blobs       []blobConfiguration       `json:"blobs"`
-	Relations   []relationConfiguration   `json:"relations"`
-	Shortcuts   []shortcutConfiguration   `json:"shortcuts"`
+	Collections []CollectionConfiguration `json:"collections"`
+	Singletons  []SingletonConfiguration  `json:"singletons"`
+	Blobs       []BlobConfiguration       `json:"blobs"`
+	Relations   []RelationConfiguration   `json:"relations"`
+	Shortcuts   []ShortcutConfiguration   `json:"shortcuts"`
 }
 
-// collectionConfiguration describes a collection resource
-type collectionConfiguration struct {
+// CollectionConfiguration describes a collection resource
+type CollectionConfiguration struct {
 	Resource                      string          `json:"resource"`
 	ExternalIndex                 string          `json:"external_index"`
 	StaticProperties              []string        `json:"static_properties"`
@@ -36,8 +36,8 @@ type collectionConfiguration struct {
 	needsKSS                      bool            // true of this collection or any subcollection or subblob needs kss
 }
 
-// singletonConfiguration describes a singleton resource
-type singletonConfiguration struct {
+// SingletonConfiguration describes a singleton resource
+type SingletonConfiguration struct {
 	Resource             string          `json:"resource"`
 	Permits              []access.Permit `json:"permits"`
 	Description          string          `json:"description"`
@@ -47,8 +47,8 @@ type singletonConfiguration struct {
 	Default              json.RawMessage `json:"default"`
 }
 
-// blobConfiguration describes a blob collection resource
-type blobConfiguration struct {
+// BlobConfiguration describes a blob collection resource
+type BlobConfiguration struct {
 	Resource             string          `json:"resource"`
 	ExternalIndex        string          `json:"external_index"`
 	StaticProperties     []string        `json:"static_properties"`
@@ -61,9 +61,9 @@ type blobConfiguration struct {
 	needsKSS             bool            // true of this blob or any subcollection or subblob needs kss
 }
 
-// relationConfiguration is a n:m relation from
+// RelationConfiguration is a n:m relation from
 // another collection, blob collection or relation
-type relationConfiguration struct {
+type RelationConfiguration struct {
 	Resource     string          `json:"resource"`
 	Left         string          `json:"left"`
 	Right        string          `json:"right"`
@@ -72,9 +72,9 @@ type relationConfiguration struct {
 	Description  string          `json:"description"`
 }
 
-// shortcutConfiguration is shorcut to a resource
+// ShortcutConfiguration is shortcut to a resource
 // for an authenticated request
-type shortcutConfiguration struct {
+type ShortcutConfiguration struct {
 	Shortcut    string   `json:"shortcut"`
 	Target      string   `json:"target"`
 	Roles       []string `json:"roles"`

@@ -117,6 +117,9 @@ type Builder struct {
 
 	// Defines the configuration for the KSS service
 	KssConfiguration kss.Configuration
+
+	// Extensions are the extensions to be used by the backend
+	Extensions []KExtension
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -152,6 +155,14 @@ func New(bb *Builder) *Backend {
 		log.Fatalf("Invalid json %v", err)
 	}
 	bb.Router.UseEncodedPath()
+
+	for _, ext := range bb.Extensions {
+		config, err = ext.UpdateConfig(config)
+		if err != nil {
+			panic(fmt.Errorf("cannot update config with extension %s: %v", ext.GetName(), err))
+		}
+	}
+
 	b := &Backend{
 		config:                   config,
 		db:                       bb.DB,
@@ -245,15 +256,21 @@ func New(bb *Builder) *Backend {
 			logger.Default().Fatalf("Cannot release schema update advisory lock %v", err)
 		}
 	}
+	for _, ext := range bb.Extensions {
+		err = ext.UpdateMux(bb.Router)
+		if err != nil {
+			panic(fmt.Errorf("cannot update mux with extension %s: %v", ext.GetName(), err))
+		}
+	}
 
 	return b
 }
 
 type anyResourceConfiguration struct {
-	collection *collectionConfiguration
-	singleton  *singletonConfiguration
-	blob       *blobConfiguration
-	relation   *relationConfiguration
+	collection *CollectionConfiguration
+	singleton  *SingletonConfiguration
+	blob       *BlobConfiguration
+	relation   *RelationConfiguration
 }
 
 func (rc anyResourceConfiguration) depth() int {
@@ -362,7 +379,7 @@ func (b *Backend) handleResourceRoutes() {
 		}
 		if rc.singleton != nil {
 			// a singleton is a specialized collection
-			tmp := collectionConfiguration{
+			tmp := CollectionConfiguration{
 				Resource:             rc.singleton.Resource,
 				Permits:              rc.singleton.Permits,
 				SchemaID:             rc.singleton.SchemaID,
@@ -496,7 +513,7 @@ func (b *Backend) addChildrenToGetResponse(children []string, noIntercept bool, 
 	return http.StatusOK, nil
 }
 
-func (b *Backend) createShortcut(router *mux.Router, sc shortcutConfiguration) {
+func (b *Backend) createShortcut(router *mux.Router, sc ShortcutConfiguration) {
 	shortcut := sc.Shortcut
 	target := sc.Target
 
