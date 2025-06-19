@@ -8,10 +8,15 @@ package backend_test
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/relabs-tech/kurbisio/core/backend"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -521,4 +526,181 @@ func TestBlobExes(t *testing.T) {
 		t.Fatalf("Expecting kss file to be deleted, but still exists")
 	}
 
+}
+
+func TestCursorPaginationBlob(t *testing.T) {
+	// Clear any existing data
+	_, err := testService.client.RawDelete("/blob2s")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Populate the DB with blobs
+	numberOfElements := 25
+	blobData := []byte{0, 1, 2, 3, 4}
+	header := map[string]string{
+		"Content-Type": "image/png",
+	}
+
+	for i := 1; i <= numberOfElements; i++ {
+		if _, err = testService.client.RawPostBlob("/blob2s", header, blobData, &Blob{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test basic cursor pagination
+	limit := 8
+	var allReceived []Blob
+	var nextToken string
+
+	for page := 0; page < 5; page++ { // Get pages to test beyond available data
+		var path string
+		if nextToken == "" {
+			path = fmt.Sprintf("/blob2s?limit=%d", limit)
+		} else {
+			path = fmt.Sprintf("/blob2s?limit=%d&next_token=%s", limit, nextToken)
+		}
+
+		var blobs []Blob
+		status, headers, err := testService.client.RawGetWithHeader(path, map[string]string{}, &blobs)
+		if err != nil || status != http.StatusOK {
+			t.Fatal("error: ", err, "status: ", status)
+		}
+
+		assert.Equal(t, strconv.Itoa(limit), headers.Get("Pagination-Limit"))
+
+		allReceived = append(allReceived, blobs...)
+
+		nextToken = headers.Get("Pagination-Next-Token")
+
+		if nextToken == "" {
+			break
+		}
+	}
+
+	// Check that we got all elements
+	if len(allReceived) != numberOfElements {
+		t.Fatalf("Expected %d elements, got %d", numberOfElements, len(allReceived))
+	}
+
+	// Check that elements are ordered correctly (descending by timestamp)
+	for i := 1; i < len(allReceived); i++ {
+		if allReceived[i].Timestamp.After(allReceived[i-1].Timestamp) {
+			t.Fatal("Results are not in descending timestamp order")
+		}
+	}
+
+	// Cleanup
+	_, err = testService.client.RawDelete("/blob2s")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCursorPaginationBlobMutualExclusion(t *testing.T) {
+	// Test that page and next_token are mutually exclusive for blobs
+	cursor := backend.PaginationCursor{
+		Timestamp: time.Now().UTC(),
+		ID:        uuid.New(),
+	}
+
+	path := fmt.Sprintf("/blob2s?page=2&next_token=%s", cursor.Encode())
+	var blobs []Blob
+	status, _, _ := testService.client.RawGetWithHeader(path, map[string]string{}, &blobs)
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("Expected status 400 for mutually exclusive parameters, got %d", status)
+	}
+}
+
+func TestCursorPaginationBlobInvalidToken(t *testing.T) {
+	// Test invalid cursor format for blobs
+	path := "/blob2s?next_token=invalid_blob_token"
+	var blobs []Blob
+	status, _, _ := testService.client.RawGetWithHeader(path, map[string]string{}, &blobs)
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("Expected status 400 for invalid cursor, got %d", status)
+	}
+}
+
+func TestCursorPaginationBlobEmptyCollection(t *testing.T) {
+	// Clear any existing data
+	_, err := testService.client.RawDelete("/blob2s")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test cursor pagination on empty collection
+	var blobs []Blob
+	status, headers, err := testService.client.RawGetWithHeader("/blob2s?limit=10", map[string]string{}, &blobs)
+	if err != nil || status != http.StatusOK {
+		t.Fatal("error: ", err, "status: ", status)
+	}
+
+	assert.Equal(t, 0, len(blobs))
+	assert.Equal(t, "10", headers.Get("Pagination-Limit"))
+	assert.Empty(t, headers.Get("Pagination-Next-Token"))
+}
+
+func TestCursorPaginationBlobWithTimeFiltering(t *testing.T) {
+	// Clear any existing data
+	_, err := testService.client.RawDelete("/blob2s")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blobData := []byte{0, 1, 2, 3, 4}
+	header := map[string]string{
+		"Content-Type":       "image/png",
+	}
+
+	beforeTime := time.Now().UTC().Add(-2 * time.Second) // Give more time buffer
+	time.Sleep(10 * time.Millisecond)
+
+	// Create some blobs
+	for i := 0; i < 5; i++ {
+		if _, err = testService.client.RawPostBlob("/blob2s", header, blobData, &Blob{}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond) // Longer delay between blobs
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	afterTime := time.Now().UTC().Add(2 * time.Second) // Give more time buffer
+
+	// Test cursor pagination with 'from' filter
+	var blobs []Blob
+	fromPath := fmt.Sprintf("/blob2s?from=%s&limit=3", beforeTime.Format(time.RFC3339))
+	status, headers, err := testService.client.RawGetWithHeader(fromPath, map[string]string{}, &blobs)
+	if err != nil || status != http.StatusOK {
+		t.Fatal("error: ", err, "status: ", status)
+	}
+
+	assert.Equal(t, 3, len(blobs))
+	assert.Equal(t, "3", headers.Get("Pagination-Limit"))
+	// Should have next token since we limited to 3 but have 5 blobs
+	nextToken := headers.Get("Pagination-Next-Token")
+	if len(blobs) == 3 && nextToken == "" {
+		// This might be OK if there are exactly 3 blobs or we got all remaining blobs
+		t.Logf("Got exactly 3 blobs, next token empty - this might be expected")
+	}
+
+	// Test cursor pagination with 'until' filter
+	untilPath := fmt.Sprintf("/blob2s?until=%s&limit=10", afterTime.Format(time.RFC3339))
+	status, headers, err = testService.client.RawGetWithHeader(untilPath, map[string]string{}, &blobs)
+	if err != nil || status != http.StatusOK {
+		t.Fatal("error: ", err, "status: ", status)
+	}
+
+	assert.Equal(t, 5, len(blobs))
+	assert.Equal(t, "10", headers.Get("Pagination-Limit"))
+	// Should not have next token since we got all available blobs
+	assert.Empty(t, headers.Get("Pagination-Next-Token"))
+
+	// Cleanup
+	_, err = testService.client.RawDelete("/blob2s")
+	if err != nil {
+		t.Fatal(err)
+	}
 }

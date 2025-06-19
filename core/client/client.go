@@ -23,10 +23,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/2gconsulting/blueprint/utils"
 	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
@@ -541,10 +541,12 @@ func (r Item) Patch(body interface{}, result interface{}) (int, error) {
 
 // Page is a requester for one page in a collection
 type Page struct {
-	r          Collection
-	page       int
-	pageCount  int
-	totalCount int
+	r Collection
+	// the cursor to fetch this page
+	cursor *string
+
+	// the cursor to fetch the next page, only populated after Get()
+	nextCursor *string
 }
 
 // FirstPage returns a requester for the first page of a collection
@@ -553,33 +555,25 @@ type Page struct {
 // it manages page itself. You can set all others parameters, including
 // limit.
 func (r Collection) FirstPage() Page {
-	return Page{page: 1, r: r}
+	return Page{r: r}
 }
 
 // HasData returns true if the page has data (by definition true for the first page)
 func (p Page) HasData() bool {
-	return p.page == 1 || p.page <= p.pageCount
-}
-
-// TotalCount returns the total number of elements (only available after you have called Get on the page)
-func (p Page) TotalCount() int {
-	return p.totalCount
+	return p.cursor == nil || *p.cursor != ""
 }
 
 // Get gets one page of the collection
 func (p *Page) Get(result interface{}) (int, error) {
-	path := p.r.WithParameter("page", strconv.Itoa(p.page)).CollectionPath()
-	status, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
+	c := p.r
+	if p.cursor != nil {
+		c = c.WithParameter("next_token", *p.cursor)
+	}
+	path := c.CollectionPath()
+	status, headers, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
+	p.nextCursor = utils.AnyPtr(headers.Get("Pagination-Next-Token"))
 	if err != nil {
 		return status, err
-	}
-	pageCount, err := strconv.Atoi(header.Get("Pagination-Page-Count"))
-	if err == nil {
-		p.pageCount = pageCount
-	}
-	totalCount, err := strconv.Atoi(header.Get("Pagination-Total-Count"))
-	if err == nil {
-		p.totalCount = totalCount
 	}
 	return status, nil
 }
@@ -587,9 +581,8 @@ func (p *Page) Get(result interface{}) (int, error) {
 // Next returns the next page
 func (p Page) Next() Page {
 	return Page{
-		r:         p.r,
-		page:      p.page + 1,
-		pageCount: p.pageCount,
+		r:      p.r,
+		cursor: p.nextCursor,
 	}
 }
 
