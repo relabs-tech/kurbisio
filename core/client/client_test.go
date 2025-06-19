@@ -7,6 +7,7 @@
 package client_test
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"testing"
@@ -26,7 +27,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestCient_TestClient(t *testing.T) {
+func TestClient_TestClient(t *testing.T) {
 
 	client := client.NewWithRouter(nil)
 
@@ -71,7 +72,7 @@ func TestCient_TestClient(t *testing.T) {
 	}
 
 }
-func TestCient_Page_From(t *testing.T) {
+func TestClient_Page_From(t *testing.T) {
 
 	if err := envdecode.Decode(&testService); err != nil {
 		panic(err)
@@ -207,7 +208,7 @@ func TestUpsert(t *testing.T) {
 
 }
 
-func TestCient_limit(t *testing.T) {
+func TestClient_limit(t *testing.T) {
 
 	if err := envdecode.Decode(&testService); err != nil {
 		panic(err)
@@ -258,7 +259,96 @@ func TestCient_limit(t *testing.T) {
 		as = append(as, onePage...)
 	}
 	if len(as) != 200 {
-		t.Fatalf("Expecting 1 item, got %d", len(as))
+		t.Fatalf("Expecting 200 items, got %d", len(as))
 	}
 
+}
+
+func TestClientCursorPaginationSameTimestamps(t *testing.T) {
+	if err := envdecode.Decode(&testService); err != nil {
+		panic(err)
+	}
+
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	defer db.Close()
+	db.ClearSchema()
+
+	var configurationJSON string = `{
+		"collections": [
+		  {
+			"resource": "aaa"
+		  }
+		]
+	  }
+	`
+	router := mux.NewRouter()
+	testService.backend = backend.New(&backend.Builder{
+		Config:       configurationJSON,
+		DB:           db,
+		Router:       router,
+		UpdateSchema: true,
+	})
+	cl := client.NewWithRouter(router)
+
+	type A struct {
+		AID        uuid.UUID `json:"aaa_id"`
+		Timestamp  time.Time `json:"timestamp,omitempty"`
+		ExternalID string    `json:"external_id,omitempty"`
+	}
+
+	// Create 50 elements with the exact same timestamp
+	numberOfElements := 50
+	sameTimestamp := time.Now().UTC().Round(time.Millisecond)
+
+	for i := 0; i < numberOfElements; i++ {
+		var a A
+		a.Timestamp = sameTimestamp
+		a.ExternalID = fmt.Sprintf("same_timestamp_%d", i)
+		_, err := cl.Collection("aaa").Create(&a, &a)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Use client pagination mechanism with limit 10 to get all elements
+	var allAs []A
+	pageCount := 0
+
+	for page := cl.Collection("aaa").WithParameter("limit", "10").FirstPage(); page.HasData(); page = page.Next() {
+		var onePage []A
+		_, err := page.Get(&onePage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allAs = append(allAs, onePage...)
+		pageCount++
+
+		// Safety check to prevent infinite loops
+		if pageCount > 10 {
+			t.Fatal("Too many pages, possible infinite loop")
+		}
+	}
+
+	// Verify we got all 50 elements
+	if len(allAs) != numberOfElements {
+		t.Fatalf("Expected %d elements, got %d", numberOfElements, len(allAs))
+	}
+
+	// Verify all elements have the same timestamp
+	for i, a := range allAs {
+		if !a.Timestamp.Equal(sameTimestamp) {
+			t.Fatalf("Element %d has different timestamp: expected %v, got %v", i, sameTimestamp, a.Timestamp)
+		}
+	}
+
+	// Verify all elements have unique IDs (no duplicates)
+	seenIDs := make(map[uuid.UUID]bool)
+	for i, a := range allAs {
+		if seenIDs[a.AID] {
+			t.Fatalf("Duplicate element found at index %d: %s", i, a.AID)
+		}
+		seenIDs[a.AID] = true
+	}
+
+	t.Logf("Successfully paginated through %d elements with same timestamp using %d pages", len(allAs), pageCount)
 }
