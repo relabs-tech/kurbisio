@@ -147,7 +147,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 	sqlReturnMeta := " RETURNING " + strings.Join(columns, ", ") + ", timestamp"
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", timestamp, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", timestamp FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > 1 {
 		sqlWhereAll += compareIDsString(columns[1:propertiesIndex]) + " AND "
@@ -157,7 +157,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 
 	sqlPagination := fmt.Sprintf("ORDER BY timestamp DESC, %s  DESC LIMIT $%d OFFSET $%d;", columns[0], propertiesIndex+4, propertiesIndex+5)
 
-	sqlWhereAllPlusOneExternalIndex := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
+	// Cursor pagination SQL (no offset, just limit)
+	sqlCursorPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC, %s DESC LIMIT $%d;", columns[0], propertiesIndex+4)
+	sqlCursorPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC, %s ASC LIMIT $%d;", columns[0], propertiesIndex+4)
+
+	// External index queries - separate for cursor vs page pagination due to different parameter counts
+	sqlWhereAllPlusOneExternalIndexCursor := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+5)
+	sqlWhereAllPlusOneExternalIndexPage := sqlWhereAll + fmt.Sprintf("AND %%s = $%d ", propertiesIndex+6)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
@@ -236,6 +242,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			from            time.Time
 			externalColumn  string
 			externalIndex   string
+
+			nextToken           string
+			cursor              *PaginationCursor
+			useCursorPagination bool
+			ascendingOrder      bool = false // Default to descending like collection.go
 		)
 
 		urlQuery := r.URL.Query()
@@ -257,6 +268,23 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				if err == nil && page < 1 {
 					err = fmt.Errorf("out of range")
 				}
+			case "next_token":
+				nextToken = value
+				if nextToken != "" {
+					var decodedCursor PaginationCursor
+					decodedCursor, err = DecodePaginationCursor(nextToken)
+					if err != nil {
+						break
+					}
+					cursor = &decodedCursor
+					useCursorPagination = true
+				}
+			case "order":
+				if value != "asc" && value != "desc" {
+					err = fmt.Errorf("order must be asc or desc")
+					break
+				}
+				ascendingOrder = (value == "asc")
 			case "until":
 				until, err = time.Parse(time.RFC3339, value)
 
@@ -293,29 +321,81 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 				return
 			}
 		}
-		params := mux.Vars(r)
-		if externalIndex == "" { // get entire collection
-			sqlQuery = readQueryWithTotal + sqlWhereAll
-			queryParameters = make([]interface{}, propertiesIndex-1+6)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
-		} else {
-			sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndex, externalColumn)
-			queryParameters = make([]interface{}, propertiesIndex-1+6+1)
-			for i := 1; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-1] = params[columns[i]]
-			}
-			queryParameters[propertiesIndex-1+6] = externalIndex
+
+		// Check mutual exclusion of page and next_token
+		pageProvided := urlQuery.Has("page")
+		if useCursorPagination && pageProvided {
+			http.Error(w, "page and next_token parameters are mutually exclusive", http.StatusBadRequest)
+			return
 		}
 
-		// add before and after and pagination
+		// If no cursor and no page specified, use cursor pagination by default
+		if !useCursorPagination && !pageProvided {
+			useCursorPagination = true
+		}
+
+		params := mux.Vars(r)
+
+		// Build base parameters first - different sizes for cursor vs page pagination
+		if useCursorPagination {
+			if externalIndex == "" { // get entire collection
+				sqlQuery = readQueryWithTotal + sqlWhereAll
+				queryParameters = make([]interface{}, propertiesIndex-1+5) // No offset for cursor
+				for i := 1; i < propertiesIndex; i++ {                     // skip ID
+					queryParameters[i-1] = params[columns[i]]
+				}
+			} else {
+				sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndexCursor, externalColumn)
+				queryParameters = make([]interface{}, propertiesIndex-1+5+1) // No offset for cursor
+				for i := 1; i < propertiesIndex; i++ {                       // skip ID
+					queryParameters[i-1] = params[columns[i]]
+				}
+				queryParameters[propertiesIndex-1+5] = externalIndex
+			}
+		} else {
+			if externalIndex == "" { // get entire collection
+				sqlQuery = readQueryWithTotal + sqlWhereAll
+				queryParameters = make([]interface{}, propertiesIndex-1+6) // Include offset for page
+				for i := 1; i < propertiesIndex; i++ {                     // skip ID
+					queryParameters[i-1] = params[columns[i]]
+				}
+			} else {
+				sqlQuery = fmt.Sprintf(readQueryWithTotal+sqlWhereAllPlusOneExternalIndexPage, externalColumn)
+				queryParameters = make([]interface{}, propertiesIndex-1+6+1) // Include offset for page
+				for i := 1; i < propertiesIndex; i++ {                       // skip ID
+					queryParameters[i-1] = params[columns[i]]
+				}
+				queryParameters[propertiesIndex-1+6] = externalIndex
+			}
+		}
+
+		// add before and after and limit
 		queryParameters[propertiesIndex-1+0] = until.IsZero()
 		queryParameters[propertiesIndex-1+1] = until.UTC()
 		queryParameters[propertiesIndex-1+2] = from.IsZero()
 		queryParameters[propertiesIndex-1+3] = from.UTC()
-		queryParameters[propertiesIndex-1+4] = limit
-		queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+		queryParameters[propertiesIndex-1+4] = limit + 1
+
+		if useCursorPagination {
+			if cursor != nil {
+				// Add cursor parameters to the existing parameter list
+				currentParamCount := len(queryParameters)
+				queryParameters = append(queryParameters, cursor.Timestamp.UTC(), cursor.ID)
+
+				// Add cursor condition based on ordering
+				if ascendingOrder {
+					sqlQuery += fmt.Sprintf("AND ((timestamp > $%d) OR (timestamp = $%d AND %s > $%d)) ",
+						currentParamCount+1, currentParamCount+1, columns[0], currentParamCount+2)
+				} else {
+					sqlQuery += fmt.Sprintf("AND ((timestamp < $%d) OR (timestamp = $%d AND %s < $%d)) ",
+						currentParamCount+1, currentParamCount+1, columns[0], currentParamCount+2)
+				}
+			}
+			// Don't set offset parameter for cursor pagination
+		} else {
+			// Traditional page-based pagination - set offset parameter
+			queryParameters[propertiesIndex-1+5] = (page - 1) * limit
+		}
 
 		if relation != nil {
 			// inject subquery for relation
@@ -324,7 +404,15 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
-		sqlQuery += sqlPagination
+		if useCursorPagination {
+			if ascendingOrder {
+				sqlQuery += sqlCursorPaginationAsc
+			} else {
+				sqlQuery += sqlCursorPaginationDesc
+			}
+		} else {
+			sqlQuery += sqlPagination
+		}
 
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
@@ -333,39 +421,86 @@ func (b *Backend) createBlobResource(router *mux.Router, rc blobConfiguration) {
 		}
 		response := []interface{}{}
 		defer rows.Close()
-		var totalCount int
+		hasMoreData := false
+		rowCount := 0
+		var lastTimestamp time.Time
+		var lastID uuid.UUID
 		for rows.Next() {
 			var timestamp time.Time
-			values, object := createScanValuesAndObject(&timestamp, &totalCount)
+			values, object := createScanValuesAndObject(&timestamp)
 			err := rows.Scan(values...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			mergeProperties(object)
+			rowCount++
+			if rowCount <= limit {
+				// Store last timestamp and ID for cursor generation
+				lastTimestamp = timestamp
+				lastID = *values[0].(*uuid.UUID) // First value is always the ID
 
-			// if we did not have from, take it from the first object
-			if from.IsZero() {
-				from = timestamp
+				mergeProperties(object)
+
+				// if we did not have from, take it from the first object
+				if from.IsZero() {
+					from = timestamp
+				}
+				response = append(response, object)
+			} else {
+				// We have more data than the limit, so there's a next page
+				hasMoreData = true
 			}
-			response = append(response, object)
 		}
 
 		jsonData, _ := json.Marshal(response)
-		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
-		// ETag must also be provided in headers in case If-None-Match is set
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
+
+		if useCursorPagination {
+			// Cursor pagination headers
+			if hasMoreData && len(response) > 0 {
+				// Generate next cursor from the last item in the response
+				nextCursor := PaginationCursor{
+					Timestamp: lastTimestamp,
+					ID:        lastID,
+				}
+				w.Header().Set("Pagination-Next-Token", nextCursor.Encode())
+			}
+			// Don't set page count headers for cursor pagination
+		}
+		if !useCursorPagination || page == 1 {
+			// Traditional page pagination headers
+			// Calculate page count based on whether we have more data
+			pageCount := page
+			if hasMoreData {
+				pageCount = page + 1
+			}
+			w.Header().Set("Pagination-Page-Count", strconv.Itoa(pageCount))
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+		}
+
+		if !from.IsZero() {
+			w.Header().Set("Pagination-Until", from.Format(time.RFC3339Nano))
+		}
+
+		// Calculate etag based on content and pagination type
+		var etagSeed int
+		if useCursorPagination {
+			etagSeed = len(response) // Use response length for cursor pagination
+		} else {
+			// Calculate page count for traditional pagination
+			pageCount := page
+			if hasMoreData {
+				pageCount = page + 1
+			}
+			etagSeed = pageCount
+		}
+
+		etag := bytesPlusTotalCountToEtag(jsonData, etagSeed)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
-		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
-		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
-		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
-		if !from.IsZero() {
-			w.Header().Set("Pagination-Until", from.Format(time.RFC3339Nano))
 		}
 		w.Write(jsonData)
 
