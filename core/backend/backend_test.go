@@ -1383,8 +1383,13 @@ func TestPaginationCollection(t *testing.T) {
 			t.Fatal("error: ", err, "status: ", status)
 		}
 		assert.Equal(t, strconv.Itoa(limit), h.Get("Pagination-Limit"))
-		assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
-		assert.Equal(t, strconv.Itoa((numberOfElements-1)/limit+1), h.Get("Pagination-Page-Count"))
+
+		// we expect to have a total page count which is page+1 unless we are on the last page
+		expectedCount := page + 1
+		if page >= (numberOfElements-1)/limit+1 {
+			expectedCount = page
+		}
+		assert.Equal(t, strconv.Itoa(expectedCount), h.Get("Pagination-Page-Count"))
 		assert.Equal(t, strconv.Itoa(page), h.Get("Pagination-Current-Page"))
 
 		for _, a := range as {
@@ -1439,12 +1444,10 @@ func TestPaginationBlob(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.path, func(t *testing.T) {
 			var blobs []Blob
-			status, h, err := testService.client.RawGetWithHeader(tc.path, map[string]string{}, &blobs)
+			status, _, err := testService.client.RawGetWithHeader(tc.path, map[string]string{}, &blobs)
 			if !tc.expectedError {
 				if err != nil {
 					t.Fatal(err)
-				} else {
-					assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
 				}
 			}
 			if status != tc.expectedStatus {
