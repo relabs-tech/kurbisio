@@ -10,6 +10,8 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,23 @@ import (
 	"github.com/relabs-tech/kurbisio/core/csql"
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
+
+// getIPAddress extracts the client's IP address from the request.
+func getIPAddress(r *http.Request) string {
+	// Check X-Forwarded-For header (may contain multiple IPs)
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		// The first IP is the client’s real IP
+		ips := strings.Split(forwarded, ",")
+		return strings.TrimSpace(ips[0])
+	}
+	// Fallback to RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr // as a fallback
+	}
+	return ip
+}
 
 func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConfiguration, singleton bool) {
 	schema := b.db.Schema
@@ -960,6 +979,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
+
+		if slices.Contains(rc.AuditLogs, AuditLogRead) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Read %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
 	}
 
 	readWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -1167,6 +1192,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			http.Error(w, "Error 4750", http.StatusInternalServerError)
 			return
 		}
+		if slices.Contains(rc.AuditLogs, AuditLogDelete) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Delete %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -1323,6 +1353,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			return
 		}
 
+		if slices.Contains(rc.AuditLogs, AuditLogClear) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Clear %s from IP: %s, path: %s", resource, ip, r.URL.String())
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 
@@ -1364,6 +1400,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+		}
+
+		if slices.Contains(rc.AuditLogs, AuditLogCreate) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Create %s from IP: %s, body: %v", resource, ip, bodyJSON)
 		}
 
 		// build insert query and validate that we have all parameters

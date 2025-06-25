@@ -27,6 +27,20 @@
                         "type": "string",
                         "minLength": 1
                     },
+                    "audit_logs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "create",
+                                "read",
+                                "update",
+                                "delete",
+                                "clear"
+                            ]
+                        },
+                        "description": "List of audit log resources to be used for this collection"
+                    },
                     "permits": {
                         "$ref": "#/definitions/permits"
                     },
@@ -79,6 +93,20 @@
                         "type": "string",
                         "minLength": 1
                     },
+                    "audit_logs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "create",
+                                "read",
+                                "update",
+                                "delete",
+                                "clear"
+                            ]
+                        },
+                        "description": "List of audit log resources to be used for this collection"
+                    },
                     "permits": {
                         "$ref": "#/definitions/permits"
                     },
@@ -128,6 +156,20 @@
                     },
                     "mutable": {
                         "type": "boolean"
+                    },
+                    "audit_logs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "create",
+                                "read",
+                                "update",
+                                "delete",
+                                "clear"
+                            ]
+                        },
+                        "description": "List of audit log resources to be used for this blob"
                     },
                     "max_age_cache": {
                         "type": "integer"

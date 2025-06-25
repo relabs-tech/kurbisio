@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -521,6 +522,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 
 	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
 		rlog := logger.FromContext(r.Context())
+
+		// Audit logging for read operation
+		if slices.Contains(rc.AuditLogs, AuditLogRead) {
+			ip := getIPAddress(r)
+			rlog.Infof("[AuditLog] Read %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
+
 		params := mux.Vars(r)
 		queryParameters := make([]interface{}, propertiesIndex)
 		for i := 0; i < propertiesIndex; i++ {
@@ -780,6 +788,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			return
 		}
 
+		// Audit logging for create operation
+		if slices.Contains(rc.AuditLogs, AuditLogCreate) {
+			ip := getIPAddress(r)
+			rlog.Infof("[AuditLog] Create %s from IP: %s, body: %v", resource, ip, jsonData)
+		}
+
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(jsonData)
@@ -971,6 +985,12 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			return
 		}
 
+		// Audit logging for update operation (only when not silent)
+		if !silent && slices.Contains(rc.AuditLogs, AuditLogUpdate) {
+			ip := getIPAddress(r)
+			rlog.Infof("[AuditLog] Update %s from IP: %s, body: %v", resource, ip, jsonData)
+		}
+
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
@@ -1125,6 +1145,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 		}
 		notificationJSON, _ := json.Marshal(parameters)
+
+		// Audit logging for clear operation
+		if slices.Contains(rc.AuditLogs, AuditLogClear) {
+			ip := getIPAddress(r)
+			rlog.Infof("[AuditLog] Clear %s from IP: %s, path: %s", resource, ip, r.URL.String())
+		}
+
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
@@ -1185,6 +1212,13 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		mergeProperties(object)
 		primaryID := values[0].(*uuid.UUID)
 		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+
+		// Audit logging for delete operation
+		if slices.Contains(rc.AuditLogs, AuditLogDelete) {
+			ip := getIPAddress(r)
+			rlog.Infof("[AuditLog] Delete %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
+
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, *primaryID, jsonData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
