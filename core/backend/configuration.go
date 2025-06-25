@@ -12,6 +12,43 @@ import (
 	"github.com/relabs-tech/kurbisio/core/access"
 )
 
+// AuditLog represents the type of audit log operation
+type AuditLog string
+
+const (
+	AuditLogCreate AuditLog = "create"
+	AuditLogRead   AuditLog = "read"
+	AuditLogUpdate AuditLog = "update"
+	AuditLogDelete AuditLog = "delete"
+	AuditLogClear  AuditLog = "clear"
+)
+
+// String returns the string representation of the AuditLog
+func (a AuditLog) String() string {
+	return string(a)
+}
+
+// IsValid checks if the AuditLog value is valid
+func (a AuditLog) IsValid() bool {
+	switch a {
+	case AuditLogCreate, AuditLogRead, AuditLogUpdate, AuditLogDelete, AuditLogClear:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllAuditLogs returns all valid audit log types
+func AllAuditLogs() []AuditLog {
+	return []AuditLog{
+		AuditLogCreate,
+		AuditLogRead,
+		AuditLogUpdate,
+		AuditLogDelete,
+		AuditLogClear,
+	}
+}
+
 // Configuration holds a complete backend configuration
 type Configuration struct {
 	Collections []CollectionConfiguration `json:"collections"`
@@ -34,6 +71,7 @@ type CollectionConfiguration struct {
 	WithCompanionFile             bool            `json:"with_companion_file"`
 	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
 	needsKSS                      bool            // true of this collection or any subcollection or subblob needs kss
+	AuditLogs                     []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
 // SingletonConfiguration describes a singleton resource
@@ -45,6 +83,7 @@ type SingletonConfiguration struct {
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
 	Default              json.RawMessage `json:"default"`
+	AuditLogs            []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
 // BlobConfiguration describes a blob collection resource
@@ -59,6 +98,7 @@ type BlobConfiguration struct {
 	Description          string          `json:"description"`
 	StoredExternally     bool            `json:"stored_externally"`
 	needsKSS             bool            // true of this blob or any subcollection or subblob needs kss
+	AuditLogs            []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
 // RelationConfiguration is a n:m relation from

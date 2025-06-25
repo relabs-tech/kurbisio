@@ -516,6 +516,72 @@ key which defines the duration in seconds for which the URL will be valid
 
 # Deleting a resource also delete the associated companion file if it exist
 
+# Audit Logging
+
+The backend supports comprehensive audit logging for tracking operations performed on collections and blobs.
+Audit logs capture important information about who performed what action, when, and from where.
+
+## Configuration
+
+Audit logging is configured per resource using the `audit_logs` array in collection or blob configurations.
+You can specify which operations to audit by including them in this array.
+
+Available audit log operations:
+- `create` - Log when resources are created
+- `read` - Log when resources are accessed/read
+- `update` - Log when resources are modified
+- `delete` - Log when individual resources are deleted
+- `clear` - Log when entire collections are cleared
+
+Example configuration for a user collection with full audit logging:
+
+	{
+		"collections": [
+			{
+				"resource": "user",
+				"external_index": "email",
+				"audit_logs": ["create", "read", "update", "delete", "clear"]
+			}
+		]
+	}
+
+Example configuration for a blob with selective audit logging:
+
+	{
+		"blobs": [
+			{
+				"resource": "document",
+				"static_properties": ["content_type"],
+				"audit_logs": ["create", "delete"]
+			}
+		]
+	}
+
+## Log Format
+
+Audit logs are written to the application logger using structured logging with the prefix `[AuditLog]`.
+The format varies slightly depending on the operation:
+
+For create/update operations:
+
+	[AuditLog] Create user from IP: 192.168.1.100, body: {"user_id":"...","email":"user@example.com"}
+
+For read/delete operations:
+
+	[AuditLog] Read user from IP: 192.168.1.100, path: /users/12345678-1234-1234-1234-123456789abc
+
+For clear operations:
+
+	[AuditLog] Clear user from IP: 192.168.1.100, path: /users?filter=active=false
+
+## IP Address Tracking
+
+Audit logs automatically capture the client's IP address for each operation. The system
+handles different network configurations:
+
+- **Direct connections**: Uses the client's actual IP address from the request
+- **Proxy/Load balancer scenarios**: Extracts the original client IP from the `X-Forwarded-For` header
+
 # Statistics
 
 Statistics about the backend can be retrieved by doing a GET request to:
