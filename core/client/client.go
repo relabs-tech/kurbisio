@@ -72,6 +72,11 @@ func (c Client) WithToken(token string) Client {
 	return c
 }
 
+// UpdateToken updates the token of the client
+func (c *Client) UpdateToken(token string) {
+	c.token = token
+}
+
 // WithAdminAuthorization returns a new client with admin authorizations
 // (this works only directly against the mux router, for a normal client
 //
