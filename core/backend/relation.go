@@ -27,7 +27,7 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-func (b *Backend) createRelationResource(router *mux.Router, rc relationConfiguration) {
+func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfiguration) {
 	schema := b.db.Schema
 	leftResources := strings.Split(rc.Left, "/")
 	left := leftResources[len(leftResources)-1]
