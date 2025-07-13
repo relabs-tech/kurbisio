@@ -26,13 +26,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/2gconsulting/blueprint/utils"
 	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/pointers"
 )
 
 // Client provides easy access to the REST API.
@@ -585,7 +585,7 @@ func (p *Page) Get(result interface{}) (int, error) {
 	}
 	path := c.CollectionPath()
 	status, headers, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
-	p.nextCursor = utils.AnyPtr(headers.Get("Pagination-Next-Token"))
+	p.nextCursor = pointers.StringPtr(headers.Get("Pagination-Next-Token"))
 	if err != nil {
 		return status, err
 	}
