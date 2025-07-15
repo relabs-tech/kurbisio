@@ -801,6 +801,11 @@ func (c Client) RawPostWithHeader(path string, headers map[string]string, body i
 		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
+
+	if status == http.StatusNoContent {
+		return status, nil
+	}
+
 	if status != http.StatusCreated && status != http.StatusOK {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
 			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
