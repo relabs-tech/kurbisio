@@ -167,7 +167,7 @@ func (e DynamicAuth) UpdateMux(router *mux.Router) error {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(res); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

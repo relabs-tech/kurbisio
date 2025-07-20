@@ -35,14 +35,14 @@ import (
 // - Requires a shortcut to the account collection
 //
 // Added Resources:
-// - Collection: "account/token_metadata" - stores token metadata
-//   Users can list/read/update/delete their own tokens
-// - Singleton: "account/token_metadata/token" - stores secure token data
-//   (hashed token with salt, not the actual token)
+//   - Collection: "account/token_metadata" - stores token metadata
+//     Users can list/read/update/delete their own tokens
+//   - Singleton: "account/token_metadata/token" - stores secure token data
+//     (hashed token with salt, not the actual token)
 //
 // API Endpoints:
-// - POST /_account/create_token - Creates a new token
-//   Accepts JSON body matching TokenMetadataModel
+//   - POST /_account/create_token - Creates a new token
+//     Accepts JSON body matching TokenMetadataModel
 //
 // Security:
 // - Tokens are never stored in plain text
@@ -196,7 +196,7 @@ func (a AuthToken) UpdateMux(router *mux.Router) error {
 				return
 			}
 
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprintf(w, `{"token": "%s"}`, metadata.Token)
 		},
