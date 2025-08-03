@@ -526,7 +526,12 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 		var key string
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
-		ticker := time.NewTicker(max(time.Second, minTimeout-5*time.Second))
+		minTimeout = minTimeout - 5*time.Second
+		if minTimeout <= 0 {
+			logger.Default().Errorf("minTimeout is negative %v", minTimeout)
+		}
+		minTimeout = max(minTimeout, time.Second)
+		ticker := time.NewTicker(minTimeout)
 		tickerDone := make(chan bool)
 		go func() {
 			for {
@@ -622,7 +627,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			rlog.WithError(err).Error("error processing " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 		} else {
 			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			// job handled sucessfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
+			// job handled successfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
 			var serial int
 			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
 			if err != nil && err != sql.ErrNoRows {

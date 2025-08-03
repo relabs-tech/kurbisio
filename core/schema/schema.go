@@ -8,6 +8,7 @@ package schema
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -135,7 +136,7 @@ func (v *Validator) validate(loader gojsonschema.JSONLoader, schemaID string) er
 		for _, e := range result.Errors() {
 			err += fmt.Sprintf("- %s\n", e)
 		}
-		return fmt.Errorf(err)
+		return errors.New(err)
 	}
 	return nil
 }

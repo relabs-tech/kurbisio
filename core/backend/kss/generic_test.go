@@ -75,7 +75,7 @@ func test_PresignedURL_PostGet(t *testing.T, driver kss.Driver, cl client.Client
 	v := tainted.Query()
 	v.Set("key", "another_key")
 	tainted.RawQuery = v.Encode()
-	status, err := cl.RawPut(tainted.String(), []byte("123"), nil)
+	status, _ := cl.RawPut(tainted.String(), []byte("123"), nil)
 
 	if status != http.StatusForbidden {
 		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
@@ -87,7 +87,7 @@ func test_PresignedURL_PostGet(t *testing.T, driver kss.Driver, cl client.Client
 		t.Fatal(err)
 	}
 	time.Sleep(3 * time.Millisecond)
-	status, err = cl.RawPut(pushURL, []byte("123"), nil)
+	status, _ = cl.RawPut(pushURL, []byte("123"), nil)
 	if status != http.StatusForbidden {
 		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
 	}
@@ -97,7 +97,7 @@ func test_PresignedURL_PostGet(t *testing.T, driver kss.Driver, cl client.Client
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = cl.PostMultipart(pushURL, []byte("123"))
+	status, _ = cl.PostMultipart(pushURL, []byte("123"))
 	if status != http.StatusForbidden {
 		t.Fatalf("Expecting %v got '%v'", http.StatusForbidden, status)
 	}
@@ -144,52 +144,8 @@ func test_Delete(t *testing.T, driver kss.Driver, cl client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	status, _, _ = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
 	if status != http.StatusNotFound {
 		t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
 	}
-}
-
-func test_DeleteAllWithPrefix(t *testing.T, driver kss.Driver, cl client.Client) {
-	// Test that a file can be deleted
-
-	var urls []string
-	for _, key := range []string{"key/1", "key/2"} {
-		// Push some data
-		pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		_, err = cl.PostMultipart(pushURL, []byte("123"))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// Now try to read the data
-		getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		urls = append(urls, getURL)
-
-		var data []byte
-		_, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	err := driver.DeleteAllWithPrefix("key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, u := range urls {
-		var data []byte
-		status, _, _ := cl.RawGetBlobWithHeader(u, map[string]string{}, &data)
-		if status != http.StatusNotFound {
-			t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
-		}
-	}
-
 }

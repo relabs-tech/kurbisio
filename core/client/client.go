@@ -16,6 +16,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -69,6 +70,11 @@ func NewWithURL(url string) Client {
 func (c Client) WithToken(token string) Client {
 	c.token = token
 	return c
+}
+
+// UpdateToken updates the token of the client
+func (c *Client) UpdateToken(token string) {
+	c.token = token
 }
 
 // WithAdminAuthorization returns a new client with admin authorizations
@@ -930,7 +936,7 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 	status := res.StatusCode
 
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
+		return status, errors.New(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		err = json.Unmarshal(resBody, result)
@@ -977,7 +983,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 	}
 	status := res.StatusCode
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
+		return status, errors.New(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -1018,7 +1024,7 @@ func (c Client) RawDelete(path string) (int, error) {
 	}
 	status := res.StatusCode
 	if status != http.StatusNoContent {
-		return status, fmt.Errorf(strings.TrimSpace(string(resBody)))
+		return status, errors.New(strings.TrimSpace(string(resBody)))
 	}
 	return status, nil
 }

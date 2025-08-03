@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/kurbisio/core/csql"
 
@@ -81,7 +79,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if read.A != write.A || read.B != read.B {
+	if read.A != write.A || read.B != write.B {
 		t.Fatal("could not read what I wrote")
 	}
 	if timestamp.Sub(now) > time.Second {
@@ -101,9 +99,4 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("Deleted key still exists")
 	}
 
-}
-
-func asJSON(object interface{}) string {
-	j, _ := json.Marshal(object)
-	return string(j)
 }
