@@ -1295,6 +1295,7 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 					Brokers:  b.kafkaBrokers,
 					Topic:    "notification." + strings.ReplaceAll(resource, "/", "."),
 					MaxBytes: 10e6, // 10 MB
+					GroupID:  consumerGroup,
 				}
 				if consumerGroup == "" {
 					cfg.GroupID = "default"
