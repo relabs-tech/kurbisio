@@ -51,7 +51,9 @@ const InternalDatabaseSchemaVersion = 3
 
 // Backend is the generic rest backend
 type Backend struct {
-	ctx                 context.Context
+	ctx      context.Context
+	cancelFn context.CancelFunc // cancelFn is used to cancel the context when the backend is closed
+
 	config              Configuration
 	db                  *csql.DB
 	router              *mux.Router
@@ -98,8 +100,6 @@ type Builder struct {
 	Config string
 	// DB is a postgres database. This is mandatory.
 	DB *csql.DB
-
-	Ctx context.Context
 
 	KafkaBrokers    []string
 	OutboxTableName string
@@ -169,8 +169,11 @@ func New(bb *Builder) *Backend {
 		log.Fatalf("Invalid json %v", err)
 	}
 	bb.Router.UseEncodedPath()
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
 	b := &Backend{
-		ctx:                      bb.Ctx,
+		ctx:                      ctx,
+		cancelFn:                 cancelFunc,
 		config:                   config,
 		db:                       bb.DB,
 		kafkaBrokers:             bb.KafkaBrokers,
@@ -307,6 +310,14 @@ func (r byDepth) Swap(i, j int) {
 }
 func (r byDepth) Less(i, j int) bool {
 	return r[i].depth() < r[j].depth()
+}
+
+func (b *Backend) Close() error {
+	b.cancelFn()
+	if err := b.db.Close(); err != nil {
+		return fmt.Errorf("cannot close database: %w", err)
+	}
+	return nil
 }
 
 // handleResourceRoutes adds all necessary handlers for the specified configuration
