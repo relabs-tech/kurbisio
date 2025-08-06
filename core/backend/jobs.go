@@ -769,10 +769,12 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 							switch jb.Job {
 							case "notification":
 								notification := jb.notification()
-								if handler, ok := b.callbacks[topic]; ok {
+								key := notificationJobKey(notification.Resource, notification.Operation)
+								if splits := strings.Split(topic, ":"); len(splits) > 1 {
+									key += ":" + splits[1] // we have a consumer group attached to the reader key
+								}
+								if handler, ok := b.callbacks[key]; ok {
 									err = handler.notification(ctx, notification)
-								} else {
-									err = fmt.Errorf("no handler for key %s", topic)
 								}
 							case "event", "queued-event":
 								event := jb.event()
@@ -1090,10 +1092,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, jobName st
 	if event.Priority != PriorityForeground && event.Priority != PriorityBackground {
 		return http.StatusBadRequest, fmt.Errorf("bogus priority")
 	}
-	key := eventJobKey(event.Type)
-	if _, ok := b.callbacks[key]; !ok {
-		return http.StatusBadRequest, fmt.Errorf("no callback handler installed for %s", key)
-	}
+
 	var (
 		err         error
 		data        []byte
@@ -1190,9 +1189,10 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 	if w == nil {
 		var kafkaHashBalancer kafka.Hash
 		w = &kafka.Writer{
-			Addr:      kafka.TCP(b.kafkaBrokers...),
-			BatchSize: 1,
-			Topic:     "event." + j.Type,
+			Addr:                   kafka.TCP(b.kafkaBrokers...),
+			BatchSize:              1,
+			AllowAutoTopicCreation: true,
+			Topic:                  "event." + j.Type,
 			Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
 				// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
 				m.Key = []byte(strings.Split(string(m.Key), "_")[0])
@@ -1216,6 +1216,9 @@ func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
 	key := j.Resource
 	if j.ResourceID != uuid.Nil {
 		key = key + "_" + j.ResourceID.String()
+	}
+	if key == "" {
+		key = j.Key
 	}
 	if j.Job == "queued-event" {
 		// since topics are configured to compact and keep the last message for each,
@@ -1289,37 +1292,43 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 		if consumerGroup != "" {
 			key = key + ":" + consumerGroup
 		}
-		if len(b.kafkaBrokers) > 0 {
-			if _, ok := b.kafkaReaderByTopic[key]; !ok {
-				cfg := kafka.ReaderConfig{
-					Brokers:  b.kafkaBrokers,
-					Topic:    "notification." + strings.ReplaceAll(resource, "/", "."),
-					MaxBytes: 10e6, // 10 MB
-					GroupID:  consumerGroup,
-				}
-				if consumerGroup == "" {
-					cfg.GroupID = "default"
-				}
-				reader := kafka.NewReader(cfg)
-				b.kafkaReaderByTopic[key] = reader
-				go func() {
-					<-b.ctx.Done()
-					if reader != nil {
-						if err := reader.Close(); err != nil {
-							log.Println("error closing kafka reader for topic", key, ":", err)
-						}
-					}
-				}()
-				log.Println("installed kafka reader for topic:", key, "brokers:", b.kafkaBrokers)
-			} else {
-				log.Fatalf("reader for topic %s is already installed", key)
-			}
-		}
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(context.Background()).Fatalf("resource notification handler for %s already installed", key)
 		}
 		logger.FromContext(context.Background()).Debugf("install resource notification handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
+	}
+
+	if len(b.kafkaBrokers) > 0 {
+		topic := "notification." + strings.ReplaceAll(resource, "/", ".")
+
+		readerKey := topic
+		if consumerGroup != "" {
+			readerKey = readerKey + ":" + consumerGroup
+		}
+
+		if consumerGroup == "" {
+			consumerGroup = "default"
+		}
+		if _, ok := b.kafkaReaderByTopic[readerKey]; !ok {
+			cfg := kafka.ReaderConfig{
+				Brokers:  b.kafkaBrokers,
+				Topic:    topic,
+				MaxBytes: 10e6, // 10 MB
+				GroupID:  consumerGroup,
+			}
+			reader := kafka.NewReader(cfg)
+			b.kafkaReaderByTopic[readerKey] = reader
+			go func() {
+				<-b.ctx.Done()
+				if reader != nil {
+					if err := reader.Close(); err != nil {
+						log.Println("error closing kafka reader for topic", readerKey, ":", err)
+					}
+				}
+			}()
+			log.Println("installed kafka reader for topic:", readerKey, "brokers:", b.kafkaBrokers)
+		}
 	}
 }
 
