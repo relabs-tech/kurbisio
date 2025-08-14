@@ -257,7 +257,9 @@ on the user_id property
 		This is equivalent to using the following, but may be more convenient to write in some cases.
 	GET users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
 
-The system supports pagination and filtering of responses by creation time:
+The system supports pagination and filtering of responses by creation time. Two pagination methods are available:
+
+## Traditional Page-based Pagination
 
 	?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
 	?limit=n  sets a page limit of n items
@@ -266,12 +268,30 @@ The system supports pagination and filtering of responses by creation time:
 	?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
 	Timestamps must be formatted following RFC3339 (https://tools.ietf.org/html/rfc3339).
 
+## Cursor-based Pagination (Default)
+
+	?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
+	?limit=n  sets a page limit of n items
+	?next_token=token  specifies the cursor token for retrieving the next page of results
+	?from=t   selects items created at or after the timestamp t
+	?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
+	Timestamps must be formatted following RFC3339 (https://tools.ietf.org/html/rfc3339).
+
+Cursor-based pagination is used by default when no page parameter is specified. The page and next_token parameters are mutually exclusive.
+
 The response carries the following custom headers for pagination:
 
+For traditional page-based pagination (deprecated):
+
 	"Pagination-Limit"        the page limit
-	"Pagination-Total-Count"  the total number of items in the collection
-	"Pagination-Page-Count"   the total number of pages in the collection
+	"Pagination-Page-Count"   if there are more pages to fetch, this header is set to page+1
 	"Pagination-Current-Page" the currently selected page
+	"Pagination-Until"	    the timestamp of the first item in the response
+
+For cursor-based pagination:
+
+	"Pagination-Limit"        the page limit
+	"Pagination-Next-Token"   the cursor token for the next page (only present if more data is available)
 	"Pagination-Until"	    the timestamp of the first item in the response
 
 The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
