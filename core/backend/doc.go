@@ -259,7 +259,7 @@ on the user_id property
 
 The system supports pagination and filtering of responses by creation time. Two pagination methods are available:
 
-## Traditional Page-based Pagination
+## Traditional Page-based Pagination (only when page parameter is specified, ?page=1 for first page)
 
 	?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
 	?limit=n  sets a page limit of n items
@@ -284,19 +284,16 @@ The response carries the following custom headers for pagination:
 For traditional page-based pagination (deprecated):
 
 	"Pagination-Limit"        the page limit
-	"Pagination-Page-Count"   if there are more pages to fetch, this header is set to page+1
+	"Pagination-Page-Count"   the total number of pages in the collection
 	"Pagination-Current-Page" the currently selected page
-	"Pagination-Until"	    the timestamp of the first item in the response
+	"Pagination-Total-Count"  the total number of items in the collection
 
 For cursor-based pagination:
 
 	"Pagination-Limit"        the page limit
 	"Pagination-Next-Token"   the cursor token for the next page (only present if more data is available)
-	"Pagination-Until"	    the timestamp of the first item in the response
 
-The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
-avoids page drift. A well-behaving application would get the first page without any filter, and then use the timestamp
-reported in the "Pagination-Until" header as until-parameter for querying pages further down.
+The maximum allowed limit is 100, which is also the default limit.
 
 For collections it is possible to only retrieve meta data, by specifying the ?onlymeta=true query parameter. Meta data are
 all defining identifiers, the timestamp and each object's revision number.

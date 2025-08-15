@@ -464,9 +464,6 @@ func timeToEtag(t time.Time) string {
 func bytesToEtag(b []byte) string {
 	return fmt.Sprintf("\"%x\"", sha1.Sum(b))
 }
-func bytesPlusTotalCountToEtag(b []byte, t int) string {
-	return fmt.Sprintf("\"%x%x\"", sha1.Sum(b), t)
-}
 
 // clever recursive function to patch a generic json object.
 func patchObject(object map[string]interface{}, patch map[string]interface{}) {
