@@ -131,9 +131,6 @@
                             "type": "string",
                             "minLength": 1
                         }
-                    },
-                    "with_log": {
-                        "type": "boolean"
                     }
                 }
             }

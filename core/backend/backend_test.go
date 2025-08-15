@@ -1384,13 +1384,11 @@ func TestPaginationCollection(t *testing.T) {
 		}
 		assert.Equal(t, strconv.Itoa(limit), h.Get("Pagination-Limit"))
 
-		// we expect to have a total page count which is page+1 unless we are on the last page
-		expectedCount := page + 1
-		if page >= (numberOfElements-1)/limit+1 {
-			expectedCount = page
-		}
+		expectedCount := (numberOfElements-1)/limit + 1
 		assert.Equal(t, strconv.Itoa(expectedCount), h.Get("Pagination-Page-Count"))
 		assert.Equal(t, strconv.Itoa(page), h.Get("Pagination-Current-Page"))
+
+		assert.Equal(t, strconv.Itoa(numberOfElements), h.Get("Pagination-Total-Count"))
 
 		for _, a := range as {
 			if _, ok := received[a.AID]; ok {

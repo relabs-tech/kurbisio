@@ -37,7 +37,7 @@ func DecodePaginationCursor(encoded string) (PaginationCursor, error) {
 
 	parts := strings.SplitN(string(decoded), ".", 2)
 	if len(parts) != 2 {
-		return PaginationCursor{}, fmt.Errorf("invalid cursor format: " + encoded)
+		return PaginationCursor{}, fmt.Errorf("invalid cursor format: %s", encoded)
 	}
 
 	timestampNano, err := strconv.ParseInt(parts[0], 10, 64)

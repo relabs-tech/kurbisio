@@ -126,12 +126,26 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 			if len(filter) > 0 && !filter[resource] {
 				continue
 			}
-			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
+
+			query := fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'),reltuples::bigint AS estimate FROM pg_class WHERE  oid = '%s."%s"'::regclass`,
+				b.db.Schema, resource, b.db.Schema, resource)
+
+			row := b.db.QueryRow(query)
 			var size, count int64
 			if err := row.Scan(&size, &count); err != nil {
 				logger.FromContext(context.Background()).WithError(err).Errorln("Error 4028: Scan")
 				http.Error(w, "Error 4028: ", http.StatusInternalServerError)
 				return
+			}
+			if count <= 50 { // count is small, get the real count instead of the rough estimate
+				query := fmt.Sprintf(`SELECT count(*) FROM %s."%s" `, b.db.Schema, resource)
+				row := b.db.QueryRow(query)
+				if err := row.Scan(&count); err != nil {
+					logger.FromContext(context.Background()).WithError(err).Errorln("Error 4029: Scan")
+					http.Error(w, "Error 4029: ", http.StatusInternalServerError)
+					return
+				}
+
 			}
 			var averageSize float64 = 0
 			if count != 0 {

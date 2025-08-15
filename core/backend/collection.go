@@ -261,9 +261,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
-		fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryWithFakeTotal := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaWithTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
-		fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaWithFakeTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > ownerIndex {
 		sqlWhereAll += compareIDsString(columns[ownerIndex:propertiesIndex]) + " AND "
@@ -535,9 +539,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			selectors[columns[i]] = params[columns[i]]
 		}
 		if metaonly {
-			sqlQuery = readQueryMetaWithTotal
+			if useCursorPagination {
+				sqlQuery = readQueryMetaWithFakeTotal
+			} else {
+				sqlQuery = readQueryMetaWithTotal
+			}
 		} else {
-			sqlQuery = readQueryWithTotal
+			if useCursorPagination {
+				sqlQuery = readQueryWithFakeTotal
+			} else {
+				sqlQuery = readQueryWithTotal
+			}
 		}
 		sqlQuery += sqlWhereAll
 
@@ -635,13 +647,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 
 		response := []interface{}{}
 		defer rows.Close()
+		var totalCount int
 		hasMoreData := false
 		rowCount := 0
 		var lastTimestamp time.Time
 		var lastID uuid.UUID
 		for rows.Next() {
 			var timestamp time.Time
-			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int))
+			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
 			err := rows.Scan(values...)
 			if err != nil {
 				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
@@ -722,37 +735,39 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				}
 				w.Header().Set("Pagination-Next-Token", nextCursor.Encode())
 			}
-		}
-
-		if !useCursorPagination || page == 1 {
-			// Traditional page pagination headers
-			// Calculate page count based on whether we have more data
-			pageCount := page
-			if hasMoreData {
-				pageCount = page + 1
-			}
-			w.Header().Set("Pagination-Page-Count", strconv.Itoa(pageCount))
-			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
-		}
-
-		if !from.IsZero() {
-			w.Header().Set("Pagination-Until", from.Format(time.RFC3339Nano))
-		}
-
-		// Calculate etag based on content and pagination type
-		var etagSeed int
-		if useCursorPagination {
-			etagSeed = len(response) // Use response length for cursor pagination
 		} else {
-			// Calculate page count for traditional pagination
-			pageCount := page
-			if hasMoreData {
-				pageCount = page + 1
+			if page > 0 && totalCount == 0 {
+				// sql does not return total count if we ask beyond limits, hence
+				// we need a second query
+				queryParameters[propertiesIndex-ownerIndex+4] = 1
+				queryParameters[propertiesIndex-ownerIndex+5] = 0
+				rows, err := b.db.Query(sqlQuery, queryParameters...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
+					http.Error(w, "Error 4722", http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var timestamp time.Time
+					values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+					err := rows.Scan(values...)
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+						http.Error(w, "Error 4725", http.StatusInternalServerError)
+						return
+					}
+				}
 			}
-			etagSeed = pageCount
+
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+			w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+			w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+
 		}
 
-		etag := bytesPlusTotalCountToEtag(jsonData, etagSeed)
+		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
