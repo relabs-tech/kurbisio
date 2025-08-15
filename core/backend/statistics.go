@@ -23,8 +23,10 @@ import (
 
 // ResourceStatistics represents information about a resource
 type ResourceStatistics struct {
-	Resource string `json:"resource"`
-	Count    int64  `json:"count"`
+	Resource     string  `json:"resource"`
+	Count        int64   `json:"count"`
+	SizeMB       float64 `json:"size_mb"`
+	AverageSizeB float64 `json:"average_size_b"`
 }
 
 // StatisticsDetails represents information about the backend resources
@@ -124,19 +126,23 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 			if len(filter) > 0 && !filter[resource] {
 				continue
 			}
-			query := fmt.Sprintf("SELECT reltuples::bigint AS estimate FROM pg_class WHERE  oid = '%s.%s'::regclass",
-				b.db.Schema, resource)
-			row := b.db.QueryRow(query)
-			var count int64
-			if err := row.Scan(&count); err != nil {
+			row := b.db.QueryRow(fmt.Sprintf(`SELECT pg_total_relation_size('%s."%s"'), count(*) FROM %s."%s" `, b.db.Schema, resource, b.db.Schema, resource))
+			var size, count int64
+			if err := row.Scan(&size, &count); err != nil {
 				logger.FromContext(context.Background()).WithError(err).Errorln("Error 4028: Scan")
 				http.Error(w, "Error 4028: ", http.StatusInternalServerError)
 				return
 			}
+			var averageSize float64 = 0
+			if count != 0 {
+				averageSize = float64(size / count)
+			}
 
 			*stats = append(*stats, ResourceStatistics{
-				Resource: resource,
-				Count:    count,
+				Resource:     resource,
+				Count:        count,
+				SizeMB:       float64(size) / 1024. / 1024.,
+				AverageSizeB: averageSize,
 			})
 		}
 	}
