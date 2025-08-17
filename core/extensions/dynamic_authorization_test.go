@@ -94,7 +94,7 @@ func TestDynamicAuth(t *testing.T) {
 						"read", "update"
 					],
 					"selectors": [
-						"org"
+						"team"
 					]
 				}
 			    ]
