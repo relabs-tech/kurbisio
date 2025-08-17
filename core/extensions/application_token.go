@@ -10,9 +10,11 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
+type ContextKey string
+
 const (
-	ApplicationTokenHeader   = "X-Application-Token"
-	applicationTokenDisabled = "application_token_disabled"
+	ApplicationTokenHeader              = "X-Application-Token"
+	applicationTokenDisabled ContextKey = "application_token_disabled"
 )
 
 // ApplicationToken is a Kurbisio extension that limits roles based on an application token.
