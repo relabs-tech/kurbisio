@@ -268,7 +268,13 @@ func (e DynamicAuth) addAuth(router *mux.Router, lastResource, targetSelector st
 		return
 	}
 
+	if v, ok := auth.Selectors[lastResource+"_id"]; ok && v != targetSelector {
+		rlog.Errorf("Overriding existing authorization for %s, selector: %s, was set to %s", lastResource, targetSelector, v)
+		return
+	}
+
 	adminClient := client.NewWithRouter(router).WithAdminAuthorization()
+	addedRole := false
 	for p := adminClient.
 		Collection(e.RolesCollection).
 		WithParent(parentID).WithFilter(e.Selector+"_id", selector).FirstPage(); p.HasData(); p = p.Next() {
@@ -281,14 +287,23 @@ func (e DynamicAuth) addAuth(router *mux.Router, lastResource, targetSelector st
 
 		for _, r := range roles {
 			for _, role := range r.Roles {
+				if role == "" {
+					continue
+				}
 				if !slices.Contains(e.AllowedRoles, role) {
 					rlog.Errorf("role %s is not allowed for %s", role, selector)
 					continue
 				}
-				auth.Roles = append(auth.Roles, role)
+				if !slices.Contains(auth.Roles, role) {
+					auth.Roles = append(auth.Roles, role)
+				}
+				addedRole = true
 			}
 		}
 	}
+	if !addedRole {
+		return
+	}
+	rlog.Infof("Adding authorization for %s, selector: %s", lastResource, targetSelector)
 	auth.Selectors[lastResource+"_id"] = targetSelector
-
 }
