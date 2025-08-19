@@ -10,6 +10,8 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +34,24 @@ import (
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
-func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConfiguration, singleton bool) {
+// getIPAddress extracts the client's IP address from the request.
+func getIPAddress(r *http.Request) string {
+	// Check X-Forwarded-For header (may contain multiple IPs)
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		// The first IP is the client’s real IP
+		ips := strings.Split(forwarded, ",")
+		return strings.TrimSpace(ips[0])
+	}
+	// Fallback to RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr // as a fallback
+	}
+	return ip
+}
+
+func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConfiguration, singleton bool) {
 	schema := b.db.Schema
 	resource := rc.Resource
 
@@ -243,8 +262,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryWithFakeTotal := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
 	readQueryMetaWithTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaWithFakeTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
 	sqlWhereAll := "WHERE "
 	if propertiesIndex > ownerIndex {
 		sqlWhereAll += compareIDsString(columns[ownerIndex:propertiesIndex]) + " AND "
@@ -256,6 +279,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 
 	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
+
+	// Cursor pagination SQL (no offset, just limit)
+	sqlCursorPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC LIMIT $%d;",
+		columns[0], propertiesIndex-ownerIndex+1+4)
+
+	sqlCursorPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC LIMIT $%d;",
+		columns[0], propertiesIndex-ownerIndex+1+4)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
 
@@ -377,6 +407,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			ascendingOrder      bool
 			metaonly            bool
 			err                 error
+			nextToken           string
+			cursor              *PaginationCursor
+			useCursorPagination bool
 		)
 		urlQuery := r.URL.Query()
 		parameters := map[string]string{}
@@ -398,6 +431,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				page, err = strconv.Atoi(value)
 				if err == nil && page < 1 {
 					err = fmt.Errorf("out of range")
+				}
+			case "next_token":
+				nextToken = value
+				if nextToken != "" {
+					var decodedCursor PaginationCursor
+					decodedCursor, err = DecodePaginationCursor(nextToken)
+					if err != nil {
+						break switchStatement
+					}
+					cursor = &decodedCursor
+					useCursorPagination = true
 				}
 			case "until":
 				until, err = time.Parse(time.RFC3339, value)
@@ -476,28 +520,67 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				return
 			}
 		}
+
+		// Check mutual exclusion of page and next_token
+		pageProvided := urlQuery.Has("page")
+		if useCursorPagination && pageProvided {
+			http.Error(w, "page and next_token parameters are mutually exclusive", http.StatusBadRequest)
+			return
+		}
+
+		// If no cursor and no page specified, use cursor pagination by default
+		if !useCursorPagination && !pageProvided {
+			useCursorPagination = true
+		}
+
 		params := mux.Vars(r)
 		selectors := map[string]string{}
 		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 			selectors[columns[i]] = params[columns[i]]
 		}
 		if metaonly {
-			sqlQuery = readQueryMetaWithTotal
+			if useCursorPagination {
+				sqlQuery = readQueryMetaWithFakeTotal
+			} else {
+				sqlQuery = readQueryMetaWithTotal
+			}
 		} else {
-			sqlQuery = readQueryWithTotal
+			if useCursorPagination {
+				sqlQuery = readQueryWithFakeTotal
+			} else {
+				sqlQuery = readQueryWithTotal
+			}
 		}
 		sqlQuery += sqlWhereAll
-		if len(externalValues) == 0 && len(filterJSONValues) == 0 { // no filter(s), get entire collection
-			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6)
-		} else {
-			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues)+len(filterJSONValues))
-			for i := range externalValues {
-				sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+7+i)
-				queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
+
+		// Build base parameters first - different sizes for cursor vs page pagination
+		if useCursorPagination {
+			if len(externalValues) == 0 && len(filterJSONValues) == 0 {
+				queryParameters = make([]interface{}, propertiesIndex-ownerIndex+5) // No offset for cursor
+			} else {
+				queryParameters = make([]interface{}, propertiesIndex-ownerIndex+5+len(externalValues)+len(filterJSONValues))
+				for i := range externalValues {
+					sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+6+i)
+					queryParameters[propertiesIndex-ownerIndex+5+i] = externalValues[i]
+				}
+				for i := range filterJSONValues {
+					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+6+i+len(externalValues))
+					queryParameters[propertiesIndex-ownerIndex+5+i+len(externalValues)] = filterJSONValues[i]
+				}
 			}
-			for i := range filterJSONValues {
-				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+7+i+len(externalValues))
-				queryParameters[propertiesIndex-ownerIndex+6+i+len(externalValues)] = filterJSONValues[i]
+		} else {
+			if len(externalValues) == 0 && len(filterJSONValues) == 0 {
+				queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6) // Include offset for page
+			} else {
+				queryParameters = make([]interface{}, propertiesIndex-ownerIndex+6+len(externalValues)+len(filterJSONValues))
+				for i := range externalValues {
+					sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+7+i)
+					queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
+				}
+				for i := range filterJSONValues {
+					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+7+i+len(externalValues))
+					queryParameters[propertiesIndex-ownerIndex+6+i+len(externalValues)] = filterJSONValues[i]
+				}
 			}
 		}
 
@@ -508,8 +591,30 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		queryParameters[propertiesIndex-ownerIndex+1] = until.UTC()
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
-		queryParameters[propertiesIndex-ownerIndex+4] = limit
-		queryParameters[propertiesIndex-ownerIndex+5] = (page - 1) * limit
+
+		// We add 1 to the limit to check if there is more data than the limit
+		queryParameters[propertiesIndex-ownerIndex+4] = limit + 1
+
+		if useCursorPagination {
+			if cursor != nil {
+				// Add cursor parameters to the existing parameter list
+				currentParamCount := len(queryParameters)
+				queryParameters = append(queryParameters, cursor.Timestamp.UTC(), cursor.ID)
+
+				// Add cursor condition based on ordering
+				if ascendingOrder {
+					sqlQuery += fmt.Sprintf("AND ((timestamp > $%d) OR (timestamp = $%d AND %s > $%d)) ",
+						currentParamCount+1, currentParamCount+1, columns[0], currentParamCount+2)
+				} else {
+					sqlQuery += fmt.Sprintf("AND ((timestamp < $%d) OR (timestamp = $%d AND %s < $%d)) ",
+						currentParamCount+1, currentParamCount+1, columns[0], currentParamCount+2)
+				}
+			}
+			// Don't set offset parameter for cursor pagination
+		} else {
+			// Traditional page-based pagination - set offset parameter
+			queryParameters[propertiesIndex-ownerIndex+5] = (page - 1) * limit
+		}
 
 		if relation != nil {
 			// inject subquery for relation
@@ -518,11 +623,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			queryParameters = append(queryParameters, relation.queryParameters...)
 		}
 
-		if ascendingOrder {
-			sqlQuery += sqlPaginationAsc
-
+		if useCursorPagination {
+			if ascendingOrder {
+				sqlQuery += sqlCursorPaginationAsc
+			} else {
+				sqlQuery += sqlCursorPaginationDesc
+			}
 		} else {
-			sqlQuery += sqlPaginationDesc
+			if ascendingOrder {
+				sqlQuery += sqlPaginationAsc
+			} else {
+				sqlQuery += sqlPaginationDesc
+			}
 		}
 
 		// fmt.Printf("\n\nQUERY %#v parameters: %#v\n\n", sqlQuery, queryParameters)
@@ -536,6 +648,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		response := []interface{}{}
 		defer rows.Close()
 		var totalCount int
+		hasMoreData := false
+		rowCount := 0
+		var lastTimestamp time.Time
+		var lastID uuid.UUID
 		for rows.Next() {
 			var timestamp time.Time
 			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
@@ -545,6 +661,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "Error 4725", http.StatusInternalServerError)
 				return
 			}
+			rowCount++
+			if rowCount > limit {
+				hasMoreData = true
+				continue // Skip this object, we only want the first 'limit' objects
+			}
+
+			// Store last timestamp and ID for cursor generation
+			lastTimestamp = timestamp
+			lastID = *values[0].(*uuid.UUID) // First value is always the ID
 			if !metaonly {
 				var uploadURL string
 				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
@@ -582,6 +707,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				from = timestamp
 			}
 			response = append(response, object)
+
 		}
 
 		// do request interceptors
@@ -596,40 +722,52 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			jsonData = data
 		}
 
-		if page > 0 && totalCount == 0 {
-			// sql does not return total count if we ask beyond limits, hence
-			// we need a second query
-			queryParameters[propertiesIndex-ownerIndex+4] = 1
-			queryParameters[propertiesIndex-ownerIndex+5] = 0
-			rows, err := b.db.Query(sqlQuery, queryParameters...)
-			if err != nil {
-				nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
-				http.Error(w, "Error 4722", http.StatusInternalServerError)
-				return
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var timestamp time.Time
-				values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
-				err := rows.Scan(values...)
-				if err != nil {
-					nillog.WithError(err).Errorf("Error 4725: cannot scan values")
-					http.Error(w, "Error 4725", http.StatusInternalServerError)
-					return
-				}
-			}
-		}
-
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
-		w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
-		w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
-		w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
-		if !from.IsZero() {
-			w.Header().Set("Pagination-Until", from.Format(time.RFC3339Nano))
+
+		if useCursorPagination {
+			// Cursor pagination headers
+			if hasMoreData && len(response) > 0 {
+				// Generate next cursor from the last item in the response
+				nextCursor := PaginationCursor{
+					Timestamp: lastTimestamp,
+					ID:        lastID,
+				}
+				w.Header().Set("Pagination-Next-Token", nextCursor.Encode())
+			}
+		} else {
+			if page > 0 && totalCount == 0 {
+				// sql does not return total count if we ask beyond limits, hence
+				// we need a second query
+				queryParameters[propertiesIndex-ownerIndex+4] = 1
+				queryParameters[propertiesIndex-ownerIndex+5] = 0
+				rows, err := b.db.Query(sqlQuery, queryParameters...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
+					http.Error(w, "Error 4722", http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var timestamp time.Time
+					values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+					err := rows.Scan(values...)
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+						http.Error(w, "Error 4725", http.StatusInternalServerError)
+						return
+					}
+				}
+			}
+
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+			w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+			w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+
 		}
 
-		etag := bytesPlusTotalCountToEtag(jsonData, totalCount)
+		etag := bytesToEtag(jsonData)
 		w.Header().Set("Etag", etag)
 		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
@@ -856,6 +994,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
+
+		if slices.Contains(rc.AuditLogs, AuditLogRead) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Read %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
 	}
 
 	readWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -1063,6 +1207,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			http.Error(w, "Error 4750", http.StatusInternalServerError)
 			return
 		}
+		if slices.Contains(rc.AuditLogs, AuditLogDelete) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Delete %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -1219,6 +1368,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 			return
 		}
 
+		if slices.Contains(rc.AuditLogs, AuditLogClear) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Clear %s from IP: %s, path: %s", resource, ip, r.URL.String())
+		}
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 
@@ -1260,6 +1415,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc collectionConf
 				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+		}
+
+		if slices.Contains(rc.AuditLogs, AuditLogCreate) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Create %s from IP: %s, body: %v", resource, ip, bodyJSON)
 		}
 
 		// build insert query and validate that we have all parameters

@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/pointers"
 )
 
 // Client provides easy access to the REST API.
@@ -43,6 +43,8 @@ type Client struct {
 	token      string
 	auth       *access.Authorization
 	ctx        context.Context
+
+	defaultHeaders map[string]string
 }
 
 // NewWithRouter creates a client to make pseudo-REST requests to the backend,
@@ -52,8 +54,15 @@ type Client struct {
 // WithContext() specifies a different base context all together.
 func NewWithRouter(router *mux.Router) Client {
 	return Client{
-		router: router,
+		router:         router,
+		defaultHeaders: map[string]string{},
 	}
+}
+
+// WithHeader returns a new client with a default header added
+func (c Client) WithHeader(key string, value string) Client {
+	c.defaultHeaders[key] = value
+	return c
 }
 
 // NewWithURL creates a client to make REST requests to the backend
@@ -111,7 +120,7 @@ func (c Client) WithContext(ctx context.Context) Client {
 	return c
 }
 
-func (c Client) context() context.Context {
+func (c Client) Context() context.Context {
 	ctx := c.ctx
 	if c.ctx == nil {
 		ctx = context.Background()
@@ -546,10 +555,12 @@ func (r Item) Patch(body interface{}, result interface{}) (int, error) {
 
 // Page is a requester for one page in a collection
 type Page struct {
-	r          Collection
-	page       int
-	pageCount  int
-	totalCount int
+	r Collection
+	// the cursor to fetch this page
+	cursor *string
+
+	// the cursor to fetch the next page, only populated after Get()
+	nextCursor *string
 }
 
 // FirstPage returns a requester for the first page of a collection
@@ -558,33 +569,25 @@ type Page struct {
 // it manages page itself. You can set all others parameters, including
 // limit.
 func (r Collection) FirstPage() Page {
-	return Page{page: 1, r: r}
+	return Page{r: r}
 }
 
 // HasData returns true if the page has data (by definition true for the first page)
 func (p Page) HasData() bool {
-	return p.page == 1 || p.page <= p.pageCount
-}
-
-// TotalCount returns the total number of elements (only available after you have called Get on the page)
-func (p Page) TotalCount() int {
-	return p.totalCount
+	return p.cursor == nil || *p.cursor != ""
 }
 
 // Get gets one page of the collection
 func (p *Page) Get(result interface{}) (int, error) {
-	path := p.r.WithParameter("page", strconv.Itoa(p.page)).CollectionPath()
-	status, header, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
+	c := p.r
+	if p.cursor != nil {
+		c = c.WithParameter("next_token", *p.cursor)
+	}
+	path := c.CollectionPath()
+	status, headers, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
+	p.nextCursor = pointers.StringPtr(headers.Get("Pagination-Next-Token"))
 	if err != nil {
 		return status, err
-	}
-	pageCount, err := strconv.Atoi(header.Get("Pagination-Page-Count"))
-	if err == nil {
-		p.pageCount = pageCount
-	}
-	totalCount, err := strconv.Atoi(header.Get("Pagination-Total-Count"))
-	if err == nil {
-		p.totalCount = totalCount
 	}
 	return status, nil
 }
@@ -592,9 +595,8 @@ func (p *Page) Get(result interface{}) (int, error) {
 // Next returns the next page
 func (p Page) Next() Page {
 	return Page{
-		r:         p.r,
-		page:      p.page + 1,
-		pageCount: p.pageCount,
+		r:      p.r,
+		cursor: p.nextCursor,
 	}
 }
 
@@ -606,7 +608,10 @@ func (p Page) Next() Page {
 // result can be map[string]interface{} or a raw *[]byte.
 // result can be nil.
 func (c Client) RawGet(path string, result interface{}) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 
 	var err error
 	var res *http.Response
@@ -655,7 +660,11 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 // result can be map[string]interface{} or a raw *[]byte.
 // result can be nil.
 func (c Client) RawGetWithHeader(path string, header map[string]string, result interface{}) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
+
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -707,7 +716,10 @@ func (c Client) RawGetWithHeader(path string, header map[string]string, result i
 //
 // Returns the actual http status code and the return header
 func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blob *[]byte) (int, http.Header, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodGet, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodGet, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -749,15 +761,14 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	return status, res.Header, nil
 }
 
-// RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// RawPostWithHeader posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
 //
 // body can also be a []byte, result can also be raw *[]byte.
 // result can be nil.
-func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
-
+func (c Client) RawPostWithHeader(path string, headers map[string]string, body interface{}, result interface{}) (int, error) {
 	var err error
 	j, ok := body.([]byte)
 	if !ok {
@@ -767,7 +778,15 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
+
+	for key, value := range headers {
+		r.Header.Add(key, value)
+	}
+
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -787,6 +806,11 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 		resBody, _ = io.ReadAll(res.Body)
 	}
 	status := res.StatusCode
+
+	if status == http.StatusNoContent {
+		return status, nil
+	}
+
 	if status != http.StatusCreated && status != http.StatusOK {
 		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
 			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
@@ -802,13 +826,27 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 	return status, err
 }
 
+// RawPost posts a resource to path. Expects http.StatusCreated as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// The path can be extend with query strings.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
+func (c Client) RawPost(path string, body interface{}, result interface{}) (int, error) {
+	return c.RawPostWithHeader(path, nil, body, result)
+}
+
 // RawPostBlob posts a resource to path. Expects http.StatusCreated as response, otherwise it will
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -863,7 +901,10 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPut, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -910,7 +951,10 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 // result can be nil.
 func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	for key, value := range header {
 		r.Header.Add(key, value)
 	}
@@ -962,7 +1006,10 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodPatch, c.url+path, bytes.NewBuffer(j))
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPatch, c.url+path, bytes.NewBuffer(j))
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var res *http.Response
 	var resBody []byte
 	if c.router != nil {
@@ -1002,7 +1049,10 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 //
 // Returns the actual http status code.
 func (c Client) RawDelete(path string) (int, error) {
-	r, _ := http.NewRequestWithContext(c.context(), http.MethodDelete, c.url+path, nil)
+	r, _ := http.NewRequestWithContext(c.Context(), http.MethodDelete, c.url+path, nil)
+	for key, value := range c.defaultHeaders {
+		r.Header.Add(key, value)
+	}
 	var err error
 	var res *http.Response
 	var resBody []byte
@@ -1049,6 +1099,10 @@ func (c Client) PostMultipart(url string, data []byte) (status int, err error) {
 	if err != nil {
 		return
 	}
+	for key, value := range c.defaultHeaders {
+		req.Header.Add(key, value)
+	}
+
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	var res *http.Response

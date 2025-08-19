@@ -12,17 +12,54 @@ import (
 	"github.com/relabs-tech/kurbisio/core/access"
 )
 
-// Configuration holds a complete backend configuration
-type Configuration struct {
-	Collections []collectionConfiguration `json:"collections"`
-	Singletons  []singletonConfiguration  `json:"singletons"`
-	Blobs       []blobConfiguration       `json:"blobs"`
-	Relations   []relationConfiguration   `json:"relations"`
-	Shortcuts   []shortcutConfiguration   `json:"shortcuts"`
+// AuditLog represents the type of audit log operation
+type AuditLog string
+
+const (
+	AuditLogCreate AuditLog = "create"
+	AuditLogRead   AuditLog = "read"
+	AuditLogUpdate AuditLog = "update"
+	AuditLogDelete AuditLog = "delete"
+	AuditLogClear  AuditLog = "clear"
+)
+
+// String returns the string representation of the AuditLog
+func (a AuditLog) String() string {
+	return string(a)
 }
 
-// collectionConfiguration describes a collection resource
-type collectionConfiguration struct {
+// IsValid checks if the AuditLog value is valid
+func (a AuditLog) IsValid() bool {
+	switch a {
+	case AuditLogCreate, AuditLogRead, AuditLogUpdate, AuditLogDelete, AuditLogClear:
+		return true
+	default:
+		return false
+	}
+}
+
+// AllAuditLogs returns all valid audit log types
+func AllAuditLogs() []AuditLog {
+	return []AuditLog{
+		AuditLogCreate,
+		AuditLogRead,
+		AuditLogUpdate,
+		AuditLogDelete,
+		AuditLogClear,
+	}
+}
+
+// Configuration holds a complete backend configuration
+type Configuration struct {
+	Collections []CollectionConfiguration `json:"collections"`
+	Singletons  []SingletonConfiguration  `json:"singletons"`
+	Blobs       []BlobConfiguration       `json:"blobs"`
+	Relations   []RelationConfiguration   `json:"relations"`
+	Shortcuts   []ShortcutConfiguration   `json:"shortcuts"`
+}
+
+// CollectionConfiguration describes a collection resource
+type CollectionConfiguration struct {
 	Resource                      string          `json:"resource"`
 	ExternalIndex                 string          `json:"external_index"`
 	StaticProperties              []string        `json:"static_properties"`
@@ -34,10 +71,11 @@ type collectionConfiguration struct {
 	WithCompanionFile             bool            `json:"with_companion_file"`
 	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
 	needsKSS                      bool            // true of this collection or any subcollection or subblob needs kss
+	AuditLogs                     []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
-// singletonConfiguration describes a singleton resource
-type singletonConfiguration struct {
+// SingletonConfiguration describes a singleton resource
+type SingletonConfiguration struct {
 	Resource             string          `json:"resource"`
 	Permits              []access.Permit `json:"permits"`
 	Description          string          `json:"description"`
@@ -45,10 +83,11 @@ type singletonConfiguration struct {
 	StaticProperties     []string        `json:"static_properties"`
 	SearchableProperties []string        `json:"searchable_properties"`
 	Default              json.RawMessage `json:"default"`
+	AuditLogs            []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
-// blobConfiguration describes a blob collection resource
-type blobConfiguration struct {
+// BlobConfiguration describes a blob collection resource
+type BlobConfiguration struct {
 	Resource             string          `json:"resource"`
 	ExternalIndex        string          `json:"external_index"`
 	StaticProperties     []string        `json:"static_properties"`
@@ -59,11 +98,12 @@ type blobConfiguration struct {
 	Description          string          `json:"description"`
 	StoredExternally     bool            `json:"stored_externally"`
 	needsKSS             bool            // true of this blob or any subcollection or subblob needs kss
+	AuditLogs            []AuditLog      `json:"audit_logs"` // list of audit log names to use for this collection
 }
 
-// relationConfiguration is a n:m relation from
+// RelationConfiguration is a n:m relation from
 // another collection, blob collection or relation
-type relationConfiguration struct {
+type RelationConfiguration struct {
 	Resource     string          `json:"resource"`
 	Left         string          `json:"left"`
 	Right        string          `json:"right"`
@@ -72,9 +112,9 @@ type relationConfiguration struct {
 	Description  string          `json:"description"`
 }
 
-// shortcutConfiguration is shorcut to a resource
+// ShortcutConfiguration is shortcut to a resource
 // for an authenticated request
-type shortcutConfiguration struct {
+type ShortcutConfiguration struct {
 	Shortcut    string   `json:"shortcut"`
 	Target      string   `json:"target"`
 	Roles       []string `json:"roles"`

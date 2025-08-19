@@ -257,7 +257,9 @@ on the user_id property
 		This is equivalent to using the following, but may be more convenient to write in some cases.
 	GET users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
 
-The system supports pagination and filtering of responses by creation time:
+The system supports pagination and filtering of responses by creation time. Two pagination methods are available:
+
+## Traditional Page-based Pagination (only when page parameter is specified, ?page=1 for first page)
 
 	?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
 	?limit=n  sets a page limit of n items
@@ -266,17 +268,32 @@ The system supports pagination and filtering of responses by creation time:
 	?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
 	Timestamps must be formatted following RFC3339 (https://tools.ietf.org/html/rfc3339).
 
+## Cursor-based Pagination (Default)
+
+	?order=[asc|desc]  sets the sorting order to be descending (newest first, the default) or ascending (oldest first)
+	?limit=n  sets a page limit of n items
+	?next_token=token  specifies the cursor token for retrieving the next page of results
+	?from=t   selects items created at or after the timestamp t
+	?until=t  selects items created up until and including the timestamp t. The default is "0001-01-01 00:00:00 +0000 UTC".
+	Timestamps must be formatted following RFC3339 (https://tools.ietf.org/html/rfc3339).
+
+Cursor-based pagination is used by default when no page parameter is specified. The page and next_token parameters are mutually exclusive.
+
 The response carries the following custom headers for pagination:
 
+For traditional page-based pagination (deprecated):
+
 	"Pagination-Limit"        the page limit
-	"Pagination-Total-Count"  the total number of items in the collection
 	"Pagination-Page-Count"   the total number of pages in the collection
 	"Pagination-Current-Page" the currently selected page
-	"Pagination-Until"	    the timestamp of the first item in the response
+	"Pagination-Total-Count"  the total number of items in the collection
 
-The maximum allowed limit is 100, which is also the default limit. Combining pagination with the until-filter
-avoids page drift. A well-behaving application would get the first page without any filter, and then use the timestamp
-reported in the "Pagination-Until" header as until-parameter for querying pages further down.
+For cursor-based pagination:
+
+	"Pagination-Limit"        the page limit
+	"Pagination-Next-Token"   the cursor token for the next page (only present if more data is available)
+
+The maximum allowed limit is 100, which is also the default limit.
 
 For collections it is possible to only retrieve meta data, by specifying the ?onlymeta=true query parameter. Meta data are
 all defining identifiers, the timestamp and each object's revision number.
@@ -495,6 +512,72 @@ It is possible to define the validity duration of the pre-signed URL in the conf
 key which defines the duration in seconds for which the URL will be valid
 
 # Deleting a resource also delete the associated companion file if it exist
+
+# Audit Logging
+
+The backend supports comprehensive audit logging for tracking operations performed on collections and blobs.
+Audit logs capture important information about who performed what action, when, and from where.
+
+## Configuration
+
+Audit logging is configured per resource using the `audit_logs` array in collection or blob configurations.
+You can specify which operations to audit by including them in this array.
+
+Available audit log operations:
+- `create` - Log when resources are created
+- `read` - Log when resources are accessed/read
+- `update` - Log when resources are modified
+- `delete` - Log when individual resources are deleted
+- `clear` - Log when entire collections are cleared
+
+Example configuration for a user collection with full audit logging:
+
+	{
+		"collections": [
+			{
+				"resource": "user",
+				"external_index": "email",
+				"audit_logs": ["create", "read", "update", "delete", "clear"]
+			}
+		]
+	}
+
+Example configuration for a blob with selective audit logging:
+
+	{
+		"blobs": [
+			{
+				"resource": "document",
+				"static_properties": ["content_type"],
+				"audit_logs": ["create", "delete"]
+			}
+		]
+	}
+
+## Log Format
+
+Audit logs are written to the application logger using structured logging with the prefix `[AuditLog]`.
+The format varies slightly depending on the operation:
+
+For create/update operations:
+
+	[AuditLog] Create user from IP: 192.168.1.100, body: {"user_id":"...","email":"user@example.com"}
+
+For read/delete operations:
+
+	[AuditLog] Read user from IP: 192.168.1.100, path: /users/12345678-1234-1234-1234-123456789abc
+
+For clear operations:
+
+	[AuditLog] Clear user from IP: 192.168.1.100, path: /users?filter=active=false
+
+## IP Address Tracking
+
+Audit logs automatically capture the client's IP address for each operation. The system
+handles different network configurations:
+
+- **Direct connections**: Uses the client's actual IP address from the request
+- **Proxy/Load balancer scenarios**: Extracts the original client IP from the `X-Forwarded-For` header
 
 # Statistics
 
