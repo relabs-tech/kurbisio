@@ -9,6 +9,7 @@ package backend
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,9 +17,12 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/lib/pq"
+	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/google/uuid"
@@ -153,16 +157,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._sch
 	}
 
 	b.jobsInsertQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
-	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
-	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=5,context=$8,
+	(job,type,key,resource,resource_id,payload,timestamp,context, scheduled_at, attempts_left) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	DO UPDATE SET payload=$6,timestamp=$7,attempts_left=$10,context=$8,
 	scheduled_at=CASE WHEN $9 is NULL AND _$JUSTTABLENAME_.implicit_schedule is true THEN _$JUSTTABLENAME_.scheduled_at ELSE $9 END::TIMESTAMP,
 	implicit_schedule=CASE WHEN $9 is NULL THEN _$JUSTTABLENAME_.implicit_schedule ELSE false END
 	RETURNING serial;`)
 
 	b.jobsInsertIfNotExistQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
-	(job,type,key,resource,resource_id,payload,timestamp,attempts_left,context, scheduled_at) 
-	VALUES($1,$2,$3,$4,$5,$6,$7,5,$8,$9) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
+	(job,type,key,resource,resource_id,payload,timestamp,context, scheduled_at,attempts_left) 
+	VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0
 	DO NOTHING RETURNING serial;`)
 
 	b.jobsUpdateQuery = b.prioritizedJobQueries(`UPDATE $TABLENAME
@@ -206,6 +210,30 @@ RETURNING scheduled_at;
 SET scheduled_at = $2,
 implicit_schedule = FALSE
 WHERE serial = $1 RETURNING serial;`)
+
+	b.jobsInsertKafkaQuery = b.prioritizedJobQueries(`INSERT INTO $TABLENAME
+	(serial, job, type, key, resource, resource_id, payload, timestamp, attempts_left, context, last_scheduled_at, last_implicit_schedule)
+	VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (serial) DO NOTHING RETURNING serial;`)
+
+	if len(b.kafkaBrokers) > 0 {
+		// enabling kafka if brokers are set
+		b.kafkaWriterByTopic = make(map[string]*kafka.Writer)
+		b.kafkaReaderByTopic = make(map[string]*kafka.Reader)
+		_, err := b.db.Exec(fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id                  BIGSERIAL PRIMARY KEY,
+			create_time         TIMESTAMP WITH TIME ZONE NOT NULL,
+			kafka_topic         VARCHAR(249) NOT NULL,
+			kafka_key           VARCHAR(1024) NOT NULL,
+			kafka_value         VARCHAR(100000),
+			kafka_header_keys   TEXT[] NOT NULL,
+			kafka_header_values TEXT[] NOT NULL,
+			leader_id           UUID
+		)`, b.outBoxTableName))
+		if err != nil {
+			log.Fatalf("Cannot create outbox table for kafka: %v", err)
+		}
+	}
 
 	logger.Default().Debugln("job processing pipelines")
 	logger.Default().Debugln("  handle route: /kurbisio/events PUT")
@@ -463,15 +491,8 @@ func (b *Backend) eventsWithAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3]time.Duration) {
-
 	rescheduledError := fmt.Errorf("rescheduled rate limited event")
 	for jb := range jobs {
-		if jb.AttemptsLeft == 0 {
-			ready <- true
-			continue
-		}
-		var key string
-
 		ctx := logger.ContextWithLoggerFromData(context.Background(), jb.ContextData)
 		rlog := logger.FromContext(ctx).WithFields(logrus.Fields{
 			"resource":     jb.Resource,
@@ -483,6 +504,27 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			"attempts":     jb.AttemptsLeft,
 			"priority":     jb.Priority,
 		})
+		rlog.Debug("processing normal job")
+
+		if jb.AttemptsLeft == 0 {
+			rlog.Debug("job has no more left attempts, skipping")
+			ready <- true
+			continue
+		}
+		if len(b.kafkaBrokers) > 0 {
+			if err := b.writeJobToKafka(ctx, jb); err == nil {
+				// deleting the job from the database
+				err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&jb.Serial)
+				if err != nil && err != sql.ErrNoRows {
+					rlog.WithError(err).Errorln("failed to delete job from database")
+				} else {
+					rlog.Debugf("deleted job %d from database", jb.Serial)
+					ready <- true
+					continue
+				}
+			}
+		}
+		var key string
 
 		minTimeout := min(timeouts[0], timeouts[1], timeouts[2])
 		minTimeout = minTimeout - 5*time.Second
@@ -516,6 +558,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			}
 		}()
 
+		rlog.Debug("executing handler")
 		// call the registered handler in a panic/recover envelope
 		err := func() (err error) {
 			defer func() {
@@ -574,6 +617,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			}
 			return
 		}()
+		rlog.Debug("handler returned", err)
 		ticker.Stop()
 		tickerDone <- true
 
@@ -650,8 +694,7 @@ func (b *Backend) ProcessJobsAsync(heartbeat time.Duration) {
 
 	go func() {
 		b.ProcessJobsSync(5 * time.Minute)
-		for {
-			<-b.processJobsAsyncTrigger
+		for range b.processJobsAsyncTrigger {
 			b.ProcessJobsSync(5 * time.Minute)
 		}
 	}()
@@ -673,8 +716,115 @@ func (b *Backend) ProcessJobsSync(max time.Duration) bool {
 //
 // Jobs will be tried up to 3 times according to the timeouts specified.
 func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]time.Duration) bool {
+	ctx := context.Background()
 	rlog := logger.FromContext(context.Background())
 	startTime := time.Now()
+
+	kafkaJobsWg := &sync.WaitGroup{}
+	if len(b.kafkaReaderByTopic) > 0 {
+		b.pipelineConcurrency = 1 // leaving only one thread for kurbisio queue processing for scheduled jobs
+		if max > 0 {
+			ctx, _ = context.WithTimeout(ctx, max)
+		}
+
+		for topic, reader := range b.kafkaReaderByTopic {
+			kafkaJobsWg.Add(1)
+			go func(topic string, reader *kafka.Reader) {
+				defer kafkaJobsWg.Done()
+
+				rlog := rlog.WithField("callback_key", topic)
+				rlog = rlog.WithField("kafka_topic", reader.Config().Topic)
+				rlog = rlog.WithField("kafka_group_id", reader.Config().GroupID)
+
+				for {
+					select {
+					case <-ctx.Done():
+						rlog.Debugf("kafka reader for topic %s timed out", topic)
+						return
+					default:
+						m, err := reader.FetchMessage(ctx)
+						if err != nil && !errors.Is(err, context.DeadlineExceeded) && err != io.EOF {
+							rlog.WithError(err).Errorln("could not fetch message from kafka")
+							continue
+						}
+						if errors.Is(err, context.DeadlineExceeded) || err == io.EOF {
+							rlog.Debugf("kafka reader for topic %s finished: %v", topic, err)
+							// we have reached the timeout, we can stop reading from this topic
+							return
+						}
+
+						var jb job
+						err = json.Unmarshal(m.Value, &jb)
+						if err != nil {
+							rlog.WithError(err).Errorln("could not unmarshal message from kafka")
+							return
+						}
+
+						func() {
+							defer func() {
+								if r := recover(); r != nil {
+									err = fmt.Errorf("recovered from panic: %s. stacktrace:\n%s", r, string(debug.Stack()))
+								}
+							}()
+
+							switch jb.Job {
+							case "notification":
+								notification := jb.notification()
+								key := notificationJobKey(notification.Resource, notification.Operation)
+								if splits := strings.Split(topic, ":"); len(splits) > 1 {
+									key += ":" + splits[len(splits)-1] // we have a consumer group attached to the reader key
+								}
+								if handler, ok := b.callbacks[key]; ok {
+									err = handler.notification(ctx, notification)
+								}
+							case "event", "queued-event":
+								event := jb.event()
+
+								if rateLimit, ok := b.rateLimits[event.Type]; ok && rateLimit.delta > 0 {
+									// we have a rate limited event. We must reschedule if a) the event has an implicit
+									// schedule (happens at retry), or b) the event is too old
+								}
+
+								if handler, ok := b.callbacks[topic]; ok {
+									err = handler.event(ctx, event)
+								} else {
+									err = fmt.Errorf("no handler for key %s", topic)
+								}
+							default:
+								err = fmt.Errorf("unknown job type %s", jb.Job)
+							}
+						}()
+
+						if err != nil {
+							rlog.WithError(err).Error("error processing " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+							var serial int
+							err = b.db.QueryRow(b.jobsInsertKafkaQuery[jb.Priority],
+								jb.Serial,
+								jb.Job,
+								jb.Type,
+								jb.Key,
+								jb.Resource,
+								jb.ResourceID,
+								jb.Payload,
+								jb.Timestamp,
+								jb.AttemptsLeft,
+								jb.ContextData,
+								jb.ScheduledAt,
+								jb.ImplicitSchedule,
+							).Scan(&serial)
+							if err != nil {
+								rlog.WithError(err).Error("could not insert job " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+								continue
+							}
+						}
+						if err := reader.CommitMessages(ctx, m); err != nil {
+							rlog.WithError(err).Error("could not commit kafka message for job " + topic + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
+						}
+					}
+				}
+			}(topic, reader)
+		}
+	}
 
 	getJob := func(priority EventPriority) (j job, err error) {
 		j.Priority = priority
@@ -742,9 +892,10 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			}
 		}
 	}
-
+	kafkaJobsWg.Wait()
 	close(ready)
 	close(jobs)
+
 	maxedOutString := ""
 	if maxedOut {
 		maxedOutString = " (maxed out)"
@@ -758,11 +909,49 @@ type jobHandler struct {
 	event        func(context.Context, Event) error
 }
 
+type handleEventConfig struct {
+	consumerGroup string
+}
+
+type HandleEventOpt func(*handleEventConfig)
+
+func WithConsumerGroup(consumerGroup string) HandleEventOpt {
+	return func(o *handleEventConfig) {
+		o.consumerGroup = consumerGroup
+	}
+}
+
 // HandleEvent installs a callback handler the specified event. Handlers are executed
 // out-of-band. If a handler fails (i.e. it returns a non-nil error), it will be retried
 // a few times with increasing timeout.
-func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error) {
+func (b *Backend) HandleEvent(event string, handler func(context.Context, Event) error, opts ...HandleEventOpt) {
+	var cfg handleEventConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	consumerGroup := cfg.consumerGroup
+
 	key := eventJobKey(event)
+	if consumerGroup != "" && len(b.kafkaBrokers) > 0 {
+		key = key + ":" + consumerGroup
+	}
+
+	if len(b.kafkaBrokers) > 0 {
+		if _, ok := b.kafkaReaderByTopic[key]; !ok {
+			if consumerGroup == "" {
+				consumerGroup = "default"
+			}
+			reader := kafka.NewReader(kafka.ReaderConfig{
+				Brokers:  b.kafkaBrokers,
+				GroupID:  consumerGroup,
+				Topic:    "event." + event,
+				MaxBytes: 10e6, // 10 MB
+			})
+			b.kafkaReaderByTopic[key] = reader
+		} else {
+			log.Fatalf("reader for topic %s is already installed", key)
+		}
+	}
 	if _, ok := b.callbacks[key]; ok {
 		log.Fatalf("callback handler for %s already installed", key)
 	}
@@ -900,14 +1089,11 @@ func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time
 }
 
 // raiseEventWithResourceInternal returns the http status code as well
-func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
+func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, jobName string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
 	if event.Priority != PriorityForeground && event.Priority != PriorityBackground {
 		return http.StatusBadRequest, fmt.Errorf("bogus priority")
 	}
-	key := eventJobKey(event.Type)
-	if _, ok := b.callbacks[key]; !ok {
-		return http.StatusBadRequest, fmt.Errorf("no callback handler installed for %s", key)
-	}
+
 	var (
 		err         error
 		data        []byte
@@ -925,7 +1111,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	if scheduleAt != nil {
 		tmp := scheduleAt.UTC()
 		scheduleAtUTC = &tmp
-	} else if job == "event" || job == "queued-event" {
+	} else if jobName == "event" || jobName == "queued-event" {
 		if rateLimit, ok := b.rateLimits[event.Type]; ok {
 			var rateLimitedSchedule time.Time
 			deltaPG := rateLimit.delta.Seconds()
@@ -941,32 +1127,114 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 		}
 	}
 
-	var serial int
-	query := b.jobsInsertQuery
-	if ifNotExist {
-		query = b.jobsInsertIfNotExistQuery
-	}
-	err = b.db.QueryRow(query[event.Priority],
-		job,
-		event.Type,
-		event.Key,
-		event.Resource,
-		event.ResourceID,
-		data,
-		time.Now().UTC(),
-		contextData,
-		scheduleAtUTC,
-	).Scan(&serial)
+	if scheduleAtUTC == nil && len(b.kafkaBrokers) > 0 {
+		if err = b.writeJobToKafka(ctx, job{
+			Job:          jobName,
+			Type:         event.Type,
+			Key:          event.Key,
+			Resource:     event.Resource,
+			ResourceID:   event.ResourceID,
+			Payload:      data,
+			ContextData:  contextData,
+			Timestamp:    time.Now().UTC(),
+			AttemptsLeft: 5,
+		}); err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("write job to kafka: %w", err)
+		}
+	} else {
+		var serial int
+		query := b.jobsInsertQuery
+		if ifNotExist {
+			query = b.jobsInsertIfNotExistQuery
+		}
+		err = b.db.QueryRow(query[event.Priority],
+			jobName,
+			event.Type,
+			event.Key,
+			event.Resource,
+			event.ResourceID,
+			data,
+			time.Now().UTC(),
+			contextData,
+			scheduleAtUTC,
+			5, // attempts left
+		).Scan(&serial)
 
-	if err == csql.ErrNoRows {
-		return http.StatusConflict, nil
+		if err == csql.ErrNoRows {
+			return http.StatusConflict, nil
+		}
+
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
 	}
 
-	if err != nil {
-		return http.StatusInternalServerError, err
-	}
 	b.TriggerJobs()
 	return http.StatusNoContent, nil
+}
+
+func (b *Backend) writeJobToKafka(ctx context.Context, j job) error {
+	if len(b.kafkaBrokers) == 0 {
+		return fmt.Errorf("no kafka brokers configured")
+	}
+
+	// if we have a kafka client, we must serialize the event data to json
+	// and send it to the kafka topic
+
+	jobBytes, err := json.Marshal(j)
+	if err != nil {
+		return fmt.Errorf("json marshal: %w", err)
+	}
+
+	w := b.kafkaWriterByTopic[j.Type]
+	if w == nil {
+		var kafkaHashBalancer kafka.Hash
+		w = &kafka.Writer{
+			Addr:                   kafka.TCP(b.kafkaBrokers...),
+			BatchSize:              1,
+			AllowAutoTopicCreation: true,
+			Topic:                  "event." + j.Type,
+			Balancer: kafka.BalancerFunc(func(m kafka.Message, i ...int) int {
+				// we want to take hash(resource, resource_id), but we want to keep the key unique for queue-event
+				m.Key = []byte(strings.Split(string(m.Key), "_")[0])
+				if len(m.Key) == 0 {
+					m.Key = []byte(uuid.Must(uuid.NewRandom()).String())
+				}
+				return kafkaHashBalancer.Balance(m, i...)
+			}),
+		}
+		b.kafkaWriterByTopic[j.Type] = w
+		go func() {
+			<-b.ctx.Done()
+			if w != nil {
+				if err := w.Close(); err != nil {
+					logger.FromContext(ctx).WithError(err).Errorf("error closing kafka writer for topic %s", j.Type)
+				}
+			}
+		}()
+	}
+
+	key := j.Resource
+	if j.ResourceID != uuid.Nil {
+		key = key + "_" + j.ResourceID.String()
+	}
+	if key == "" {
+		key = j.Key
+	}
+	if j.Job == "queued-event" {
+		// since topics are configured to compact and keep the last message for each,
+		// we must make the key unique for queued-events
+		key = key + "_" + uuid.New().String()
+	}
+
+	err = w.WriteMessages(ctx, kafka.Message{
+		Key:   []byte(key),
+		Value: jobBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("kafka write: %w", err)
+	}
+	return nil
 }
 
 // HandleResourceNotification installs a callback handler for out-of-band notifications for a given resource
@@ -987,6 +1255,14 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 // If you need to intercept operations - including the immutable read and list operations -, then you can do that
 // in-band with a request handler, see HandleResourceRequest()
 func (b *Backend) HandleResourceNotification(resource string, handler func(context.Context, Notification) error, operations ...core.Operation) {
+	var consumerGroup string
+	if strings.Contains(resource, "->") {
+		parts := strings.Split(resource, "->")
+		resource = parts[0]
+		if len(parts) > 1 {
+			consumerGroup = parts[1]
+		}
+	}
 
 	if !b.hasCollectionOrSingleton(resource) {
 		logger.FromContext(context.Background()).Fatalf("handle resource notification for %s: no such collection or singleton", resource)
@@ -1013,13 +1289,47 @@ func (b *Backend) HandleResourceNotification(resource string, handler func(conte
 				}
 			}
 		}
-
 		key := notificationJobKey(resource, operation)
+		if consumerGroup != "" {
+			key = key + ":" + consumerGroup
+		}
 		if _, ok := b.callbacks[key]; ok {
 			logger.FromContext(context.Background()).Fatalf("resource notification handler for %s already installed", key)
 		}
 		logger.FromContext(context.Background()).Debugf("install resource notification handler for %s", key)
 		b.callbacks[key] = jobHandler{notification: handler}
+	}
+
+	if len(b.kafkaBrokers) > 0 {
+		topic := "notification." + strings.ReplaceAll(resource, "/", ".")
+
+		readerKey := topic
+		if consumerGroup != "" {
+			readerKey = readerKey + ":" + consumerGroup
+		}
+
+		if consumerGroup == "" {
+			consumerGroup = "default"
+		}
+		if _, ok := b.kafkaReaderByTopic[readerKey]; !ok {
+			cfg := kafka.ReaderConfig{
+				Brokers:  b.kafkaBrokers,
+				Topic:    topic,
+				MaxBytes: 10e6, // 10 MB
+				GroupID:  consumerGroup,
+			}
+			reader := kafka.NewReader(cfg)
+			b.kafkaReaderByTopic[readerKey] = reader
+			go func() {
+				<-b.ctx.Done()
+				if reader != nil {
+					if err := reader.Close(); err != nil {
+						log.Println("error closing kafka reader for topic", readerKey, ":", err)
+					}
+				}
+			}()
+			log.Println("installed kafka reader for topic:", readerKey, "brokers:", b.kafkaBrokers)
+		}
 	}
 }
 
@@ -1038,7 +1348,14 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	request := notificationJobKey(resource, operation)
 
 	// only create a notification if somebody requested it
-	if _, ok := b.callbacks[request]; !ok {
+	ok := false
+	for k := range b.callbacks {
+		if strings.HasPrefix(k, request) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
 		return tx.Commit()
 	}
 
@@ -1049,18 +1366,39 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	contextData := logger.SerializeLoggerContext(ctx)
 
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
-	var serial int
-	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
-		operation,
-		resource,
-		resourceID,
-		payload,
-		time.Now().UTC(),
-		contextData,
-	).Scan(&serial)
+	var err error
 
+	j := job{
+		Job:         "notification",
+		Type:        string(operation),
+		Resource:    resource,
+		ResourceID:  resourceID,
+		Payload:     payload,
+		Timestamp:   time.Now().UTC(),
+		ContextData: contextData,
+	}
+	if len(b.kafkaBrokers) == 0 {
+		var serial int
+		err = tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
+			"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
+			"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
+			j.Type, j.Resource, j.ResourceID, j.Payload, j.Timestamp, j.ContextData,
+		).Scan(&serial)
+	} else {
+		j.AttemptsLeft = 2 // we don't retry kafka jobs
+		jobBytes, _ := json.Marshal(j)
+		err = tx.QueryRow(fmt.Sprintf(`
+		INSERT INTO %s (
+			create_time, 
+			kafka_topic, 
+			kafka_key, 
+			kafka_value, 
+			kafka_header_keys, 
+			kafka_header_values
+		) VALUES (
+			 $1, $2, $3, $4, $5, $6
+		)`, b.outBoxTableName), time.Now().UTC(), "notification."+strings.ReplaceAll(j.Resource, "/", "."), j.ResourceID, jobBytes, pq.StringArray([]string{"operation"}), pq.StringArray([]string{j.Type})).Err()
+	}
 	if err != nil {
 		rlog.Debugf("commitWithNotification before: tx.Rollback()")
 		tx.Rollback()

@@ -25,6 +25,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	// To allow the use of go:embed
+	_ "embed"
+
+	kafka "github.com/segmentio/kafka-go"
+
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
 	"github.com/relabs-tech/kurbisio/core/backend/kss"
@@ -46,6 +51,9 @@ const InternalDatabaseSchemaVersion = 3
 
 // Backend is the generic rest backend
 type Backend struct {
+	ctx      context.Context
+	cancelFn context.CancelFunc // cancelFn is used to cancel the context when the backend is closed
+
 	config              Configuration
 	db                  *csql.DB
 	router              *mux.Router
@@ -67,7 +75,13 @@ type Backend struct {
 	// these queries exist for foreground and background
 	jobsInsertQuery, jobsInsertIfNotExistQuery, jobsCancelQuery,
 	jobsUpdateQuery, jobsDeleteQuery, jobsResetImplicitScheduleQuery,
-	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery [2]string
+	jobsRenewImplicitScheduleQuery, jobsUpdateScheduleQuery,
+	jobsInsertKafkaQuery [2]string
+
+	outBoxTableName    string // the name of the outbox table, used for kafka
+	kafkaBrokers       []string
+	kafkaWriterByTopic map[string]*kafka.Writer
+	kafkaReaderByTopic map[string]*kafka.Reader
 
 	rateLimitQuery string
 
@@ -86,6 +100,9 @@ type Builder struct {
 	Config string
 	// DB is a postgres database. This is mandatory.
 	DB *csql.DB
+
+	KafkaBrokers    []string
+	OutboxTableName string
 	// Router is a mux router. This is mandatory.
 	Router *mux.Router
 	// Optional public URL of the deployment
@@ -163,9 +180,14 @@ func New(bb *Builder) *Backend {
 		}
 	}
 
+	ctx, cancelFunc := context.WithCancel(context.Background())
 	b := &Backend{
+		ctx:                      ctx,
+		cancelFn:                 cancelFunc,
 		config:                   config,
 		db:                       bb.DB,
+		kafkaBrokers:             bb.KafkaBrokers,
+		outBoxTableName:          bb.OutboxTableName,
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
 		collectionFunctions:      make(map[string]*collectionFunctions),
@@ -304,6 +326,14 @@ func (r byDepth) Swap(i, j int) {
 }
 func (r byDepth) Less(i, j int) bool {
 	return r[i].depth() < r[j].depth()
+}
+
+func (b *Backend) Close() error {
+	b.cancelFn()
+	if err := b.db.Close(); err != nil {
+		return fmt.Errorf("cannot close database: %w", err)
+	}
+	return nil
 }
 
 // handleResourceRoutes adds all necessary handlers for the specified configuration
