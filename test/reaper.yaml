@@ -1,0 +1,19 @@
+harvest:
+  baseKafkaConfig: 
+    bootstrap.servers: kafka:9093
+  producerKafkaConfig:
+    compression.type: lz4
+    delivery.timeout.ms: 10000
+  leaderTopic: resource_notification
+  leaderGroupID: resource_notification_leader
+  dataSource: host=postgres port=5432 user=testuser password=testpass dbname=testdb sslmode=disable
+  outboxTable: _resource_notification_outbox_
+  limits:
+    minPollInterval: 1s
+    heartbeatTimeout: 5s
+    maxInFlightRecords: 1000
+    minMetricsInterval: 5s
+    sendConcurrency: 4
+    sendBuffer: 10
+logging:
+  level: Debug

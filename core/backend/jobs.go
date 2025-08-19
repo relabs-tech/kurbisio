@@ -771,7 +771,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 								notification := jb.notification()
 								key := notificationJobKey(notification.Resource, notification.Operation)
 								if splits := strings.Split(topic, ":"); len(splits) > 1 {
-									key += ":" + splits[1] // we have a consumer group attached to the reader key
+									key += ":" + splits[len(splits)-1] // we have a consumer group attached to the reader key
 								}
 								if handler, ok := b.callbacks[key]; ok {
 									err = handler.notification(ctx, notification)
@@ -1347,7 +1347,14 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	request := notificationJobKey(resource, operation)
 
 	// only create a notification if somebody requested it
-	if _, ok := b.callbacks[request]; !ok {
+	ok := false
+	for k := range b.callbacks {
+		if strings.HasPrefix(k, request) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
 		return tx.Commit()
 	}
 
