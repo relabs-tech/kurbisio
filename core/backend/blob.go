@@ -11,7 +11,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"log"
 	"slices"
 	"strconv"
 	"strings"
@@ -235,7 +234,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 		}
 	}
-	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request) {
 		var (
 			queryParameters []interface{}
 			sqlQuery        string
@@ -400,13 +399,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			queryParameters[propertiesIndex-1+5] = (page - 1) * limit
 		}
 
-		if relation != nil {
-			// inject subquery for relation
-			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
-		}
-
 		if useCursorPagination {
 			if ascendingOrder {
 				sqlQuery += sqlCursorPaginationAsc
@@ -499,10 +491,10 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 		}
 
-		list(w, r, nil)
+		list(w, r)
 	}
 
-	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request) {
 		rlog := logger.FromContext(r.Context())
 
 		// Audit logging for read operation
@@ -622,7 +614,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 				return
 			}
 		}
-		read(w, r, nil)
+		read(w, r)
 	}
 
 	createWithAuth := func(w http.ResponseWriter, r *http.Request) {
@@ -919,8 +911,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 			return
 		}
-		log.Printf("%v\n", values)
-		log.Println(query)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1208,12 +1198,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-	}
-
-	// store the collection helper for later usage in relations
-	b.collectionFunctions[this] = &collectionFunctions{
-		list: list,
-		read: read,
 	}
 
 	// CREATE

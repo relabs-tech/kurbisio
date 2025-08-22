@@ -104,12 +104,21 @@ type BlobConfiguration struct {
 // RelationConfiguration is a n:m relation from
 // another collection, blob collection or relation
 type RelationConfiguration struct {
-	Resource     string          `json:"resource"`
-	Left         string          `json:"left"`
-	Right        string          `json:"right"`
-	LeftPermits  []access.Permit `json:"left_permits"`
-	RightPermits []access.Permit `json:"right_permits"`
-	Description  string          `json:"description"`
+	Resource                      string          `json:"resource"`
+	ExternalIndex                 string          `json:"external_index"`
+	StaticProperties              []string        `json:"static_properties"`
+	SearchableProperties          []string        `json:"searchable_properties"`
+	Permits                       []access.Permit `json:"permits"`
+	Description                   string          `json:"description"`
+	SchemaID                      string          `json:"schema_id"`
+	Default                       json.RawMessage `json:"default"`
+	WithCompanionFile             bool            `json:"with_companion_file"`
+	CompanionPresignedURLValidity int             `json:"companion_presigned_url_validity"`
+	needsKSS                      bool            // true of this collection or any subcollection or subblob needs kss
+	AuditLogs                     []AuditLog      `json:"audit_logs"`      // list of audit log names to use for this collection
+	NonDirectional                bool            `json:"non_directional"` // if true this relation is non-directional, left and right will be sorted lexicographically. This is only possible if left and right are the same resource type
+	Left                          string          `json:"left"`
+	Right                         string          `json:"right"`
 }
 
 // ShortcutConfiguration is shortcut to a resource

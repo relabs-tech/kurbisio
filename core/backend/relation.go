@@ -7,10 +7,12 @@
 package backend
 
 import (
-	"database/sql"
+	"bytes"
+	"compress/gzip"
+	"context"
 	"fmt"
-	"reflect"
-	"sort"
+	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,540 +20,2095 @@ import (
 	"github.com/goccy/go-json"
 
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/lib/pq"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/backend/kss"
+	"github.com/relabs-tech/kurbisio/core/csql"
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
 func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfiguration) {
 	schema := b.db.Schema
-	leftResources := strings.Split(rc.Left, "/")
-	left := leftResources[len(leftResources)-1]
+	resource := rc.Resource
 
-	rightResources := strings.Split(rc.Right, "/")
-	right := rightResources[len(rightResources)-1]
-
-	// do the relation
-	leftResources = append(leftResources, right)
-	rightResources = append(rightResources, left)
-
-	columns := []string{}
-	validateColumns := []string{}
-	createColumns := []string{"serial SERIAL"}
-
-	resource := rc.Left + ":" + rc.Right
-	pathPrefix := ""
-	resourcePrefix := ""
-
-	if rc.Resource != "" {
-		resource = rc.Resource + ":" + resource
-		pathPrefix = "/" + rc.Resource
-		resourcePrefix = rc.Resource + "/"
-	}
-
-	rlog := logger.Default()
-	rlog.Debugln("create relation:", resource)
+	nillog := logger.FromContext(context.Background())
+	nillog.Debugln("create relation:", resource)
 	if rc.Description != "" {
-		rlog.Debugln("  description:", rc.Description)
+		nillog.Debugln("  description:", rc.Description)
 	}
+
+	if rc.SchemaID != "" {
+		if !b.JsonValidator.HasSchema(rc.SchemaID) {
+			nillog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource",
+				rc.Resource, rc.SchemaID)
+		}
+	}
+
+	resources := strings.Split(rc.Resource, "/")
+	this := resources[len(resources)-1]
+	dependencies := resources[:len(resources)-1]
+
+	lefts := strings.Split(rc.Left, "/")
+	rights := strings.Split(rc.Right, "/")
+
+	left := lefts[len(lefts)-1]
+	right := rights[len(rights)-1]
+
+	leftColumn := left + "_id"
+	rightColumn := right + "_id"
+
+	if leftColumn == rightColumn {
+		leftColumn = "left_" + leftColumn
+		rightColumn = "right_" + rightColumn
+	}
+
 	createQuery := fmt.Sprintf("CREATE table IF NOT EXISTS %s.\"%s\"", schema, resource)
+	var createColumns []string
+	var columns []string
+	searchableColumns := []string{}
 
-	leftColumns := []string{}
-	for _, r := range leftResources {
-		id := r + "_id"
-		leftColumns = append(leftColumns, id)
-		columns = append(columns, id)
+	columns = append(columns, leftColumn)
+	columns = append(columns, rightColumn)
+	searchableColumns = append(searchableColumns, leftColumn)
+	searchableColumns = append(searchableColumns, rightColumn)
+	createColumns = append(createColumns, leftColumn+" uuid NOT NULL")
+	createColumns = append(createColumns, rightColumn+" uuid NOT NULL")
+
+	createColumns = append(createColumns, fmt.Sprintf("PRIMARY KEY(%s, %s)", leftColumn, rightColumn))
+
+	createColumns = append(createColumns, "timestamp timestamp NOT NULL DEFAULT now()")
+	createColumns = append(createColumns, "revision INTEGER NOT NULL DEFAULT 1")
+
+	var foreignColumns []string
+	for i := len(dependencies) - 1; i >= 0; i-- {
+		that := dependencies[i]
+		createColumn := fmt.Sprintf("%s_id uuid NOT NULL", that)
+		createColumns = append(createColumns, createColumn)
+		columns = append(columns, that+"_id")
+		searchableColumns = append(searchableColumns, that+"_id")
+		foreignColumns = append(foreignColumns, that+"_id")
 	}
-	sort.Strings(columns)
+	majorSearchColumns := foreignColumns
 
-	rightColumns := []string{}
-	for _, r := range rightResources {
-		id := r + "_id"
-		rightColumns = append(rightColumns, id)
-		validateColumns = append(validateColumns, id)
-	}
-	sort.Strings(validateColumns)
-
-	// now columns and validateColumns should contain exactly the same identifiers
-	if !reflect.DeepEqual(columns, validateColumns) {
-		panic(fmt.Sprintf(`"%s" and "%s" do not share a compatible base, symmetric relation not possible`, left, right))
-	}
-
-	for _, c := range columns {
-		createColumn := fmt.Sprintf("%s uuid NOT NULL", c)
+	if len(dependencies) > 0 {
+		foreign := strings.Join(foreignColumns, ",")
+		createColumn := fmt.Sprintf(
+			"FOREIGN KEY (%s) REFERENCES %s.\"%s\"(%s) ON DELETE CASCADE",
+			foreign,
+			schema,
+			strings.Join(dependencies, "/"),
+			foreign,
+		)
 		createColumns = append(createColumns, createColumn)
 	}
 
-	// left reference
-	leftResource := rc.Left
-	if relationResource, ok := b.relations[leftResource]; ok {
-		// left resource is a relation, use relation table name
-		leftResource = relationResource
+	// enforce foreign constraints on left and right
+	{
+		createColumn := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s.\"%s\"(%s_id) ON DELETE CASCADE",
+			leftColumn, schema, rc.Left, left)
+		createColumns = append(createColumns, createColumn)
 	}
 	{
-		foreignColumns := strings.Join(leftColumns[:len(leftColumns)-1], ",")
-		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
-			"REFERENCES " + schema + ".\"" + leftResource + "\" " +
-			"(" + foreignColumns + ") ON DELETE CASCADE"
+		createColumn := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s.\"%s\"(%s_id) ON DELETE CASCADE",
+			rightColumn, schema, rc.Right, right)
 		createColumns = append(createColumns, createColumn)
 	}
 
-	// right reference
-	rightResource := rc.Right
-	if relationResource, ok := b.relations[rightResource]; ok {
-		// right resource is a relation, use relation table name
-		rightResource = relationResource
+	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
+	// query to create all indices after the table creation
+	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
+		"sort_index_"+this+"_timestamp",
+		schema, resource)
+
+	if len(majorSearchColumns) > 0 {
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,timestamp);",
+			"sort_index_"+this+"_"+strings.Join(majorSearchColumns, "_")+"_timestamp",
+			schema, resource, strings.Join(majorSearchColumns, ","))
 	}
-	{
-		foreignColumns := strings.Join(rightColumns[:len(rightColumns)-1], ",")
-		createColumn := "FOREIGN KEY (" + foreignColumns + ") " +
-			"REFERENCES " + schema + ".\"" + rightResource + "\" " +
-			"(" + foreignColumns + ") ON DELETE CASCADE"
+	createIndicesQueryLog := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s_id);",
+		"sort_index_"+this+"_log_id",
+		schema, resource, this)
+	createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(timestamp);",
+		"sort_index_"+this+"_log_timestamp",
+		schema, resource)
+	propertiesIndex := len(columns) // where properties start
+	columns = append(columns, "properties")
+
+	createPropertiesQuery := ""
+
+	staticPropertiesIndex := len(columns) // where static properties start
+	// static properties are varchars
+	for _, property := range rc.StaticProperties {
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		columns = append(columns, property)
+	}
+
+	// static searchable properties are varchars with a non-unique index
+	for _, property := range rc.SearchableProperties {
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+			"searchable_property_"+this+"_"+property,
+			schema, resource, property)
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			"searchable_property_"+this+"_"+property,
+			schema, resource, property)
+		columns = append(columns, property)
+		searchableColumns = append(searchableColumns, property)
+	}
+
+	propertiesEndIndex := len(columns) // where properties end
+
+	// an external index is a unique varchar property.
+	if len(rc.ExternalIndex) > 0 {
+		name := rc.ExternalIndex
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
+		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
+			"external_index_"+this+"_"+name,
+			schema, resource, name, name)
+		// the log index is not unique
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			"external_index_"+this+"_"+name,
+			schema, resource, name)
+		columns = append(columns, name)
+		searchableColumns = append(searchableColumns, name)
+	}
+
+	// the "device" collection gets an additional UUID column for the web token
+	if this == "device" {
+		createColumn := "token uuid NOT NULL DEFAULT uuid_generate_v4()"
 		createColumns = append(createColumns, createColumn)
 	}
 
-	// relation is unique
-	createColumn := "UNIQUE (" + strings.Join(columns, ",") + ")"
-	createColumns = append(createColumns, createColumn)
+	createQuery += "(" + strings.Join(createColumns, ", ") + ");" + createPropertiesQuery + createIndicesQuery
 
-	createQuery += "(" + strings.Join(createColumns, ", ") + ");"
-	createQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS timestamp timestamp NOT NULL DEFAULT now();", schema, resource)
-
+	var err error
 	if b.updateSchema {
-		_, err := b.db.Exec(createQuery)
+		_, err = b.db.Exec(createQuery)
 		if err != nil {
-			panic(err)
+			nillog.WithError(err).Errorf("Error while updating schema when running: %s", createQuery)
+			panic(fmt.Sprintf("invalid configuration updating: err: %v", err))
 		}
 	}
 
-	leftCollection, ok := b.collectionFunctions[rc.Left]
-	if !ok {
-		panic(fmt.Sprintf("missing left resource `%s`", rc.Left))
-	}
-	rightCollection, ok := b.collectionFunctions[rc.Right]
-	if !ok {
-		panic(fmt.Sprintf("missing right resource `%s`", rc.Right))
-	}
-
-	// register this relation, so that other relations can relate to it
-	virtualLeftResource := resourcePrefix + rc.Left + "/" + right
-	b.relations[virtualLeftResource] = resource
-	virtualLeftCollection := collectionFunctions{
-		permits: rc.LeftPermits,
-		list:    rightCollection.list,
-		read:    rightCollection.read,
-	}
-
-	b.collectionFunctions[virtualLeftResource] = &virtualLeftCollection
-
-	virtualRightResource := resourcePrefix + rc.Right + "/" + left
-	b.relations[virtualRightResource] = resource
-	virtualRightCollection := collectionFunctions{
-		permits: rc.RightPermits,
-		list:    leftCollection.list,
-		read:    leftCollection.read,
-	}
-
-	b.collectionFunctions[virtualRightResource] = &virtualRightCollection
-
-	// The limit ensures reasonable fast database queries with the nested relational query. If we ever come
-	// into a situation where relations are much larger than that, we would need to work out something
-	// different: extend the relation table with all columns necessary to do pagination (timestamp,
-	// searchable properties, external indices) and keep those in sync with the original table.
-	sqlPagination := " ORDER BY serial LIMIT 1000"
-
-	leftQuery := fmt.Sprintf("SELECT %s_id, timestamp FROM %s.\"%s\" WHERE ", right, schema, resource) +
-		compareIDsString(leftColumns[:len(leftColumns)-1]) + sqlPagination + ";"
-	rightQuery := fmt.Sprintf("SELECT %s_id, timestamp FROM %s.\"%s\" WHERE ", left, schema, resource) +
-		compareIDsString(rightColumns[:len(rightColumns)-1]) + sqlPagination + ";"
-
-	leftSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s %s) ", right, right, schema, resource, sqlPagination)
-	rightSQLInjectRelation := fmt.Sprintf(" AND %s_id IN (SELECT %s_id FROM %s.\"%s\" WHERE %%s %s) ", left, left, schema, resource, sqlPagination)
-	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" (%s) VALUES(%s);", schema, resource, strings.Join(columns, ","), parameterString(len(columns)))
-	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" WHERE %s;", schema, resource, compareIDsString(columns))
-
-	leftListRoute := pathPrefix
-	leftItemRoute := pathPrefix
-	for _, r := range leftResources {
-		leftListRoute = leftItemRoute + "/" + core.Plural(r)
-		leftItemRoute = leftItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
-	}
-
-	rightListRoute := pathPrefix
-	rightItemRoute := pathPrefix
-	for _, r := range rightResources {
-		rightListRoute = rightItemRoute + "/" + core.Plural(r)
-		rightItemRoute = rightItemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
-	}
-
-	rlog.Debugln("  handle routes:", leftListRoute, "GET")
-	rlog.Debugln("  handle routes:", leftItemRoute, "GET,PUT,DELETE")
-	rlog.Debugln("  handle routes:", rightListRoute, "GET")
-	rlog.Debugln("  handle routes:", rightItemRoute, "GET,PUT,DELETE")
-
-	// LIST LEFT
-	router.HandleFunc(leftListRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationList, params, rc.LeftPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var idonly, withtimestamp bool
-		var err error
-		urlQuery := r.URL.Query()
-		for key, array := range urlQuery {
-			switch key {
-			case "idonly":
-				idonly, err = strconv.ParseBool(array[0])
-				if err != nil {
-					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
-					return
-				}
-			case "withtimestamp":
-				withtimestamp, err = strconv.ParseBool(array[0])
-				if err != nil {
-					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
-					return
-				}
-			default:
-			}
-		}
-
-		queryParameters := make([]interface{}, len(leftColumns)-1)
-		for i := 0; i < len(leftColumns)-1; i++ { // skip ID
-			queryParameters[i] = params[leftColumns[i]]
-		}
-
-		if idonly {
-			response := []uuid.UUID{}
-			responseWithTimestamp := []map[string]interface{}{}
-			idName := fmt.Sprintf("%s_id", left)
-
-			rows, err := b.db.Query(leftQuery, queryParameters...)
-			if err != sql.ErrNoRows {
-				if err != nil {
-					rlog.WithError(err).Errorln("Error 4123: cannot query database")
-					http.Error(w, "Error 4123: ", http.StatusInternalServerError)
-					return
-				}
-				defer rows.Close()
-				for rows.Next() {
-					id := uuid.UUID{}
-					timestamp := time.Time{}
-					err := rows.Scan(&id, &timestamp)
-					if err != nil {
-						rlog.WithError(err).Errorln("Error 4124: Next")
-						http.Error(w, "Error 4124: ", http.StatusInternalServerError)
-						return
-					}
-					response = append(response, id)
-					responseWithTimestamp = append(responseWithTimestamp, map[string]interface{}{
-						"timestamp": timestamp,
-						idName:      id,
-					})
-				}
-			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-			if withtimestamp {
-				jsonData, _ := json.Marshal(responseWithTimestamp)
-				w.Write(jsonData)
-				return
-			}
-
-			jsonData, _ := json.Marshal(response)
-			w.Write(jsonData)
-			return
-		}
-
-		injectRelation := &relationInjection{
-			subquery:        leftSQLInjectRelation,
-			columns:         leftColumns[:len(leftColumns)-1], // skip ID
-			queryParameters: queryParameters,
-		}
-
-		rightCollection.list(w, r, injectRelation)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// LIST RIGHT
-	router.HandleFunc(rightListRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationList, params, rc.RightPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		var idonly, withtimestamp bool
-		var err error
-		urlQuery := r.URL.Query()
-		for key, array := range urlQuery {
-			switch key {
-			case "idonly":
-				idonly, err = strconv.ParseBool(array[0])
-				if err != nil {
-					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
-					return
-				}
-			case "withtimestamp":
-				withtimestamp, err = strconv.ParseBool(array[0])
-				if err != nil {
-					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
-					return
-				}
-			default:
-			}
-		}
-
-		queryParameters := make([]interface{}, len(rightColumns)-1)
-		for i := 0; i < len(rightColumns)-1; i++ { // skip ID
-			queryParameters[i] = params[rightColumns[i]]
-		}
-
-		if idonly {
-			response := []uuid.UUID{}
-			responseWithTimestamp := []map[string]interface{}{}
-			idName := fmt.Sprintf("%s_id", left)
-
-			rows, err := b.db.Query(rightQuery, queryParameters...)
-			if err != sql.ErrNoRows {
-				if err != nil {
-					rlog.WithError(err).Errorln("Error 4125: Query")
-					http.Error(w, "Error 4125: ", http.StatusInternalServerError)
-					return
-				}
-				defer rows.Close()
-				for rows.Next() {
-					id := uuid.UUID{}
-					timestamp := time.Time{}
-					err := rows.Scan(&id, &timestamp)
-					if err != nil {
-						rlog.WithError(err).Errorln("Error 4126: Scan")
-						http.Error(w, "Error 4126: ", http.StatusInternalServerError)
-						return
-					}
-					response = append(response, id)
-					responseWithTimestamp = append(responseWithTimestamp, map[string]interface{}{
-						"timestamp": timestamp,
-						idName:      id,
-					})
-				}
-			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-			if withtimestamp {
-				jsonData, _ := json.Marshal(responseWithTimestamp)
-				w.Write(jsonData)
-				return
-			}
-
-			jsonData, _ := json.Marshal(response)
-			w.Write(jsonData)
-			return
-		}
-
-		injectRelation := &relationInjection{
-			subquery:        rightSQLInjectRelation,
-			columns:         rightColumns[:len(rightColumns)-1], // skip ID
-			queryParameters: queryParameters,
-		}
-
-		leftCollection.list(w, r, injectRelation)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// READ LEFT
-	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationRead, params, rc.LeftPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		queryParameters := make([]interface{}, len(leftColumns))
-		for i := 0; i < len(leftColumns); i++ {
-			queryParameters[i] = params[leftColumns[i]]
-		}
-		injectRelation := &relationInjection{
-			subquery:        leftSQLInjectRelation,
-			columns:         leftColumns,
-			queryParameters: queryParameters,
-		}
-
-		rightCollection.read(w, r, injectRelation)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	// READ RIGHT
-	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationRead, params, rc.RightPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		queryParameters := make([]interface{}, len(rightColumns))
-		for i := 0; i < len(rightColumns); i++ {
-			queryParameters[i] = params[rightColumns[i]]
-		}
-		injectRelation := &relationInjection{
-			subquery:        rightSQLInjectRelation,
-			columns:         rightColumns,
-			queryParameters: queryParameters,
-		}
-
-		leftCollection.read(w, r, injectRelation)
-	}).Methods(http.MethodOptions, http.MethodGet)
-
-	create := func(w http.ResponseWriter, r *http.Request) {
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, len(columns))
-		for i := 0; i < len(columns); i++ {
-			queryParameters[i] = params[columns[i]]
-		}
-		res, err := b.db.Exec(insertQuery, queryParameters...)
+	// if we have a default object and a valid schema, validate the default object
+	if rc.Default != nil && rc.SchemaID != "" && b.JsonValidator.HasSchema(rc.SchemaID) {
+		var defaultJSON map[string]interface{}
+		err := json.Unmarshal(rc.Default, &defaultJSON)
 		if err != nil {
-			var code pq.ErrorCode
-			if err, ok := err.(*pq.Error); ok {
-				code = err.Code
-			}
-			switch code {
-			case "23505":
-				// put is omnipotent, so no error if the relation already exists
-				w.WriteHeader(http.StatusNoContent)
-			case "23503":
-				http.Error(w, "resource does not exist", http.StatusBadRequest)
-			default:
-				rlog.WithError(err).Errorln("Error 4127: Exec")
-				http.Error(w, "Error 4127: ", http.StatusInternalServerError)
-			}
-			return
+			nillog.WithError(err).Errorf("parse error in backend configuration - default for %s: %s", this, err)
+			panic("invalid configuration parse error")
 		}
-		count, err := res.RowsAffected()
-
-		if err != nil {
-			rlog.WithError(err).Errorln("Error 4128: RowsAffected")
-			http.Error(w, "Error 4128: ", http.StatusInternalServerError)
-			return
+		// add dummy core identifiers
+		var id uuid.UUID
+		for i := 0; i < propertiesIndex; i++ {
+			defaultJSON[columns[i]] = id
 		}
+		jsonData, _ := json.Marshal(defaultJSON)
+		if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+			nillog.WithError(err).Errorf("validating default for %s: field does not follow schemaID %s",
+				resource, rc.SchemaID)
+			panic("invalid configuration default")
+		}
+	}
 
-		if count > 0 {
-			w.WriteHeader(http.StatusCreated)
+	listRoute := ""
+	itemRoute := ""
+	for i, r := range resources {
+		listRoute = itemRoute + "/" + core.Plural(r)
+		if i == len(resources)-1 {
+			itemRoute = itemRoute + "/" + core.Plural(r) + "/{left}:{right}"
 		} else {
-			w.WriteHeader(http.StatusBadRequest)
+			itemRoute = itemRoute + "/" + core.Plural(r) + "/{" + r + "_id}"
 		}
 	}
 
-	// CREATE LEFT
-	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+	nillog.Debugln("  handle collection routes:", listRoute, "GET,POST,PUT,PATCH,DELETE")
+	nillog.Debugln("  handle collection routes:", itemRoute, "GET,PUT,PATCH,DELETE")
+
+	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
+	sqlWhereOne := "WHERE " + compareIDsStringRequired(columns[:propertiesIndex], 2)
+
+	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryWithFakeTotal := "SELECT " + strings.Join(columns, ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaWithTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
+		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
+	readQueryMetaWithFakeTotal := "SELECT " + strings.Join(columns[:propertiesIndex], ", ") +
+		fmt.Sprintf(", timestamp, revision, -1 FROM %s.\"%s\" ", schema, resource)
+	sqlWhereAll := "WHERE "
+	sqlWhereAll += compareIDsString(columns[:propertiesIndex]) + " AND "
+	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
+		propertiesIndex+1, propertiesIndex+1+1, propertiesIndex+1+2, propertiesIndex+1+3)
+	sqlWhereAllEither := "WHERE "
+	sqlWhereAllEither += compareIDsStringEither(columns[:propertiesIndex]) + " AND "
+	sqlWhereAllEither += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
+		propertiesIndex+1, propertiesIndex+1+1, propertiesIndex+1+2, propertiesIndex+1+3)
+	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,%s DESC LIMIT $%d OFFSET $%d;",
+		columns[0], columns[1], propertiesIndex+1+4, propertiesIndex+1+5)
+
+	sqlPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC,%s ASC LIMIT $%d OFFSET $%d;",
+		columns[0], columns[1], propertiesIndex+1+4, propertiesIndex+1+5)
+
+	// Cursor pagination SQL (no offset, just limit)
+	sqlCursorPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,%s DESC LIMIT $%d;",
+		columns[0], columns[1], propertiesIndex+1+4)
+
+	sqlCursorPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s DESC,%s ASC LIMIT $%d;",
+		columns[0], columns[1], propertiesIndex+1+4)
+
+	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+
+	deleteQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
+	sqlReturnObject := " RETURNING " + strings.Join(columns, ", ") + ", timestamp, revision"
+	sqlReturnMeta := " RETURNING " + strings.Join(columns[:propertiesIndex], ", ") + ", timestamp"
+
+	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", timestamp)"
+	insertQuery += "VALUES(" + parameterString(len(columns)+1) + ")"
+	insertQuery += " RETURNING " + leftColumn + ", " + rightColumn + ";"
+
+	insertQueryLog := fmt.Sprintf("INSERT INTO %s.\"%s/log\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", timestamp, revision)"
+	insertQueryLog += "VALUES(" + parameterString(len(columns)+2) + ")"
+
+	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
+	sets := make([]string, len(columns)-propertiesIndex)
+	for i := propertiesIndex; i < len(columns); i++ {
+		sets[i-propertiesIndex] = columns[i] + " = $" + strconv.Itoa(i+1)
+	}
+	updateQuery += strings.Join(sets, ", ") + ", timestamp = $" + strconv.Itoa(len(columns)+1)
+	updateQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + leftColumn + ", " + rightColumn + ";"
+
+	updatePropertyQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
+	updatePropertyQuery += " %s = $" + strconv.Itoa(propertiesIndex+1)
+	updatePropertyQuery += ", revision = revision + 1 " + sqlWhereOne + " RETURNING " + leftColumn + ", " + rightColumn + ";"
+
+	createScanValuesAndObject := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		values := make([]interface{}, len(columns)+2, len(columns)+2+len(extra))
+		object := map[string]interface{}{}
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
+		}
+		values[i] = &json.RawMessage{}
+		object[columns[i]] = values[i]
+		i++
+
+		for ; i < len(columns); i++ {
+			str := ""
+			values[i] = &str
+			object[columns[i]] = values[i]
+
+		}
+
+		values[i] = timestamp
+		object["timestamp"] = timestamp
+		i++
+		values[i] = revision
+		object["revision"] = revision
+		values = append(values, extra...)
+		return values, object
+	}
+
+	createScanValuesAndObjectMeta := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		n := propertiesIndex + 1
+		if revision != nil {
+			n++
+		}
+		values := make([]interface{}, n, n+len(extra))
+		object := map[string]interface{}{}
+		var i int
+		for ; i < propertiesIndex; i++ {
+			values[i] = &uuid.UUID{}
+			object[columns[i]] = values[i]
+		}
+		values[i] = timestamp
+		object["timestamp"] = timestamp
+		if revision != nil {
+			i++
+			values[i] = revision
+			object["revision"] = revision
+		}
+		values = append(values, extra...)
+		return values, object
+	}
+
+	createScanValuesAndObjectWithMeta := func(metaonly bool, timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
+		if metaonly {
+			return createScanValuesAndObjectMeta(timestamp, revision, extra...)
+		}
+		return createScanValuesAndObject(timestamp, revision, extra...)
+	}
+
+	mergeProperties := func(object map[string]interface{}) {
+		rawJSON := object["properties"].(*json.RawMessage)
+		delete(object, "properties")
+		var properties map[string]interface{}
+		err := json.Unmarshal([]byte(*rawJSON), &properties)
+		if err != nil {
+			return
+		}
+		for key, value := range properties {
+			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
+				object[key] = value
+			}
+		}
+	}
+
+	listWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var (
+			queryParameters     []interface{}
+			sqlQuery            string
+			limit               int = 100
+			page                int = 1
+			until               time.Time
+			from                time.Time
+			externalColumns     []string
+			externalValues      []string
+			externalOperators   []string
+			filterJSONColumns   []string
+			filterJSONValues    []string
+			filterJSONOperators []string
+			ascendingOrder      bool
+			metaonly            bool
+			err                 error
+			nextToken           string
+			cursor              *PaginationDoubleCursor
+			useCursorPagination bool
+		)
+		urlQuery := r.URL.Query()
 
 		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationCreate, params, rc.LeftPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
+		parameters := map[string]string{}
+
+		var withCompanionUrls bool
+		for key, array := range urlQuery {
+			if key != "filter" && len(array) > 1 {
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
-			if !auth.IsAuthorized(core.OperationRead, params, rightCollection.permits) {
+			value := array[0]
+		switchStatement:
+			switch key {
+			case "limit":
+				limit, err = strconv.Atoi(value)
+				if err == nil && (limit < 1 || limit > 100) {
+					err = fmt.Errorf("out of range")
+				}
+			case "page":
+				page, err = strconv.Atoi(value)
+				if err == nil && page < 1 {
+					err = fmt.Errorf("out of range")
+				}
+			case "next_token":
+				nextToken = value
+				if nextToken != "" {
+					var decodedDoubleCursor PaginationDoubleCursor
+					decodedDoubleCursor, err = DecodePaginationDoubleCursor(nextToken)
+					if err != nil {
+						break switchStatement
+					}
+					cursor = &decodedDoubleCursor
+					useCursorPagination = true
+				}
+			case "until":
+				until, err = time.Parse(time.RFC3339, value)
+
+			case "from":
+				from, err = time.Parse(time.RFC3339, value)
+
+			case "filter", "search":
+				for _, value := range array {
+					var operator string
+					i := strings.IndexRune(value, '=')
+					if i < 0 {
+						i = strings.IndexRune(value, '~')
+						if i < 0 {
+							err = fmt.Errorf("cannot parse filter, must be of type property=value or property~value")
+							break
+						} else {
+							operator = " LIKE "
+						}
+					} else {
+						operator = "="
+					}
+					filterKey := value[:i]
+					filterValue := value[i+1:]
+
+					found := false
+					for _, searchableColumn := range searchableColumns {
+						if filterKey == searchableColumn {
+							externalValues = append(externalValues, filterValue)
+							externalColumns = append(externalColumns, filterKey)
+							found = true
+							externalOperators = append(externalOperators, operator)
+							break
+						}
+					}
+					// This was not a search inside a columns, then we try to search in the json document
+					if !found {
+						if key == "search" {
+							err = fmt.Errorf("unknown search property '%s'", filterKey)
+							break switchStatement
+						}
+						filterJSONValues = append(filterJSONValues, filterValue)
+						filterJSONColumns = append(filterJSONColumns, filterKey)
+						filterJSONOperators = append(filterJSONOperators, operator)
+					}
+				}
+			case "order":
+				if value != "asc" && value != "desc" {
+					err = fmt.Errorf("order must be asc or desc")
+					break
+				}
+				ascendingOrder = (value == "asc")
+
+			case "metaonly":
+				metaonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			case "with_companion_urls":
+				withCompanionUrls, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			case "left", "right":
+				if rc.NonDirectional {
+					http.Error(w, "parameter '"+key+"' is not available for non-directional relations, use 'either'", http.StatusBadRequest)
+					return
+				}
+				params[key] = value
+				_, err = uuid.Parse(value)
+
+			case "either":
+				params[key] = value
+				_, err = uuid.Parse(value)
+
+			default:
+				err = fmt.Errorf("unknown")
+			}
+
+			parameters[key] = value
+			if err != nil {
+				nillog.Errorf("parameter '%s': %s", key, err.Error())
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		doEither := false
+		if p, ok := params["either"]; ok {
+			doEither = true
+			params[right+"_id"] = p
+			params[left+"_id"] = p
+			if len(params["left"]) > 0 || len(params["right"]) > 0 {
+				nillog.Errorf("parameter 'either' conflicts with left or right")
+				http.Error(w, "parameter 'either' conflicts with left or right", http.StatusBadRequest)
+				return
+			}
+			params["left"] = p
+			params["right"] = "all"
+		} else {
+			params[right+"_id"] = params["right"]
+			params[left+"_id"] = params["left"]
+		}
+
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationList, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		create(w, r)
-	}).Methods(http.MethodOptions, http.MethodPut)
 
-	// CREATE RIGHT
-	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		// add left and right to the params for query purposes
+		leftParam := "all"
+		if p, ok := params["left"]; ok {
+			leftParam = p
+		}
+		rightParam := "all"
+		if p, ok := params["right"]; ok {
+			rightParam = p
+		}
 
-		params := mux.Vars(r)
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationCreate, params, rc.RightPermits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		// Check mutual exclusion of page and next_token
+		pageProvided := urlQuery.Has("page")
+		if useCursorPagination && pageProvided {
+			http.Error(w, "page and next_token parameters are mutually exclusive", http.StatusBadRequest)
+			return
+		}
+
+		// If no cursor and no page specified, use cursor pagination by default
+		if !useCursorPagination && !pageProvided {
+			useCursorPagination = true
+		}
+
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[columns[i]] = params[columns[i]]
+		}
+		if metaonly {
+			if useCursorPagination {
+				sqlQuery = readQueryMetaWithFakeTotal
+			} else {
+				sqlQuery = readQueryMetaWithTotal
 			}
-			if !auth.IsAuthorized(core.OperationRead, params, leftCollection.permits) {
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
+		} else {
+			if useCursorPagination {
+				sqlQuery = readQueryWithFakeTotal
+			} else {
+				sqlQuery = readQueryWithTotal
 			}
 		}
-		create(w, r)
-	}).Methods(http.MethodOptions, http.MethodPut)
+		if doEither {
+			sqlQuery += sqlWhereAllEither
+		} else {
+			sqlQuery += sqlWhereAll
+		}
 
-	delete := func(w http.ResponseWriter, r *http.Request) {
-		params := mux.Vars(r)
-		queryParameters := make([]interface{}, len(columns))
-		for i := 0; i < len(columns); i++ {
+		// Build base parameters first - different sizes for cursor vs page pagination
+		if useCursorPagination {
+			if len(externalValues) == 0 && len(filterJSONValues) == 0 {
+				queryParameters = make([]interface{}, propertiesIndex+5) // No offset for cursor
+			} else {
+				queryParameters = make([]interface{}, propertiesIndex+5+len(externalValues)+len(filterJSONValues))
+				for i := range externalValues {
+					sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex+6+i)
+					queryParameters[propertiesIndex+5+i] = externalValues[i]
+				}
+				for i := range filterJSONValues {
+					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex+6+i+len(externalValues))
+					queryParameters[propertiesIndex+5+i+len(externalValues)] = filterJSONValues[i]
+				}
+			}
+		} else {
+			if len(externalValues) == 0 && len(filterJSONValues) == 0 {
+				queryParameters = make([]interface{}, propertiesIndex+6) // Include offset for page
+			} else {
+				queryParameters = make([]interface{}, propertiesIndex+6+len(externalValues)+len(filterJSONValues))
+				for i := range externalValues {
+					sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex+7+i)
+					queryParameters[propertiesIndex+6+i] = externalValues[i]
+				}
+				for i := range filterJSONValues {
+					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex+7+i+len(externalValues))
+					queryParameters[propertiesIndex+6+i+len(externalValues)] = filterJSONValues[i]
+				}
+			}
+		}
+
+		for i := 0; i < propertiesIndex; i++ {
 			queryParameters[i] = params[columns[i]]
 		}
-		res, err := b.db.Exec(deleteQuery, queryParameters...)
+		queryParameters[propertiesIndex+0] = until.IsZero()
+		queryParameters[propertiesIndex+1] = until.UTC()
+		queryParameters[propertiesIndex+2] = from.IsZero()
+		queryParameters[propertiesIndex+3] = from.UTC()
+
+		// We add 1 to the limit to check if there is more data than the limit
+		queryParameters[propertiesIndex+4] = limit + 1
+
+		if useCursorPagination {
+			if cursor != nil {
+				// Add double cursor parameters to the existing parameter list
+				currentParamCount := len(queryParameters)
+				queryParameters = append(queryParameters, cursor.Timestamp.UTC(), cursor.LeftID, cursor.RightID)
+
+				// Add cursor condition based on ordering
+				if ascendingOrder {
+					sqlQuery += fmt.Sprintf("AND ((timestamp > $%d) OR (timestamp = $%d AND %s > $%d) OR (timestamp = $%d AND %s = $%d AND %s > $%d)) ",
+						currentParamCount+1,
+						currentParamCount+1, columns[0], currentParamCount+2,
+						currentParamCount+1, columns[0], currentParamCount+2, columns[1], currentParamCount+3)
+				} else {
+					sqlQuery += fmt.Sprintf("AND ((timestamp < $%d) OR (timestamp = $%d AND %s < $%d) OR (timestamp = $%d AND %s = $%d AND %s < $%d)) ",
+						currentParamCount+1,
+						currentParamCount+1, columns[0], currentParamCount+2,
+						currentParamCount+1, columns[0], currentParamCount+2, columns[1], currentParamCount+3)
+				}
+			}
+			// Don't set offset parameter for cursor pagination
+		} else {
+			// Traditional page-based pagination - set offset parameter
+			queryParameters[propertiesIndex+5] = (page - 1) * limit
+		}
+
+		if useCursorPagination {
+			if ascendingOrder {
+				sqlQuery += sqlCursorPaginationAsc
+			} else {
+				sqlQuery += sqlCursorPaginationDesc
+			}
+		} else {
+			if ascendingOrder {
+				sqlQuery += sqlPaginationAsc
+			} else {
+				sqlQuery += sqlPaginationDesc
+			}
+		}
+
+		// fmt.Printf("sqlQuery: %s, values: %#v\n", sqlQuery, queryParameters)
+
+		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4721: cannot execute query `%s` %+v", sqlQuery, queryParameters)
+			http.Error(w, "Error 4721", http.StatusInternalServerError)
+			return
+		}
+
+		response := []interface{}{}
+		defer rows.Close()
+		var totalCount int
+		hasMoreData := false
+		rowCount := 0
+		var lastTimestamp time.Time
+		var lastLeftID uuid.UUID
+		var lastRightID uuid.UUID
+		for rows.Next() {
+			var timestamp time.Time
+			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
+			err := rows.Scan(values...)
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+				http.Error(w, "Error 4725", http.StatusInternalServerError)
+				return
+			}
+			rowCount++
+			if rowCount > limit {
+				hasMoreData = true
+				continue // Skip this object, we only want the first 'limit' objects
+			}
+
+			// Store last timestamp and IDs for cursor generation
+			lastTimestamp = timestamp
+			lastLeftID = *values[0].(*uuid.UUID)  // columns[0]
+			lastRightID = *values[1].(*uuid.UUID) // columns[1]
+			if !metaonly {
+				var uploadURL string
+				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
+					var key string
+					for i := 0; i < propertiesIndex; i++ {
+						key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+					}
+
+					validitySeconds := 900
+					if rc.CompanionPresignedURLValidity > 0 {
+						validitySeconds = rc.CompanionPresignedURLValidity
+					}
+
+					uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Get, key, time.Second*time.Duration(validitySeconds))
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 5736: list companion URL")
+						http.Error(w, "Error 5736", http.StatusInternalServerError)
+						return
+					}
+					object["companion_download_url"] = uploadURL
+				}
+
+				mergeProperties(object)
+				// apply defaults if applicable
+				if rc.Default != nil {
+					var defaultJSON map[string]interface{}
+					json.Unmarshal(rc.Default, &defaultJSON)
+					patchObject(defaultJSON, object)
+					object = defaultJSON
+				}
+			}
+
+			// if we did not have from, take it from the first object
+			if from.IsZero() {
+				from = timestamp
+			}
+			response = append(response, object)
+
+		}
+
+		// do request interceptors
+		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
+		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, selectors, parameters, jsonData)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4726: cannot request interceptors")
+			http.Error(w, "Error 4726", http.StatusInternalServerError)
+			return
+		}
+		if data != nil {
+			jsonData = data
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Pagination-Limit", strconv.Itoa(limit))
+
+		if useCursorPagination {
+			// Cursor pagination headers
+			if hasMoreData && len(response) > 0 {
+				// Generate next double cursor from the last item in the response
+				nextDoubleCursor := PaginationDoubleCursor{
+					Timestamp: lastTimestamp,
+					LeftID:    lastLeftID,
+					RightID:   lastRightID,
+				}
+				w.Header().Set("Pagination-Next-Token", nextDoubleCursor.Encode())
+			}
+		} else {
+			if page > 0 && totalCount == 0 {
+				// sql does not return total count if we ask beyond limits, hence
+				// we need a second query
+				queryParameters[propertiesIndex+4] = 1
+				queryParameters[propertiesIndex+5] = 0
+				rows, err := b.db.Query(sqlQuery, queryParameters...)
+				if err != nil {
+					nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
+					http.Error(w, "Error 4722", http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var timestamp time.Time
+					values, _ := createScanValuesAndObject(&timestamp, new(int), &totalCount)
+					err := rows.Scan(values...)
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+						http.Error(w, "Error 4725", http.StatusInternalServerError)
+						return
+					}
+				}
+			}
+
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+			w.Header().Set("Pagination-Total-Count", strconv.Itoa(totalCount))
+			w.Header().Set("Pagination-Page-Count", strconv.Itoa(((totalCount-1)/limit)+1))
+			w.Header().Set("Pagination-Current-Page", strconv.Itoa(page))
+
+		}
+
+		etag := bytesToEtag(jsonData)
+		w.Header().Set("Etag", etag)
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Write(jsonData)
+
+	}
+
+	readWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		params := mux.Vars(r)
+
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		if p, ok := params["right"]; ok {
+			params[right+"_id"] = p
+		}
+		if p, ok := params["left"]; ok {
+			params[left+"_id"] = p
+		}
+
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationRead, params, rc.Permits) {
+				fmt.Printf("Not authorized to read %s with params %v and permits %v\n", this, params, rc.Permits)
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// add left and right to the params for query purposes
+		leftParam := params["left"]
+		rightParam := params["right"]
+		if rc.NonDirectional && leftParam > rightParam {
+			leftParam, rightParam = rightParam, leftParam
+		}
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		noIntercept := false
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			switch key {
+			case "nointercept":
+				noIntercept, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			case "children":
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[columns[i]] = params[columns[i]]
+		}
+
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		values, object := createScanValuesAndObject(&time.Time{}, new(int))
+		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
+		if err == csql.ErrNoRows {
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			status := http.StatusInternalServerError
+
+			// Invalid UUIDs are reported as "invalid_text_representation" which is Code 22P02
+			if err, ok := err.(*pq.Error); ok && err.Code == "22P02" {
+				status = http.StatusBadRequest
+				http.Error(w, "invalid uuid", status)
+				return
+			}
+			nillog.WithError(err).Errorf("Error 4727: cannot QueryRow")
+			http.Error(w, "Error 4727", status)
+			return
+		}
+		mergeProperties(object)
+
+		// apply defaults if applicable
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, object)
+			object = defaultJSON
+		}
+
+		if rc.WithCompanionFile && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			downloadURL, err := b.KssDriver.GetPreSignedURL(kss.Get, key, time.Second*time.Duration(validitySeconds))
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 1736: get companion URL")
+				http.Error(w, "Error 1736", http.StatusInternalServerError)
+				return
+			}
+			object["companion_download_url"] = downloadURL
+		}
+
+		// do request interceptors
+		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+		data, err := b.intercept(r.Context(), resource, core.OperationRead, uuid.Nil, selectors, nil, jsonData)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4748: interceptor")
+			http.Error(w, "Error 4748", http.StatusInternalServerError)
+			return
+		}
+		if data != nil {
+			jsonData = data
+		}
+
+		// add children if requested
+		for key, array := range urlQuery {
+			switch key {
+			case "nointercept":
+			case "children":
+				if data != nil { // data was changed in interceptor
+					err = json.Unmarshal(jsonData, &object)
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 4749: interceptor")
+						http.Error(w, "Error 4749", http.StatusInternalServerError)
+						return
+					}
+				}
+
+				status, err := b.addChildrenToGetResponse(array, noIntercept, r, object)
+				if err != nil {
+					http.Error(w, err.Error(), status)
+					return
+				}
+				jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
+			default:
+				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
+		etag := bytesToEtag(jsonData)
+		w.Header().Set("Etag", etag)
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+
+		if slices.Contains(rc.AuditLogs, AuditLogRead) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Read %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
+	}
+
+	updatePropertyWithAuth := func(w http.ResponseWriter, r *http.Request, property string) {
+
+		params := mux.Vars(r)
+
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		if p, ok := params["right"]; ok {
+			params[right+"_id"] = p
+		}
+		if p, ok := params["left"]; ok {
+			params[left+"_id"] = p
+		}
+
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// add left and right to the params for query purposes
+		leftParam := params["left"]
+		rightParam := params["right"]
+		if rc.NonDirectional && leftParam > rightParam {
+			leftParam, rightParam = rightParam, leftParam
+		}
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		found := false
+		for i := staticPropertiesIndex; i < len(columns) && !found; i++ {
+			if property == columns[i] {
+				found = true
+			}
+		}
+		if !found {
+			http.Error(w, "unknown static property", http.StatusBadRequest)
+			return
+		}
+
+		value := params[property]
+
+		value, err = url.PathUnescape(value)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("cannot unescape %s, err: %v", value, err), http.StatusBadRequest)
+			return
+		}
+
+		query := fmt.Sprintf(updatePropertyQuery, property)
+
+		queryParameters := make([]interface{}, propertiesIndex+1)
+		i := 0
+		for ; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+		queryParameters[i] = value
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4729: cannot BeginTx")
+			http.Error(w, "Error 4729", http.StatusInternalServerError)
+			return
+		}
+
+		var leftID, rightID uuid.UUID
+		err = tx.QueryRow(query, queryParameters...).Scan(&leftID, &rightID)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			nillog.WithError(err).Errorf("Error 4728: cannot QueryRow query:`%s`", query)
+			http.Error(w, "Error 4728", http.StatusInternalServerError)
+			return
+		}
+		notification := map[string]string{
+			leftColumn:  leftID.String(),
+			rightColumn: rightID.String(),
+			property:    value,
+		}
+		notificationJSON, _ := json.MarshalWithOption(notification, json.DisableHTMLEscape())
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, uuid.Nil, notificationJSON)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4744: sqlQuery `%s`", query)
+			http.Error(w, "Error 4744", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+
+	deleteWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		rlog := logger.FromContext(r.Context())
+		params := mux.Vars(r)
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		if p, ok := params["right"]; ok {
+			params[right+"_id"] = p
+		}
+		if p, ok := params["left"]; ok {
+			params[left+"_id"] = p
+		}
+
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[columns[i]] = params[columns[i]]
+		}
+
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationDelete, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// add left and right to the params for query purposes
+		leftParam := params["left"]
+		rightParam := params["right"]
+		if rc.NonDirectional && leftParam > rightParam {
+			leftParam, rightParam = rightParam, leftParam
+		}
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		_, err = b.intercept(r.Context(), resource, core.OperationDelete, uuid.Nil, selectors, nil, nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		count, err := res.RowsAffected()
+
+		queryParameters := make([]interface{}, propertiesIndex)
+		for i := 0; i < propertiesIndex; i++ {
+			queryParameters[i] = params[columns[i]]
+		}
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
-			rlog.WithError(err).Errorln("Error 4129: RowsAffected")
-			http.Error(w, "Error 4129: ", http.StatusInternalServerError)
+			rlog.WithError(err).Errorf("Error 4729: cannot BeginTx")
+			http.Error(w, "Error 4729", http.StatusInternalServerError)
 			return
 		}
 
-		if count > 0 {
-			w.WriteHeader(http.StatusNoContent)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
+		var timestamp time.Time
+		values, object := createScanValuesAndObject(&timestamp, new(int))
+		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
+			http.Error(w, "no such "+this, http.StatusNotFound)
+			return
 		}
+		if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Errorf("Error 4730: cannot QueryRow")
+			http.Error(w, "Error 4730", http.StatusInternalServerError)
+			return
+		}
+		if rc.needsKSS && b.KssDriver != nil {
+			var key string
+			for i := 0; i < propertiesIndex; i++ {
+				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+			}
+
+			err = b.KssDriver.DeleteAllWithPrefix(key)
+			if err != nil {
+				rlog.WithError(err).Error("Could not DeleteAllWithPrefix key ", key)
+			}
+		}
+
+		mergeProperties(object)
+		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+
+		var silent bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
+
+		if silent {
+			err = tx.Commit()
+
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, uuid.Nil, jsonData)
+		}
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4750: cannot QueryRow")
+			http.Error(w, "Error 4750", http.StatusInternalServerError)
+			return
+		}
+		if slices.Contains(rc.AuditLogs, AuditLogDelete) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Delete %s from IP: %s, path: %s", resource, ip, r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 
-	// DELETE LEFT
-	router.HandleFunc(leftItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+	clearWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		rlog := logger.FromContext(r.Context())
 
 		params := mux.Vars(r)
+		params[left+"_id"] = "all"
+		params[right+"_id"] = "all"
+
+		var (
+			queryParameters []interface{}
+			sqlQuery        string
+			until           time.Time
+			from            time.Time
+			externalColumn  string
+			externalValue   string
+		)
+		parameters := map[string]string{}
+		urlQuery := r.URL.Query()
+		for key, array := range urlQuery {
+			var err error
+			if len(array) > 1 {
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+			switch key {
+			case "until":
+				until, err = time.Parse(time.RFC3339, value)
+			case "from":
+				from, err = time.Parse(time.RFC3339, value)
+			case "filter":
+				i := strings.IndexRune(value, '=')
+				if i < 0 {
+					err = fmt.Errorf("cannot parse filter, must be of type property=value")
+					break
+				}
+				filterKey := value[:i]
+				filterValue := value[i+1:]
+
+				found := false
+				for _, searchableColumn := range searchableColumns {
+					if filterKey == searchableColumn {
+						externalValue = filterValue
+						externalColumn = searchableColumn
+						found = true
+					}
+				}
+				if !found {
+					err = fmt.Errorf("unknown filter property '%s'", filterKey)
+				}
+
+			case "left", "right":
+				if rc.NonDirectional {
+					http.Error(w, "parameter '"+key+"' is not available for non-directional relations, use 'either'", http.StatusBadRequest)
+					return
+				}
+				params[key] = value
+				_, err = uuid.Parse(value)
+
+			case "either":
+				params[key] = value
+				_, err = uuid.Parse(value)
+
+			default:
+				err = fmt.Errorf("unknown")
+			}
+
+			if err != nil {
+				rlog.Errorf("parameter '%s': %s", key, err.Error())
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			parameters[key] = value
+		}
+
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		doEither := false
+		if p, ok := params["either"]; ok {
+			doEither = true
+			params[right+"_id"] = p
+			params[left+"_id"] = p
+			if len(params["left"]) > 0 || len(params["right"]) > 0 {
+				nillog.Errorf("parameter 'either' conflicts with left or right")
+				http.Error(w, "parameter 'either' conflicts with left or right", http.StatusBadRequest)
+				return
+			}
+			params["left"] = p
+			params["right"] = "all"
+		} else {
+			params[right+"_id"] = params["right"]
+			params[left+"_id"] = params["left"]
+		}
+
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationDelete, params, rc.LeftPermits) {
+			if !auth.IsAuthorized(core.OperationClear, params, rc.Permits) {
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		delete(w, r)
-	}).Methods(http.MethodOptions, http.MethodDelete)
 
-	// DELETE RIGHT
-	router.HandleFunc(rightItemRoute, func(w http.ResponseWriter, r *http.Request) {
-		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		// add left and right to the params for query purposes
+		leftParam := "all"
+		if p, ok := params["left"]; ok {
+			leftParam = p
+		}
+		rightParam := "all"
+		if p, ok := params["right"]; ok {
+			rightParam = p
+		}
+
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		selectors := map[string]string{}
+		for i := 0; i < propertiesIndex; i++ {
+			selectors[columns[i]] = params[columns[i]]
+		}
+
+		_, err = b.intercept(r.Context(), resource, core.OperationClear, uuid.Nil, selectors, parameters, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			rlog.WithError(err).Errorf("Error 4731: BeginTx")
+			http.Error(w, "Error 4731", http.StatusInternalServerError)
+			return
+		}
+
+		whereAll := sqlWhereAll
+		if doEither {
+			whereAll = sqlWhereAllEither
+		}
+
+		if externalValue == "" { // delete entire collection
+			sqlQuery = clearQuery + whereAll
+			queryParameters = make([]interface{}, propertiesIndex+4)
+			for i := 0; i < propertiesIndex; i++ {
+				queryParameters[i] = params[columns[i]]
+			}
+		} else {
+			sqlQuery = clearQuery + whereAll + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
+			queryParameters = make([]interface{}, propertiesIndex+4+2)
+			for i := 0; i < propertiesIndex; i++ {
+				queryParameters[i] = params[columns[i]]
+			}
+			queryParameters[propertiesIndex+4] = externalValue
+		}
+
+		// add before and after and pagination
+		queryParameters[propertiesIndex+0] = until.IsZero()
+		queryParameters[propertiesIndex+1] = until.UTC()
+		queryParameters[propertiesIndex+2] = from.IsZero()
+		queryParameters[propertiesIndex+3] = from.UTC()
+
+		rows, err := tx.Query(sqlQuery+sqlReturnMeta, queryParameters...)
+		if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
+			http.Error(w, "Error 4732", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		if rc.needsKSS && b.KssDriver != nil {
+			for rows.Next() {
+				var timestamp time.Time
+				values, _ := createScanValuesAndObjectWithMeta(true, &timestamp, nil)
+				err := rows.Scan(values...)
+				if err != nil {
+					rlog.WithError(err).Errorf("Error 4725: cannot scan values")
+					http.Error(w, "Error 4725", http.StatusInternalServerError)
+					return
+				}
+				var key string
+				for i := 0; i < propertiesIndex; i++ {
+					key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+				}
+				err = b.KssDriver.DeleteAllWithPrefix(key)
+				if err != nil {
+					rlog.WithError(err).Error("Could not delete key ", key)
+				}
+			}
+		}
+
+		// add collection identifiers to parameters for the notification
+		for i := 1; i < propertiesIndex; i++ {
+			idOrAll := params[columns[i]]
+			if idOrAll != "all" {
+				parameters[columns[i]] = idOrAll
+			}
+		}
+		notificationJSON, _ := json.MarshalWithOption(parameters, json.DisableHTMLEscape())
+		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationClear, uuid.UUID{}, notificationJSON)
+		if err != nil {
+			rlog.WithError(err).Errorf("Error 4770: sqlQuery `%s`", sqlQuery)
+			http.Error(w, "Error 4770", http.StatusInternalServerError)
+			return
+		}
+
+		if slices.Contains(rc.AuditLogs, AuditLogClear) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Clear %s from IP: %s, path: %s", resource, ip, r.URL.String())
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+
+	create := func(w http.ResponseWriter, r *http.Request, bodyJSON map[string]interface{}) {
+		var err error
+
+		rlog := logger.FromContext(r.Context())
+
+		// low-key features for the backup/restore tool
+		var silent, force bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
+		if s := r.URL.Query().Get("force"); s != "" {
+			force, _ = strconv.ParseBool(s)
+		}
 
 		params := mux.Vars(r)
+		if bodyJSON == nil {
+
+			// we pick into the body to figure out if it was empty (which is allowed for relations)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "cannot read body: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			defer r.Body.Close()
+
+			if len(body) == 0 {
+				bodyJSON = map[string]interface{}{}
+			} else {
+				r.Body = io.NopCloser(bytes.NewBuffer(body))
+				body := r.Body
+				if r.Header.Get("Content-Encoding") == "gzip" || r.Header.Get("Kurbisio-Content-Encoding") == "gzip" {
+					body, err = gzip.NewReader(r.Body)
+					if err != nil {
+						http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
+						return
+					}
+				}
+
+				err := json.NewDecoder(body).Decode(&bodyJSON)
+				if err != nil {
+					http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			}
+		}
+
+		if slices.Contains(rc.AuditLogs, AuditLogCreate) {
+			ip := getIPAddress(r)
+			rlog := logger.FromContext(r.Context())
+			rlog.Infof("[AuditLog] Create %s from IP: %s, body: %v", resource, ip, bodyJSON)
+		}
+
+		// build insert query and validate that we have all parameters
+		values := make([]interface{}, len(columns)+1)
+		var i int
+
+		params[leftColumn] = params["left"]
+		params[rightColumn] = params["right"]
+		for ; i < propertiesIndex; i++ { // the core identifiers, either from url or from json
+			k := columns[i]
+			value, ok := bodyJSON[k]
+
+			// zero uuid counts as no uuid for creation
+			ok = ok && value != "00000000-0000-0000-0000-000000000000"
+
+			param := params[k]
+			// identifiers in the url parameters must match the ones in the json document
+			if ok && param != "" && param != "all" && param != value.(string) {
+				http.Error(w, "illegal "+k+": "+param, http.StatusBadRequest)
+				return
+			}
+			// if we have no identifier in the url parameters, but in the json document, use
+			// the ones from the json document
+			if param == "all" || param == "" || param == "00000000-0000-0000-0000-000000000000" {
+				if ok && value != "00000000-0000-0000-0000-000000000000" {
+					values[i] = value
+				} else {
+					http.Error(w, "missing "+columns[i], http.StatusBadRequest)
+					return
+				}
+			} else {
+				// we use the url parameters, update the bodyJSON so we can validate
+				bodyJSON[k] = param
+				values[i] = param
+			}
+			if rc.NonDirectional && i == 1 && values[0].(string) > values[1].(string) {
+				// if we have a non-directional relation, we always want the left to be smaller than the right
+				values[0], values[1] = values[1], values[0]
+				bodyJSON[columns[0]], bodyJSON[columns[1]] = bodyJSON[columns[1]], bodyJSON[columns[0]]
+			}
+		}
+
+		// validate ids
+		_, err = uuid.Parse(values[0].(string))
+		if err != nil {
+			http.Error(w, "illegal "+columns[0]+": "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		_, err = uuid.Parse(values[1].(string))
+		if err != nil {
+			http.Error(w, "illegal "+columns[1]+": "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, bodyJSON)
+			bodyJSON = defaultJSON
+		}
+
+		jsonData, _ := json.MarshalWithOption(bodyJSON, json.DisableHTMLEscape())
+
+		validateSchema := rc.SchemaID != "" && !force
+
+		if validateSchema {
+			if !b.JsonValidator.HasSchema(rc.SchemaID) {
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
+			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
+					string(jsonData), rc.SchemaID)
+				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
+					string(jsonData), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
+		if !force {
+			selectors := map[string]string{}
+			for i := 0; i < propertiesIndex; i++ {
+				selectors[columns[i]] = params[columns[i]]
+			}
+
+			data, err := b.intercept(r.Context(), resource, core.OperationCreate, uuid.Nil, selectors, nil, jsonData)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if data != nil {
+				err = json.Unmarshal(data, &bodyJSON)
+				if err != nil {
+					rlog.WithError(err).Error("Error 2733: interceptor")
+					http.Error(w, "Error 2733", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		// extract the dynamic properties
+		extract := map[string]interface{}{}
+	property_loop:
+		for key, value := range bodyJSON {
+			for i := 0; i < propertiesIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			for i := propertiesIndex + 1; i < propertiesEndIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			if key == "timestamp" || key == "revision" {
+				continue
+			}
+			extract[key] = value
+		}
+
+		propertiesJSON, _ := json.MarshalWithOption(extract, json.DisableHTMLEscape())
+		values[i] = propertiesJSON
+		i++
+
+		// static properties and external indices, non mandatory
+		for ; i < len(columns); i++ {
+			value, ok := bodyJSON[columns[i]]
+			if !ok {
+				value = ""
+			}
+			values[i] = value
+		}
+
+		// next value is timestamp
+		now := time.Now().UTC()
+		timestamp := now
+		if value, ok := bodyJSON["timestamp"]; ok {
+			timestampAsString, _ := value.(string)
+			t, err := time.Parse(time.RFC3339, timestampAsString)
+			if err != nil {
+				http.Error(w, "illegal timestamp: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if !t.IsZero() {
+				timestamp = t.UTC()
+			}
+		}
+		values[i] = &timestamp
+		i++
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			rlog.WithError(err).Errorf("Error 4733: BeginTx")
+			http.Error(w, "Error 4733", http.StatusInternalServerError)
+			return
+		}
+
+		var leftID, rightID uuid.UUID
+		err = tx.QueryRow(insertQuery, values...).Scan(&leftID, &rightID)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
+			http.Error(w, "relation "+this+" already exists", http.StatusUnprocessableEntity)
+			return
+		} else if err != nil {
+			status := http.StatusInternalServerError
+			msg := "Error 4734"
+			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502" || err.Code == "23503") {
+				if err.Code == "23505" {
+					// Non unique external keys are reported as code Code 23505
+					status = http.StatusConflict
+					msg = "constraint violation"
+					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
+				} else if err.Code == "23502" {
+					// Not null constraints are reported as Code 23502
+					status = http.StatusUnprocessableEntity
+					msg = "constraint violation"
+					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
+				} else if err.Code == "23503" {
+					// 23503 is FOREIGN KEY VIOLATION and means that the resource does not exist. This should only happen for singleton
+					status = http.StatusNotFound
+					msg = "foreign key violation"
+				}
+			} else {
+				rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
+			}
+			tx.Rollback()
+			http.Error(w, msg, status)
+			return
+		}
+
+		// re-read data and return as json
+		values, object := createScanValuesAndObject(&timestamp, new(int))
+		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", leftID, rightID).Scan(values...)
+		if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Errorf("Error 4735: re-read object")
+			http.Error(w, "Error 4735", http.StatusInternalServerError)
+			return
+		}
+
+		var uploadURL string
+		if rc.WithCompanionFile && b.KssDriver != nil {
+			var key string
+			for i := propertiesIndex - 1; i >= 0; i-- {
+				key += "/" + columns[i] + "/" + params[columns[i]]
+			}
+			key += "/" + this + "_id/" + values[0].(*uuid.UUID).String() + ":" + values[1].(*uuid.UUID).String()
+
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5736: create companion URL")
+				http.Error(w, "Error 5736", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		mergeProperties(object)
+		jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
+
+		if silent {
+			err = tx.Commit()
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, uuid.Nil, jsonData)
+		}
+		if err != nil {
+			rlog.WithError(err).Error("Error 4737: commitWithNotification")
+			http.Error(w, "Error 4737", http.StatusInternalServerError)
+			return
+		}
+
+		// We add companion_upload_url after inserting in the database if needed
+		if uploadURL != "" {
+			object["companion_upload_url"] = uploadURL
+			jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
+		w.Write(jsonData)
+
+	}
+
+	upsertWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		var err error
+
+		rlog := logger.FromContext(r.Context())
+
+		// low-key features for the backup/restore tool
+		var silent, force bool
+		if s := r.URL.Query().Get("silent"); s != "" {
+			silent, _ = strconv.ParseBool(s)
+		}
+		if s := r.URL.Query().Get("force"); s != "" {
+			force, _ = strconv.ParseBool(s)
+		}
+
+		// make params a deep copy of mux.Vars(r)
+		// so we can modify it without affecting the original request parameters.
+		// This is necessary because we may call create()
+		params := make(map[string]string)
+		for k, v := range mux.Vars(r) {
+			params[k] = v
+		}
+
+		// we pick into the body to figure out if it was empty (which is allowed for relations)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "cannot read body: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer r.Body.Close()
+
+		var bodyJSON map[string]interface{}
+		if len(body) == 0 {
+			bodyJSON = map[string]interface{}{}
+		} else {
+			r.Body = io.NopCloser(bytes.NewBuffer(body))
+			body := r.Body
+			if r.Header.Get("Content-Encoding") == "gzip" || r.Header.Get("Kurbisio-Content-Encoding") == "gzip" {
+				body, err = gzip.NewReader(r.Body)
+				if err != nil {
+					http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+
+			err := json.NewDecoder(body).Decode(&bodyJSON)
+			if err != nil {
+				http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+
+		}
+
+		// primary id can come from parameter (fully qualified put) or from body json (collection put).
+		leftParam := params["left"]
+		if leftParam == "" {
+			id, ok := bodyJSON[columns[0]].(string)
+			if !ok || id == "00000000-0000-0000-0000-000000000000" {
+				http.Error(w, "missing "+columns[0], http.StatusBadRequest)
+				return
+			}
+			leftParam = id
+		}
+		rightParam := params["right"]
+		if rightParam == "" {
+			id, ok := bodyJSON[columns[1]].(string)
+			if !ok || id == "00000000-0000-0000-0000-000000000000" {
+				http.Error(w, "missing "+columns[1], http.StatusBadRequest)
+				return
+			}
+			rightParam = id
+		}
+
+		leftID, err := uuid.Parse(leftParam)
+		if err != nil {
+			http.Error(w, "broken identifier", http.StatusBadRequest)
+			return
+		}
+		rightID, err := uuid.Parse(rightParam)
+		if err != nil {
+			http.Error(w, "broken identifier", http.StatusBadRequest)
+			return
+		}
+
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		params[right+"_id"] = rightID.String()
+		params[left+"_id"] = leftID.String()
+
+		// now we have all parameters and can authorize
 		if b.authorizationEnabled {
 			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationDelete, params, rc.RightPermits) {
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
+				fmt.Printf("not authorized for operation %s with params %v and permits %v\n", core.OperationUpdate, params, rc.Permits)
 				http.Error(w, "not authorized", http.StatusUnauthorized)
 				return
 			}
 		}
-		delete(w, r)
-	}).Methods(http.MethodOptions, http.MethodDelete)
+
+		// add left and right to the params for query purposes
+		if rc.NonDirectional && leftParam > rightParam {
+			leftParam, rightParam = rightParam, leftParam
+		}
+
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
+		revision := 0
+		if r, ok := bodyJSON["revision"].(float64); ok {
+			revision = int(r)
+		}
+
+		tx, err := b.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			rlog.WithError(err).Errorf("Error 4736: Update of resource `%s`", resource)
+			http.Error(w, "Error 4736", http.StatusInternalServerError)
+			return
+		}
+
+		var timestamp time.Time
+		var currentRevision int
+		retried := false
+	Retry:
+		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
+		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2 FOR UPDATE;", &leftID, &rightID).Scan(current...)
+		if err == csql.ErrNoRows {
+			// item does not exist yet.
+			if r.Method == http.MethodPatch {
+				// cannot patch an object which does not exist
+				tx.Rollback()
+				http.Error(w, "no such "+this, http.StatusNotFound)
+				return
+			} else if b.authorizationEnabled {
+				// normal upsert, check whether we can create the object
+				auth := access.AuthorizationFromContext(r.Context())
+				if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
+					tx.Rollback()
+					http.Error(w, "no such "+this, http.StatusNotFound)
+					return
+				}
+			}
+
+			rec := httptest.NewRecorder()
+			create(rec, r, bodyJSON)
+			if rec.Code == http.StatusCreated {
+				// all is good, we are done, we can rollback this transaction
+				tx.Rollback()
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusCreated)
+				w.Write(rec.Body.Bytes())
+				return
+			} else if rec.Code == http.StatusUnprocessableEntity && !retried {
+				// race condition: somebody else has create the object right now
+				retried = true
+				goto Retry
+			}
+			tx.Rollback()
+			http.Error(w, rec.Body.String(), rec.Code)
+			return
+		}
+		if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Error("Error 4737: Rollback")
+			http.Error(w, "Error 4737", http.StatusInternalServerError)
+			return
+		}
+		if revision != 0 && revision != currentRevision {
+			tx.Rollback()
+			// revision does not match, return conflict status with the conflicting object
+			mergeProperties(object)
+			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusConflict)
+			w.Write(jsonData)
+			return
+		}
+		mergeProperties(object)
+
+		// for MethodPatch we get the existing object from the database and patch property by property
+		if r.Method == http.MethodPatch {
+
+			// convert object into generic json for patching (the datatypes are different compared to the database) in the database)
+			body, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+			var objectJSON map[string]interface{}
+			json.Unmarshal(body, &objectJSON)
+
+			// now bodyJSON from the request becomes a patch
+			patchObject(objectJSON, bodyJSON)
+
+			// rewrite this put request to contain the entire (patched) object
+			bodyJSON = objectJSON
+		}
+
+		// apply defaults if applicable
+		if rc.Default != nil {
+			var defaultJSON map[string]interface{}
+			json.Unmarshal(rc.Default, &defaultJSON)
+			patchObject(defaultJSON, bodyJSON)
+			bodyJSON = defaultJSON
+		}
+
+		// build insert query and validate that we have all parameters
+		values := make([]interface{}, len(columns)+1)
+
+		var i int
+
+		// validate core identifiers
+		// Rationale: we have authorized the resource based on the parameters
+		// in the URL, so we have to ensure that the object to update
+		// is that very object, and that the update does not try to
+		// change its identity
+		for i = 0; i < propertiesIndex; i++ {
+			k := columns[i]
+
+			values[i] = current[i]
+			idAsString := values[i].(*uuid.UUID).String()
+
+			// validate that the paramaters  match the object
+			if params[k] != "all" && params[k] != idAsString {
+				tx.Rollback()
+				http.Error(w, "no such "+this, http.StatusNotFound)
+				return
+			}
+
+			// validate that the body json matches the object
+			value, ok := bodyJSON[k]
+			// zero uuid counts as no uuid
+			if ok && value != "00000000-0000-0000-0000-000000000000" && value != idAsString {
+				tx.Rollback()
+				http.Error(w, "illegal "+k, http.StatusBadRequest)
+				return
+			}
+			// update the bodyJSON so we can validate
+			bodyJSON[k] = values[i]
+		}
+
+		jsonData, _ := json.MarshalWithOption(bodyJSON, json.DisableHTMLEscape())
+		validateSchema := rc.SchemaID != "" && !force
+		if validateSchema {
+			if !b.JsonValidator.HasSchema(rc.SchemaID) {
+				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
+			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
+					string(jsonData), rc.SchemaID)
+				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
+					string(jsonData), rc.SchemaID, err), http.StatusBadRequest)
+				return
+			}
+		}
+
+		if !force {
+			selectors := map[string]string{}
+			for i := 0; i < propertiesIndex; i++ {
+				selectors[columns[i]] = params[columns[i]]
+			}
+			data, err := b.intercept(r.Context(), resource, core.OperationUpdate, uuid.Nil, selectors, nil, jsonData)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if data != nil {
+				err = json.Unmarshal(data, &bodyJSON)
+				if err != nil {
+					tx.Rollback()
+					rlog.WithError(err).Errorf("Error 4738: interceptor")
+					http.Error(w, "Error 4738", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		// extract the dynamic properties
+		extract := map[string]interface{}{}
+	property_loop:
+		for key, value := range bodyJSON {
+			for i := 0; i < propertiesIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			for i := propertiesIndex + 1; i < propertiesEndIndex; i++ {
+				if key == columns[i] {
+					continue property_loop
+				}
+			}
+			if key == "timestamp" || key == "revision" {
+				continue
+			}
+			extract[key] = value
+		}
+
+		propertiesJSON, _ := json.MarshalWithOption(extract, json.DisableHTMLEscape())
+		values[i] = propertiesJSON
+		i++
+
+		for ; i < len(columns); i++ {
+			value, ok := bodyJSON[columns[i]]
+			if !ok {
+				tx.Rollback()
+				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
+				return
+			}
+			values[i] = value
+		}
+
+		// next value is timestamp. We only change it when explicitely requested
+		if value, ok := bodyJSON["timestamp"]; ok {
+			timestampAsString, _ := value.(string)
+			t, err := time.Parse(time.RFC3339, timestampAsString)
+			if err != nil {
+				http.Error(w, "illegal timestamp: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if !t.IsZero() {
+				timestamp = t.UTC()
+			}
+		}
+		values[i] = timestamp
+		i++
+
+		err = tx.QueryRow(updateQuery, values...).Scan(&leftID, &rightID)
+		if err == csql.ErrNoRows {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Errorf("Error 4739: update object")
+			http.Error(w, "Error 4739", http.StatusInternalServerError)
+			return
+		}
+
+		// re-read new values and return as json
+		values, response := createScanValuesAndObject(&timestamp, &revision)
+		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", &leftID, &rightID).Scan(values...)
+		if err != nil {
+			tx.Rollback()
+			rlog.WithError(err).Errorf("Error 4740: re-read object")
+			http.Error(w, "Error 4740", http.StatusInternalServerError)
+			return
+		}
+		mergeProperties(response)
+		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
+
+		var uploadURL string
+		if rc.WithCompanionFile && b.KssDriver != nil {
+			var key string
+			for i := propertiesIndex - 1; i >= 0; i-- {
+				key += "/" + columns[i] + "/" + params[columns[i]]
+			}
+			key += "/" + this + "_id/" + leftID.String() + ":" + rightID.String()
+
+			validitySeconds := 900
+			if rc.CompanionPresignedURLValidity > 0 {
+				validitySeconds = rc.CompanionPresignedURLValidity
+			}
+
+			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
+			if err != nil {
+				tx.Rollback()
+				rlog.WithError(err).Errorf("Error 5736: create companion URL")
+				http.Error(w, "Error 5736", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if silent {
+			err = tx.Commit()
+		} else {
+			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
+		}
+		if err != nil {
+			rlog.WithError(err).Errorf("Error 4739: commitWithNotification")
+			http.Error(w, "Error 4739", http.StatusInternalServerError)
+			return
+		}
+
+		// We add companion_upload_url after inserting in the database if needed
+		if uploadURL != "" {
+			response["companion_upload_url"] = uploadURL
+			jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+	}
+
+	// UPDATE/CREATE with id in json
+	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		upsertWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
+
+	// UPDATE/CREATE with fully qualified path
+	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		upsertWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodPut, http.MethodPatch)
+
+	// READ
+	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		readWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodGet)
+
+	// PUT FOR STATIC PROPERTIES
+	for i := staticPropertiesIndex; i < len(columns); i++ {
+		property := columns[i]
+		propertyRoute := fmt.Sprintf("%s/%s/{%s}", itemRoute, property, property)
+		router.Handle(propertyRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+			updatePropertyWithAuth(w, r, property)
+		}))).Methods(http.MethodOptions, http.MethodPut)
+	}
+	// LIST
+	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		listWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodGet)
+
+	// DELETE
+	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		deleteWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodDelete)
+
+	// CLEAR
+	router.Handle(listRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		clearWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodDelete)
 
 }
