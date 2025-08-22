@@ -523,8 +523,12 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			params["left"] = p
 			params["right"] = "all"
 		} else {
-			params[right+"_id"] = params["right"]
-			params[left+"_id"] = params["left"]
+			if p := params["right"]; p != "" {
+				params[right+"_id"] = params["right"]
+			}
+			if p := params["left"]; p != "" {
+				params[left+"_id"] = params["left"]
+			}
 		}
 
 		if b.authorizationEnabled {
@@ -1259,8 +1263,12 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			params["left"] = p
 			params["right"] = "all"
 		} else {
-			params[right+"_id"] = params["right"]
-			params[left+"_id"] = params["left"]
+			if p := params["right"]; p != "" {
+				params[right+"_id"] = params["right"]
+			}
+			if p := params["left"]; p != "" {
+				params[left+"_id"] = params["left"]
+			}
 		}
 
 		if b.authorizationEnabled {
