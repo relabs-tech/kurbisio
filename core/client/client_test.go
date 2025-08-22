@@ -34,6 +34,7 @@ func TestClient_TestClient(t *testing.T) {
 	parentID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9b")
 	childID := uuid.MustParse("c46da255-eb72-4cc6-8835-1b34a9917826")
 	leftID := uuid.MustParse("4f1638da-861e-4a81-8cc7-e6847b6fdf9c")
+	rightID := uuid.MustParse("c46da255-eb72-4cc6-8835-1b34a9917827")
 
 	collection := client.Collection("parent/child")
 	if p := collection.CollectionPath(); p != "/parents/all/children" {
@@ -66,11 +67,20 @@ func TestClient_TestClient(t *testing.T) {
 		t.Fatal("unexpected collection path:", p)
 	}
 
-	collection = client.Relation("myrelation").Collection("left/right").WithParent(leftID)
-	if p := collection.CollectionPath(); p != "/myrelation/lefts/"+leftID.String()+"/rights" {
+	relationship := client.Collection("myrelation").Relationship(leftID, rightID)
+	if p := relationship.Path(); p != "/myrelations/"+leftID.String()+":"+rightID.String() {
+		t.Fatal("unexpected relationship path:", p)
+	}
+
+	collection = client.Collection("myrelation").WithLeft(leftID).WithRight(rightID)
+	if p := collection.CollectionPath(); p != "/myrelations?left="+leftID.String()+"&right="+rightID.String() {
 		t.Fatal("unexpected collection path:", p)
 	}
 
+	collection = client.Collection("myrelation").WithEither(leftID)
+	if p := collection.CollectionPath(); p != "/myrelations?either="+leftID.String() {
+		t.Fatal("unexpected collection path:", p)
+	}
 }
 func TestClient_Page_From(t *testing.T) {
 

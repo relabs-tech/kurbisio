@@ -205,6 +205,90 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
+                    "resource",
+                    "left",
+                    "right"
+                ],
+                "properties": {
+                    "default": {
+                        "type": "object"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "non_directional": {
+                        "type": "boolean",
+                        "description": "If true this relation is non-directional, left and right will be sorted lexicographically. This is only posisble of left and right are the same resource type"
+                    },
+                    "external_index": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "resource": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "audit_logs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "create",
+                                "read",
+                                "update",
+                                "delete",
+                                "clear"
+                            ]
+                        },
+                        "description": "List of audit log resources to be used for this collection"
+                    },
+                    "permits": {
+                        "$ref": "#/definitions/permits"
+                    },
+                    "schema_id": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "left": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "right": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "searchable_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "static_properties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    "with_companion_file": {
+                        "type": "boolean",
+                        "description": "If true this resource will allow to add companion file stored externally"
+                    },
+                    "companion_presigned_url_validity": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "description": "The validity in seconds of the pre signed URL. Defaults to 900 (15 minutes)"
+                    }
+                }
+            }
+        },
+        "relations_old": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
                     "left",
                     "right"
                 ],

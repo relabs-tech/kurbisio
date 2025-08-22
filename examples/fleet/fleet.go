@@ -32,34 +32,6 @@ var configurationJSON string = `{
 	  },
 	  {
 		"resource": "device/data"
-	  },
-	  {
-		"resource": "fleet"
-	  },
-	  {
-		"resource": "fleet/user"
-	  },
-	  {
-		"resource": "fleet/location"
-	  }
-	],
-	"singletons": [
-	  {
-		"resource": "fleet/user/profile"
-	  }
-	],
-	"relations": [
-	  {
-		"left": "device",
-		"right": "fleet"
-	  },
-	  {
-		"left": "fleet/location",
-		"right": "fleet/user"
-	  },
-	  {
-		"left": "fleet/device",
-		"right": "fleet/user"
 	  }
 	]
   }

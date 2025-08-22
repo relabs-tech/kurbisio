@@ -170,13 +170,6 @@ var configurationJSON string = `{
 	  }
 
 	],
-	"relations": [
-		{
-			"resource":"named_relation",
-			"left":"a",
-			"right":"b"
-		}
-	],
 	"shortcuts": [
 		{
 			"shortcut" : "b",

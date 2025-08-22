@@ -258,7 +258,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	}
 
 	readQuery := "SELECT " + strings.Join(columns, ", ") + fmt.Sprintf(", timestamp, revision FROM %s.\"%s\" ", schema, resource)
-	sqlWhereOne := "WHERE " + compareIDsString(columns[:propertiesIndex])
+	sqlWhereOne := "WHERE " + compareIDsStringRequired(columns[:propertiesIndex], 1)
 
 	readQueryWithTotal := "SELECT " + strings.Join(columns, ", ") +
 		fmt.Sprintf(", timestamp, revision, count(*) OVER() AS full_count FROM %s.\"%s\" ", schema, resource)
@@ -390,7 +390,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 	}
 
-	list := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	list := func(w http.ResponseWriter, r *http.Request) {
 		var (
 			queryParameters     []interface{}
 			sqlQuery            string
@@ -616,13 +616,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			queryParameters[propertiesIndex-ownerIndex+5] = (page - 1) * limit
 		}
 
-		if relation != nil {
-			// inject subquery for relation
-			sqlQuery += fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
-		}
-
 		if useCursorPagination {
 			if ascendingOrder {
 				sqlQuery += sqlCursorPaginationAsc
@@ -787,10 +780,10 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
-		list(w, r, nil)
+		list(w, r)
 	}
 
-	read := func(w http.ResponseWriter, r *http.Request, relation *relationInjection) {
+	read := func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
 		params := mux.Vars(r)
@@ -839,16 +832,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			queryParameters[i] = params[columns[i]]
 		}
 
-		subQuery := ""
-		if relation != nil {
-			// inject subquery for relation
-			subQuery = fmt.Sprintf(relation.subquery,
-				compareIDsStringWithOffset(len(queryParameters), relation.columns))
-			queryParameters = append(queryParameters, relation.queryParameters...)
-		}
-
 		values, object := createScanValuesAndObject(&time.Time{}, new(int))
-		err = b.db.QueryRow(readQuery+sqlWhereOne+subQuery+";", queryParameters...).Scan(values...)
+		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			if singleton {
 				var jsonData []byte
@@ -1012,7 +997,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
-		read(w, r, nil)
+		read(w, r)
 	}
 
 	updatePropertyWithAuth := func(w http.ResponseWriter, r *http.Request, property string) {
@@ -1083,7 +1068,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		err = tx.QueryRow(query, queryParameters...).Scan(&primaryID)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -1167,7 +1152,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
-			w.WriteHeader(http.StatusNotFound)
+			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -1623,7 +1608,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			for i := propertiesIndex - 1; i >= ownerIndex; i-- {
 				key += "/" + columns[i] + "/" + selectors[columns[i]]
 			}
-			key += "/" + primary + "_id/" + object[primary+"_id"].(*uuid.UUID).String()
+			key += "/" + primary + "_id/" + id.String()
 
 			validitySeconds := 900
 			if rc.CompanionPresignedURLValidity > 0 {
@@ -1718,7 +1703,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		if len(primaryID) == 0 || primaryID == "all" {
 			var ok bool
 			primaryID, ok = bodyJSON[columns[0]].(string)
-			if !ok {
+			if !ok || primaryID == "00000000-0000-0000-0000-000000000000" {
 				http.Error(w, "missing "+columns[0], http.StatusBadRequest)
 				return
 			}
@@ -2021,13 +2006,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonData)
-	}
-
-	// store the collection functions  for later usage in relations
-	b.collectionFunctions[resource] = &collectionFunctions{
-		permits: rc.Permits,
-		list:    list,
-		read:    read,
 	}
 
 	// CREATE

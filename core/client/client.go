@@ -105,6 +105,21 @@ func (c Client) WithRole(role string) Client {
 	return c
 }
 
+// WithRoleAndSelector returns a new client with role authorization
+// (this works only directly against the mux router, for a normal client
+//
+//	use WithToken()))
+func (c Client) WithRoleAndSelector(role string, selector string, value uuid.UUID) Client {
+	if !strings.HasSuffix(selector, "_id") {
+		selector += "_id"
+	}
+	c.auth = &access.Authorization{
+		Roles:     []string{role},
+		Selectors: map[string]string{selector: value.String()},
+	}
+	return c
+}
+
 // WithAuthorization returns a new client with specific authorizations
 // (this works only directly against the mux router, for a normal client
 //
@@ -140,33 +155,11 @@ type Collection struct {
 	parameters []string
 }
 
-// Collection returns a new collection client
+// Collection returns a new collection client. It works
+// for normal collections and relations.
 func (c Client) Collection(resource string) Collection {
 	return Collection{
 		client:    &c,
-		resources: strings.Split(resource, "/"),
-	}
-}
-
-// Relation represents a relation of particular resources
-type Relation struct {
-	resource string
-	client   *Client
-}
-
-// Relation returns a new relation client
-func (c Client) Relation(resource string) Relation {
-	return Relation{
-		client:   &c,
-		resource: resource,
-	}
-}
-
-// Collection returns a new collection client, for a collection within this relation
-func (r Relation) Collection(resource string) Collection {
-	return Collection{
-		prefix:    "/" + r.resource,
-		client:    r.client,
 		resources: strings.Split(resource, "/"),
 	}
 }
@@ -243,6 +236,24 @@ func (r Collection) WithParameters(keyValues map[string]string) Collection {
 		// we want a true copy to avoid side effects
 		parameters: append(append([]string{}, r.parameters...), parameters...),
 	}
+}
+
+// WithLeft returns a new collection client with a left selector added. This only
+// works if the collection is a directional relation
+func (r Collection) WithLeft(leftID uuid.UUID) Collection {
+	return r.WithParameter("left", leftID.String())
+}
+
+// WithRight returns a new collection client with a right selector added. This only
+// works if the collection is a directional relation
+func (r Collection) WithRight(rightID uuid.UUID) Collection {
+	return r.WithParameter("right", rightID.String())
+}
+
+// WithEither returns a new collection client with a either selector added. This only
+// works if the collection is a non-directional relation
+func (r Collection) WithEither(eitherID uuid.UUID) Collection {
+	return r.WithParameter("either", eitherID.String())
 }
 
 // WithFilter returns a new collection client with a URL filter parameter added.
@@ -393,12 +404,13 @@ type Item struct {
 	parameters  []string
 }
 
-// Item gets an item from a collection
+// Item gets an item from the collection.
+// If the collection is a relation, use RelationShip()
 func (r Collection) Item(id uuid.UUID) Item {
 	return Item{col: r, id: id}
 }
 
-// Singleton gets a singleton from this collection
+// Singleton gets a singleton from the collection
 func (r Collection) Singleton() Item {
 	return Item{col: r, isSingleton: true}
 }
@@ -532,16 +544,6 @@ func (r Item) UpdateProperty(jsonName string, value string) (int, error) {
 	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
 }
 
-// Relate creates a realation to another resource, provided that the relation actually exists
-//
-// The operation corresponds to a PUT request.
-//
-// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
-// otherwise it will flag an error. Returns the actual http status code.
-func (r Item) Relate(resource string, id uuid.UUID) (int, error) {
-	return r.col.client.RawPut(r.Path()+"/"+core.Plural(resource)+"/"+id.String(), nil, nil)
-}
-
 // Patch updates selected fields of an item
 //
 // Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
@@ -550,6 +552,86 @@ func (r Item) Relate(resource string, id uuid.UUID) (int, error) {
 // body can also be a []byte, result can also be raw *[]byte.
 // result can be nil.
 func (r Item) Patch(body interface{}, result interface{}) (int, error) {
+	return r.col.client.RawPatch(r.Path(), body, result)
+}
+
+type Relationship struct {
+	col     Collection
+	leftID  uuid.UUID
+	rightID uuid.UUID
+}
+
+// Relationship returns a relationship from the collection
+func (r Collection) Relationship(leftID, rightID uuid.UUID) Relationship {
+	return Relationship{col: r, leftID: leftID, rightID: rightID}
+}
+
+// Path returns the created path for this item
+func (r Relationship) Path() string {
+	return r.col.CollectionPath() + "/" + r.leftID.String() + ":" + r.rightID.String()
+}
+
+// Read reads a relationship from a collection
+//
+// The operation corresponds to a GET request.
+//
+// Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// result can also be map[string]interface{} or a raw *[]byte.
+func (r Relationship) Read(result interface{}) (int, error) {
+	return r.col.client.RawGet(r.Path(), result)
+}
+
+// Delete deletes a relationship from a collection
+//
+// The operation corresponds to a DELETE request.
+//
+// Expects http.StatusNoContent as response, otherwise it will
+// flag an error.
+//
+// Returns the actual http status code.
+func (r Relationship) Delete() (int, error) {
+	return r.col.client.RawDelete(r.Path())
+}
+
+// Upsert updates a relationship, or creates if it doesn't exist yet.
+// The relationship must be fully qualified, i.e. it must contain all identifiers, either in the
+// body itself or as selectors.
+//
+// The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+//
+// In case of http.StatusConflict, the conflicting version of the object has been returned as result.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
+func (r Relationship) Upsert(body interface{}, result interface{}) (int, error) {
+	return r.col.client.RawPut(r.Path(), body, result)
+}
+
+// UpdateProperty updates a single static property in the fastest possible
+// way. Note: this method does trigger an update resource notificatino, but
+// not with the entire object, only with the updated property.
+//
+// The operation corresponds to a PUT request.
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+func (r Relationship) UpdateProperty(jsonName string, value string) (int, error) {
+	return r.col.client.RawPut(r.Path()+"/"+jsonName+"/"+value, nil, nil)
+}
+
+// Patch updates selected fields of a relationship
+//
+// Expects http.StatusOK, http.StatusCreated or http.StatusNoContent as valid responses,
+// otherwise it will flag an error. Returns the actual http status code.
+//
+// body can also be a []byte, result can also be raw *[]byte.
+// result can be nil.
+func (r Relationship) Patch(body interface{}, result interface{}) (int, error) {
 	return r.col.client.RawPatch(r.Path(), body, result)
 }
 
@@ -563,11 +645,9 @@ type Page struct {
 	nextCursor *string
 }
 
-// FirstPage returns a requester for the first page of a collection
-//
-// Do not specify the page filter when using the page requester, as
-// it manages page itself. You can set all others parameters, including
-// limit.
+// FirstPage returns a requester for the first page of a collection,
+// using the cursor pagination
+// You can set others parameters, including limit.
 func (r Collection) FirstPage() Page {
 	return Page{r: r}
 }
@@ -927,7 +1007,8 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 
 	// we do not return just yet in case of http.StatusConflict to be able to return the conflicting object
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
-		return status, fmt.Errorf("put got status=%d body=%s", status, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v. Error: %s",
+			status, strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -937,7 +1018,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 	}
 	if status == http.StatusConflict {
-		return status, fmt.Errorf("conflict while writing to path:'%s', wanted to write %s, conflict: %s", path, string(j), string(resBody))
+		return status, fmt.Errorf("conflict while writing to path '%s', wanted to write %s, conflict: %s", path, string(j), string(resBody))
 	}
 	return status, err
 }

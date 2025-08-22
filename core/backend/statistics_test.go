@@ -54,12 +54,7 @@ func TestStatistics(t *testing.T) {
 		expectedResources = append(expectedResources, r.Resource)
 	}
 	for _, r := range testService.backend.Config().Relations {
-		resource := ""
-		if r.Resource != "" {
-			resource = r.Resource + ":" + resource
-		}
-		resource += r.Left + ":" + r.Right
-		expectedResources = append(expectedResources, resource)
+		expectedResources = append(expectedResources, r.Resource)
 	}
 	for _, r := range testService.backend.Config().Singletons {
 		expectedResources = append(expectedResources, r.Resource)

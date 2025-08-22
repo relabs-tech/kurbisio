@@ -20,7 +20,7 @@ type Request struct {
 	// Resource for which this request is made
 	Resource string
 	// the primary ID for the resource, for singletons this is the parent ID, for
-	// list requests this is a  null uuid.
+	// list requests or relations requests this is a  null uuid.
 	ResourceID uuid.UUID
 	// Operation for this request
 	Operation core.Operation

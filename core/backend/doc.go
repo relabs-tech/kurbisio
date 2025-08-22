@@ -34,11 +34,11 @@ Example:
 		  }
 		],
 		"relations": [
-		  {
-			"left": "device",
-			"right": "user"
-		  }
-		]
+	  	  {
+			"resource": "device_ownership",
+			"left": "user",
+			"right": "device"
+	  	  }
 	  }
 
 The example creates one resource "user" with an external unique index "identity".
@@ -47,7 +47,7 @@ A user has a child resource "user/profile", which is declared as a singleton, i.
 Hence a profile does not have an id of its own, but uses the user_id as its primary identifier, and there
 is a convenient singular resource accessor for a user's profile.
 
-Finally there is a relation from device to user which creates two more virtual child resources "user/device" and "device/user".
+Finally there is a relation from user to device called "device_ownership", which creates a resource of its own.
 
 This configuration creates the following REST routes:
 
@@ -55,13 +55,10 @@ This configuration creates the following REST routes:
 	/users/{user_id} GET,PUT,PATCH,DELETE
 	/devices GET,POST,PUT,PATCH
 	/devices/{device_id} GET,PUT,PATCH,DELETE
-	/users/{user_id}/devices GET
-	/users/{user_id}/devices/{device_id} GET,PUT,DELETE
-	/devices/{device_id}/users GET
-	/devices/{device_id}/users/{user_id} GET,PUT,DELETE
-	/users/{user_id}/profile GET,PUT,PATCH,DELETE
 	/users/{user_id}/profiles GET,POST,PUT,PATCH
 	/users/{user_id}/profiles/{user_id} GET,PUT,PATCH,DELETE
+	/device_ownerships GET,PUT,PATCH,DELETE with optional query parameters ?left={user_id} and ?right={device_id}
+	/device_ownerships/{users_id}:{device_id} GET,PUT,PATCH,DELETE
 
 The models look like this:
 
@@ -69,15 +66,6 @@ The models look like this:
 	{
 		"user_id": UUID,
 		"identity": STRING
-		"timestamp": TIMESTAMP
-		"revision": INTEGER
-		...
-	}
-
-	Profile
-	{
-		"profile_id": UUID
-		"user_id": UUID,
 		"timestamp": TIMESTAMP
 		"revision": INTEGER
 		...
@@ -92,50 +80,86 @@ The models look like this:
 		...
 	}
 
+	Profile
+	{
+		"profile_id": UUID
+		"user_id": UUID,
+		"timestamp": TIMESTAMP
+		"revision": INTEGER
+		...
+	}
+
+	DeviceOwnership
+	{
+		"user_id": UUID,
+		"device_id": UUID,
+		"timestamp": TIMESTAMP
+		"revision": INTEGER
+		...
+	}
+
 We can now create a user with a simple POST:
 
-	  curl http://localhost:3000/users -d'{"identity":"test@test.com", "name":"Jonathan Test"}'
-	  {
-		"timestamp": "2020-03-23T16:01:08.138302Z",
-	 	"identity": "test@test.com",
-		"name": "Jonathan Test",
-	 	"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
-	  }
+	curl http://localhost:3000/users -d'{"identity":"test@test.com", "name":"Jonathan Test"}'
 
-We can create a device:
+which returns
 
-	  curl http://localhost:3000/devices -d'{"thing":"12345"}'
-	  {
-	 	"timestamp": "2020-03-23T16:07:23.57638Z",
-		"device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-		"thing": "12345"
-	  }
+	{
+	  "timestamp": "2020-03-23T16:01:08.138302Z",
+	  "identity": "test@test.com",
+	  "name": "Jonathan Test",
+	  "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
+	}
 
-And we can assign this device to the test user:
+We then create a device:
 
-	curl -X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices/783b3674-34d5-497d-892a-2b48cf99296d
-	204 No Content
+	curl http://localhost:3000/devices -d'{"thing":"12345"}'
+
+which returns
+
+	{
+	  "timestamp": "2020-03-23T16:07:23.57638Z",
+	  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
+	  "thing": "12345"
+	}
+
+And we can assign this device to the test user, using the ids we have just received:
+
+	curl -X PUT http://localhost:3000/device_ownerships/f879572d-ac69-4020-b7f8-a9b3e628fd9d:783b3674-34d5-497d-892a-2b48cf99296d
+
+which returns
+
+	{
+	  "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d",
+	  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
+	  "timestamp": ...,
+	  "revision": 1
+	}
 
 Now we can query the devices of this specific user:
 
-	  curl http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/devices
-	  [
-	 	{
-		  "timestamp": "2020-03-23T16:07:23.57638Z",
-		  "device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
-		  "thing": "12345"
-		 }
-	  ]
+	curl http://localhost:3000/device_ownerships?left=f879572d-ac69-4020-b7f8-a9b3e628fd9d
+
+which returns
+
+	[
+	 {
+		"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d",
+		"device_id": "783b3674-34d5-497d-892a-2b48cf99296d",
+		"timestamp": ...,
+		"revision": 1
+	 }
+	]
 
 This adds a profile to the user, or updates the user's profile:
 
-	  curl-X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/profile -d'{"nickname":"jonathan"}'
-	  {
-	 	"timestamp": "2020-03-23T16:25:15.738091Z",
-	 	"profile_id": "9a09030c-516f-4dcd-a2fc-dedad219457d",
-		"nickname": "jonathan",
-		"user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
-	  }
+	curl-X PUT http://localhost:3000/users/f879572d-ac69-4020-b7f8-a9b3e628fd9d/profile -d'{"nickname":"jonathan"}'
+	{
+	  "timestamp": "2020-03-23T16:25:15.738091Z",
+	  "profile_id": "9a09030c-516f-4dcd-a2fc-dedad219457d",
+	  "nickname": "jonathan",
+	  "user_id": "f879572d-ac69-4020-b7f8-a9b3e628fd9d"
+	}
 
 # Shortcut Routes
 
@@ -311,37 +335,34 @@ The backend supports notifications through the Notifier interface specified at c
 
 # Relations
 
-The example demonstrated a relation between "user" and "device", which created two additional resources "user/device" and
-"device/user". Relations also work between different child resources, for example between "fleet/user" and "fleet/device",
-as long as both resources have a compatible base (in this case "fleet"). Furthermore relations are transient. Say you
-have actual resources "device" and "fleet", and a relation between them, which creates a virtual resource "fleet/device".
-In this case you can also have a relation between "fleet/user" and "fleet/device", leading to the two additional
-resources "fleet/user/device" and "fleet/device/user".
+Relations are a special type of collection, which creates a relation between two resources.
+For example, a relation "device_ownership" creates a relation between "user" on the left and "device" on the right.
 
-Relations support separate permits for the left and the right resource, called "left_permits" and "right_permits".
-"left_permits" applies to the left/right relations.
-"right_permits" applies to the right/left relations.
+The generated routes are as follows:
 
-Examples:
-  - to read left/{left_id}/right/{right_id}, one needs to have the "read" permission on the left_permit.
-  - to read right/{right_id}/left/{left_id}, one needs to have the "read" permission on the right_permit.
-  - to create left/{left_id}/right/{right_id}, one needs to have the "create" permission on the left_permit and read permission on the right resource
-  - to create right/{right_id}/left/{left_id}, one needs to have the "create" permission on the right_permit and read permission on the left resource
-  - to list left/{left_id}/rights, one needs to have the "list" permission on the left_permit.
-  - to list right/{right_id}/lefts, one needs to have the "list" permission on the right_permit.
-  - to delete left/{left_id}/right/{right_id}, one needs to have the "delete" permission on the left_permit.
-  - to delete right/{right_id}/left/{left_id}, one needs to have the "delete" permission on the right_permit.
-  - the update permission is not used
+	/device_ownerships GET,PUT,PATCH,DELETE with optional query parameters ?left={user_id} and ?right={device_id}
+	/device_ownerships/{users_id}:{device_id} GET,PUT,PATCH,DELETE
 
-For each relation, the number of related resources for one other resource is currently limited by 1000. In the above
-example, one fleet can have up to 1000 users and devices, and each user then can be assigned to 1000 devices max.
+Like any other collection, relations support pagination, sorting and filtering.
 
-Relations support an extra query parameter "?idonly=true", which returns only the list of ids as opposed to full objects.
-If you furthermore specify "withtimestamp=true", you will receice both the ids and the timestamp when this relation was
-established.
+It is also possible to have relations between the same type of resources, for example a relation "invitation" between "user"
+and "user". The generated routes are as follows:
 
-Relations can also be given an explicit Resource name just like any other collection, which allows multiple different
-relations from the the same resource types. The resource name then becomes a prefix to access the relation.
+	/invitations GET,PUT,PATCH,DELETE with optional query parameters ?left={inviting_user_id} and ?right={invited_user_id}
+	/invitations/{inviting_user_id}:{invited_users_id} GET,PUT,PATCH,DELETE
+
+You can also query all relations of a specific user regardless of wether they are the inviting user or the invited user:
+
+	/invitations?either={user_id}
+
+Relations between the same type of resource can also be non-directional, by specifying the "non_directional" to true
+in the configuration. For example the relation "friendship" between "user" and "user":
+
+	/friendships GET,PUT,PATCH,DELETE with optional query parameters ?either={user_id}
+	/friendships/{user_id}:{other_user_id} GET,PUT,PATCH,DELETE
+
+The order between "user_id" and "other_user_id" does not matter. In the reported non-directional friendship object, one
+will be "left_user_id" and one will be "right_user_id", depending on the lexicographic order of the identifiers.
 
 # Blobs
 
@@ -487,10 +508,6 @@ Example:
 			"with_companion_file": true,
 			companion_presigned_url_validity: 3600
 		  }
-		],
-		"singletons": [
-		],
-		"relations": [
 		]
 	  }
 
