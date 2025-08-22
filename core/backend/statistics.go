@@ -64,11 +64,7 @@ func (b *Backend) statisticsWithAuth(w http.ResponseWriter, r *http.Request) {
 		singletons = append(singletons, r.Resource)
 	}
 	for _, r := range b.config.Relations {
-		resource := r.Left + ":" + r.Right
-		if r.Resource != "" {
-			resource = r.Resource + ":" + resource
-		}
-		relations = append(relations, resource)
+		relations = append(relations, r.Resource)
 	}
 	for _, r := range b.config.Blobs {
 		blobs = append(blobs, r.Resource)

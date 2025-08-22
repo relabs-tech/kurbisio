@@ -46,12 +46,10 @@ const InternalDatabaseSchemaVersion = 3
 
 // Backend is the generic rest backend
 type Backend struct {
-	config              Configuration
-	db                  *csql.DB
-	router              *mux.Router
-	publicURL           string
-	collectionFunctions map[string]*collectionFunctions
-	relations           map[string]string
+	config    Configuration
+	db        *csql.DB
+	router    *mux.Router
+	publicURL string
 	// Registry is the JSON object registry for this backend's schema
 	Registry             registry.Registry
 	authorizationEnabled bool
@@ -168,8 +166,6 @@ func New(bb *Builder) *Backend {
 		db:                       bb.DB,
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
-		collectionFunctions:      make(map[string]*collectionFunctions),
-		relations:                make(map[string]string),
 		Registry:                 registry.New(bb.DB),
 		authorizationEnabled:     bb.AuthorizationEnabled,
 		callbacks:                make(map[string]jobHandler),
@@ -408,18 +404,6 @@ func (b *Backend) handleResourceRoutes() {
 
 }
 
-type relationInjection struct {
-	subquery        string
-	columns         []string
-	queryParameters []interface{}
-}
-
-type collectionFunctions struct {
-	permits []access.Permit
-	list    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-	read    func(w http.ResponseWriter, r *http.Request, relation *relationInjection)
-}
-
 // returns $1,...,$n
 func parameterString(n int) string {
 	result := ""
@@ -432,11 +416,10 @@ func parameterString(n int) string {
 	return result
 }
 
-// returns s[0]=$1 AND ... AND s[n-1]=$n
+// returns s[0]=$1 AND ... AND s[n-1]=$n, but also excepts 'all' as a special case
 func compareIDsString(s []string) string {
 	result := ""
-	i := 0
-	for ; i < len(s); i++ {
+	for i := 0; i < len(s); i++ {
 		if i > 0 {
 			result += " AND "
 		}
@@ -445,18 +428,41 @@ func compareIDsString(s []string) string {
 	return result
 }
 
-// returns s[0]=$(offset+1) AND ... AND s[n-1]=$(offset+n)
-func compareIDsStringWithOffset(offset int, s []string) string {
+// returns (s[0]=$1 OR s[1]=$1) AND ... AND s[n-1]=$n, but also excepts 'all' as a special case
+func compareIDsStringEither(s []string) string {
 	result := ""
-	i := 0
-	for ; i < len(s); i++ {
+	for i := 0; i < len(s); i++ {
+		if i == 0 && len(s) > 1 {
+			result += fmt.Sprintf("($1<>'all' AND $2='all' AND (%s=$1::UUID OR %s=$1::UUID))", s[0], s[1])
+			i = 1 // skip the second one, we already added it
+			continue
+		}
+
 		if i > 0 {
 			result += " AND "
 		}
-		result += fmt.Sprintf("($%d='all' OR %s=$%d::UUID)", i+offset+1, s[i], i+offset+1)
+		result += fmt.Sprintf("($%d='all' OR %s=$%d::UUID)", i+1, s[i], i+1)
 	}
 	return result
 }
+
+// returns s[0]=$1 AND ... AND s[n-1]=$n, but also excepts 'all' as a special case unless for the required number of IDs
+func compareIDsStringRequired(s []string, required int) string {
+	result := ""
+	for i := 0; i < len(s); i++ {
+		if i > 0 {
+			result += " AND "
+		}
+		if i < required {
+			result += fmt.Sprintf("%s=$%d::UUID", s[i], i+1)
+		} else {
+			result += fmt.Sprintf("($%d='all' OR %s=$%d::UUID)", i+1, s[i], i+1)
+		}
+	}
+	return result
+}
+
+// returns (s[0]=$1 OR s[1]=$2) AND ... AND s[n-1]=$n, but also excepts 'all' as a special case unless for the required number of IDs
 
 func timeToEtag(t time.Time) string {
 	return fmt.Sprintf("\"%x\"", sha1.Sum([]byte(t.String())))
