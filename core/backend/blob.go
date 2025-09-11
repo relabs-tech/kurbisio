@@ -220,20 +220,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		return values, object
 	}
 
-	mergeProperties := func(object map[string]interface{}) {
-		rawJSON := object["properties"].(*json.RawMessage)
-		delete(object, "properties")
-		var properties map[string]interface{}
-		err := json.Unmarshal([]byte(*rawJSON), &properties)
-		if err != nil {
-			return
-		}
-		for key, value := range properties {
-			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
-				object[key] = value
-			}
-		}
-	}
 	list := func(w http.ResponseWriter, r *http.Request) {
 		var (
 			queryParameters []interface{}
@@ -699,7 +685,11 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		// last value is timestamp
 		timestamp := time.Now().UTC()
 		if j, ok := metaJSON["timestamp"]; ok {
-			json.Unmarshal(j, &timestamp)
+			if err := json.Unmarshal(j, &timestamp); err != nil {
+				http.Error(w, "invalid timestamp in meta data", http.StatusBadRequest)
+				return
+			}
+			delete(metaJSON, "timestamp")
 		}
 		values[i] = &timestamp
 
@@ -754,6 +744,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 				return
 			}
 		}
+
+		mergeProperties(response)
 
 		jsonData, _ := json.Marshal(response)
 		err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, id, jsonData)
