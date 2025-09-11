@@ -375,21 +375,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		return createScanValuesAndObject(timestamp, revision, extra...)
 	}
 
-	mergeProperties := func(object map[string]interface{}) {
-		rawJSON := object["properties"].(*json.RawMessage)
-		delete(object, "properties")
-		var properties map[string]interface{}
-		err := json.Unmarshal([]byte(*rawJSON), &properties)
-		if err != nil {
-			return
-		}
-		for key, value := range properties {
-			if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
-				object[key] = value
-			}
-		}
-	}
-
 	list := func(w http.ResponseWriter, r *http.Request) {
 		var (
 			queryParameters     []interface{}
@@ -2092,4 +2077,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		deleteWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
+}
+
+func mergeProperties(object map[string]interface{}) {
+	rawJSON := object["properties"].(*json.RawMessage)
+	delete(object, "properties")
+	var properties map[string]interface{}
+	err := json.Unmarshal([]byte(*rawJSON), &properties)
+	if err != nil {
+		return
+	}
+	for key, value := range properties {
+		if _, ok := object[key]; !ok { // dynamic properties must not overwrite static properties
+			object[key] = value
+		}
+	}
 }
