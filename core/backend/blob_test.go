@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/google/uuid"
 	"github.com/relabs-tech/kurbisio/core/backend"
 	"github.com/stretchr/testify/assert"
@@ -156,6 +157,37 @@ func TestEtagGetBlobCollection(t *testing.T) {
 	_, err = testService.client.RawDelete("/blobs") // clear entire collection
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBlobTimestampAndMetadata(t *testing.T) {
+	// Test that we can set the timestamp of a blob manually
+	blobData := []byte{1, 2, 3, 4}
+	now := time.Date(2023, 1, 2, 3, 4, 5, 0, time.UTC)
+	metadata := Blob{
+		Timestamp:    now,
+		SomeProperty: 1,
+	}
+	metadataJson, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	header := map[string]string{
+		"Content-Type":       "image/png",
+		"Kurbisio-Meta-Data": string(metadataJson),
+	}
+	res := &Blob{}
+	if _, err := testService.client.RawPostBlob("/blobs", header, blobData, &res); err != nil {
+		t.Fatal(err)
+	}
+	// Check that the timestamp is set correctly
+	if res.Timestamp != now {
+		t.Fatalf("Timestamp is expected to be %s, was %s", now, res.Timestamp)
+	}
+	// Check that the additional property is set correctly
+	if res.SomeProperty != 1 {
+		t.Fatalf("SomeProperty is expected to be %d, was %d", 1, res.SomeProperty)
 	}
 }
 
@@ -652,7 +684,7 @@ func TestCursorPaginationBlobWithTimeFiltering(t *testing.T) {
 
 	blobData := []byte{0, 1, 2, 3, 4}
 	header := map[string]string{
-		"Content-Type":       "image/png",
+		"Content-Type": "image/png",
 	}
 
 	beforeTime := time.Now().UTC().Add(-2 * time.Second) // Give more time buffer
