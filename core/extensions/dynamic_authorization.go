@@ -161,8 +161,14 @@ func (e DynamicAuth) UpdateMux(router *mux.Router) error {
 			return
 		}
 		auth := access.AuthorizationFromContext(r.Context())
+		if auth == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
-		res, err := e.GetResourcesWithRoles(r.Context(), router, auth.Selectors)
+		var res []ResourceWithRoles
+		var err error
+		res, err = e.GetResourcesWithRoles(r.Context(), router, auth.Selectors)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
