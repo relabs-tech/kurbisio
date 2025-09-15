@@ -206,6 +206,32 @@ func (r Collection) WithParent(parentID uuid.UUID) Collection {
 	return r.WithSelector(r.resources[len(r.resources)-2], parentID)
 }
 
+// From returns a new collection client with a 'from' time parameter added.
+func (r Collection) From(from time.Time) Collection {
+	// remove previous from parameter if any
+	for i, p := range r.parameters {
+		if strings.HasPrefix(p, "from=") {
+			r.parameters = append(r.parameters[:i], r.parameters[i+1:]...)
+			break
+		}
+	}
+
+	return r.WithParameter("from", from.Format(time.RFC3339Nano))
+}
+
+// Until returns a new collection client with an 'until' time parameter added.
+func (r Collection) Until(until time.Time) Collection {
+	// remove previous until parameter if any
+	for i, p := range r.parameters {
+		if strings.HasPrefix(p, "until=") {
+			r.parameters = append(r.parameters[:i], r.parameters[i+1:]...)
+			break
+		}
+	}
+
+	return r.WithParameter("until", until.Format(time.RFC3339Nano))
+}
+
 // WithParameter returns a new collection client with a URL parameter added.
 func (r Collection) WithParameter(key string, value string) Collection {
 
@@ -858,7 +884,10 @@ func (c Client) RawPostWithHeader(path string, headers map[string]string, body i
 		}
 	}
 
-	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	r, err := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(j))
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("POST to %s: %w", path, err)
+	}
 	for key, value := range c.defaultHeaders {
 		r.Header.Add(key, value)
 	}
