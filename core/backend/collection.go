@@ -1569,17 +1569,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			status := http.StatusInternalServerError
 			msg := "Error 4734"
 			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502" || err.Code == "23503") {
-				if err.Code == "23505" {
+				switch err.Code {
+				case "23505":
 					// Non unique external keys are reported as code Code 23505
-					status = http.StatusConflict
-					msg = "constraint violation"
-					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
-				} else if err.Code == "23502" {
-					// Not null constraints are reported as Code 23502
 					status = http.StatusUnprocessableEntity
-					msg = "constraint violation"
-					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
-				} else if err.Code == "23503" {
+					msg = "non unique external keys constraint violation"
+					rlog.WithError(err).Infof("non unique external key constraint violation: QueryRow query: `%s`", insertQuery)
+				case "23502":
+					// Not null constraints are reported as Code 23502
+					status = http.StatusBadRequest
+					msg = "not null constraint violation"
+					rlog.WithError(err).Infof("not null constraint violation: QueryRow query: `%s`", insertQuery)
+				case "23503":
 					// 23503 is FOREIGN KEY VIOLATION and means that the resource does not exist. This should only happen for singleton
 					status = http.StatusNotFound
 					msg = ""
