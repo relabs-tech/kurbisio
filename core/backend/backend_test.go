@@ -793,9 +793,10 @@ func TestCollectionOrder(t *testing.T) {
 }
 
 type Blob struct {
-	BlobID      uuid.UUID `json:"blob_id"`
-	Timestamp   time.Time `json:"timestamp"`
-	ContentType string    `json:"content_type"`
+	BlobID       uuid.UUID `json:"blob_id"`
+	Timestamp    time.Time `json:"timestamp"`
+	ContentType  string    `json:"content_type,omitempty"`
+	SomeProperty int32     `json:"some_property"`
 }
 type BlobEx struct {
 	BlobExID    uuid.UUID `json:"blobex_id"`

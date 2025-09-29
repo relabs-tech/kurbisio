@@ -4,7 +4,8 @@
 // info@dalarub.com
 //
 
-/*Package registry provides a persistent registry of objects in a SQL database
+/*
+Package registry provides a persistent registry of objects in a SQL database
 
 The package uses JSON to serialize the data.
 */
@@ -54,7 +55,7 @@ func (r Registry) Accessor(prefix string) Accessor {
 }
 
 // Read reads a value from the registry. It returns the
-// time when the value was written, or a zero timpestamp
+// time when the value was written, or a zero timestamp
 // if there is no value.
 //
 // If the accessor has a prefix, the key is prepended with "{prefix}:"
