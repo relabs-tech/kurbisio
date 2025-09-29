@@ -288,6 +288,10 @@ func (r Collection) WithFilter(key string, value string) Collection {
 	return r.WithParameter("filter", key+"="+value)
 }
 
+func (r Collection) WithSearch(key, value string) Collection {
+	return r.WithParameter("search", key+"~"+value)
+}
+
 func (r Collection) paths() (collectionPath, singletonPath string) {
 	itemPath := r.prefix
 	for _, resource := range r.resources {
