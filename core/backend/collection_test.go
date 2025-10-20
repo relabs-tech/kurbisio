@@ -230,7 +230,7 @@ func TestEtagCollectionRegenerated(t *testing.T) {
 }
 
 // TestCollectionExternalID verifies that if we try to create twice an element with the same
-// external id, we get a 422 error
+// external id, we get a 409 error
 func TestCollectionExternalID(t *testing.T) {
 	a := A{ExternalID: "an external id"}
 	if _, err := testService.client.RawPost("/as", a, &a); err != nil {

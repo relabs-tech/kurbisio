@@ -1563,7 +1563,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		err = tx.QueryRow(insertQuery, values...).Scan(&id)
 		if err == csql.ErrNoRows {
 			tx.Rollback()
-			http.Error(w, "singleton "+this+" already exists", http.StatusUnprocessableEntity)
+			http.Error(w, "singleton "+this+" already exists", http.StatusConflict)
 			return
 		} else if err != nil {
 			status := http.StatusInternalServerError

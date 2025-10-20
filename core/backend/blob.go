@@ -172,7 +172,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 
 	insertQuery := fmt.Sprintf("INSERT INTO %s.\"%s\" ", schema, resource) + "(" + strings.Join(columns, ", ") + ", blob, timestamp)"
 	insertQuery += "VALUES(" + parameterString(len(columns)+2) + ") "
-	insertQuery += "ON CONFLICT (" + this + "_id) DO UPDATE SET " + this + "_id = $1 RETURNING " + this + "_id;"
+	insertQuery += " RETURNING " + this + "_id;"
 
 	updateQuery := fmt.Sprintf("UPDATE %s.\"%s\" SET ", schema, resource)
 	sets := make([]string, len(columns)-propertiesIndex)
@@ -894,13 +894,19 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		}
 
 		var primaryID uuid.UUID
-		query := updateQuery
-		if authorizedForCreate {
-			query = insertUpdateQuery
-		}
+		var query string
+
 		if !rc.Mutable {
 			query = insertQuery
+		} else if authorizedForCreate {
+			query = insertUpdateQuery
+		} else {
+			// not mutable and not authorized for create
+			http.Error(w, "not authorized", http.StatusUnauthorized)
+			return
 		}
+
+		fmt.Printf("QUERY: %s.  %v\n", query, rc.Mutable)
 		err = tx.QueryRow(query, values...).Scan(&primaryID)
 		if err == sql.ErrNoRows {
 			tx.Rollback()
@@ -911,8 +917,16 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 			return
 		}
+
 		if err != nil {
 			tx.Rollback()
+			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+				if !rc.Mutable {
+					http.Error(w, "collection is not mutable", http.StatusConflict)
+				}
+				return
+			}
+
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -945,7 +959,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 		}
 
-		jsonData, _ := json.Marshal(response)
+		mergeProperties(response)
+		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
 
 		if silent {
 			err = tx.Commit()
