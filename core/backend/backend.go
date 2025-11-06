@@ -589,3 +589,8 @@ func (b *Backend) PublicURL() string {
 func (b *Backend) Config() Configuration {
 	return b.config
 }
+
+// DidUpdateSchema returns true if the backend updated the database schema during initialization
+func (b *Backend) DidUpdateSchema() bool {
+	return b.updateSchema
+}
