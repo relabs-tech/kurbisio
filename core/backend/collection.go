@@ -1466,10 +1466,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			if !b.JsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
-				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
-					string(jsonData), rc.SchemaID)
-				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
-					string(jsonData), rc.SchemaID, err), http.StatusBadRequest)
+				rlog.WithError(err).Errorf("document does not follow schemaID %s: %v.  Document: %v", rc.SchemaID, err, string(jsonData))
+				http.Error(w, fmt.Sprintf("document does not follow schemaID %s: %v", rc.SchemaID, err), http.StatusBadRequest)
 				return
 			}
 		}
