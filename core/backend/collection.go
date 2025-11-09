@@ -1811,7 +1811,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				switch err.Code {
 				case "23505":
 					// Non unique external keys are reported as code Code 23505
-					status = http.StatusUnprocessableEntity
+					status = http.StatusConflict
 					msg = "non unique external keys constraint violation"
 					rlog.WithError(err).Infof("non unique external key constraint violation: QueryRow query: `%s`", insertQuery)
 				case "23502":
