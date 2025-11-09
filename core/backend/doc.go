@@ -252,6 +252,16 @@ The GET request on collections can be customized with any of the searchable prop
 the resources or the first layer of properties of the json document as a filter. It is possible to search for equality of to search
 a pattern.
 
+# Getting multiple items at the same time (mget)
+
+There is a convenient way to get multiple items at the same time, by doing a POST request to the collection with a JSON array
+of ids in the body. For example, to get multiple users by their user_id:
+
+	POST /users/mget
+	Body: ["f879572d-ac69-4020-b7f8-a9b3e628fd9d", "another-user-id", "another-user-id"]
+
+This returns a JSON array of user objects matching the given ids. If an id does not exist, it is simply ignored.
+
 # Searching and Filtering
 
 Collections support two different operators for searching and filtering: search and filter. The operator "search" is guaranteed to be fast, it only
@@ -363,6 +373,9 @@ in the configuration. For example the relation "friendship" between "user" and "
 
 The order between "user_id" and "other_user_id" does not matter. In the reported non-directional friendship object, one
 will be "left_user_id" and one will be "right_user_id", depending on the lexicographic order of the identifiers.
+
+Retrieving the actual friends of a user based on a list of friendships can be done with a single POST request to /users/mget as described
+in the chapter on Getting multiple items at the same time (mget) above.
 
 # Blobs
 

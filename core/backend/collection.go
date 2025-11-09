@@ -272,7 +272,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	if propertiesIndex > ownerIndex {
 		sqlWhereAll += compareIDsString(columns[ownerIndex:propertiesIndex]) + " AND "
 	}
-	sqlWhereAll += fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
+	sqlWhereAllFromUntil := sqlWhereAll + fmt.Sprintf("($%d OR timestamp<=$%d) AND ($%d OR timestamp>=$%d) ",
 		propertiesIndex-ownerIndex+1, propertiesIndex-ownerIndex+1+1, propertiesIndex-ownerIndex+1+2, propertiesIndex-ownerIndex+1+3)
 	sqlPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC LIMIT $%d OFFSET $%d;",
 		columns[0], propertiesIndex-ownerIndex+1+4, propertiesIndex-ownerIndex+1+5)
@@ -551,7 +551,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				sqlQuery = readQueryWithTotal
 			}
 		}
-		sqlQuery += sqlWhereAll
+		sqlQuery += sqlWhereAllFromUntil
 
 		// Build base parameters first - different sizes for cursor vs page pagination
 		if useCursorPagination {
@@ -781,6 +781,247 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		list(w, r)
+	}
+
+	mget := func(w http.ResponseWriter, r *http.Request) {
+		var (
+			queryParameters     []interface{}
+			sqlQuery            string
+			externalColumns     []string
+			externalValues      []string
+			externalOperators   []string
+			filterJSONColumns   []string
+			filterJSONValues    []string
+			filterJSONOperators []string
+			metaonly            bool
+			err                 error
+		)
+		urlQuery := r.URL.Query()
+		parameters := map[string]string{}
+		var withCompanionUrls bool
+		for key, array := range urlQuery {
+			if key != "filter" && len(array) > 1 {
+				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
+				return
+			}
+			value := array[0]
+		switchStatement:
+			switch key {
+			case "filter", "search":
+				for _, value := range array {
+					var operator string
+					i := strings.IndexRune(value, '=')
+					if i < 0 {
+						i = strings.IndexRune(value, '~')
+						if i < 0 {
+							err = fmt.Errorf("cannot parse filter, must be of type property=value or property~value")
+							break
+						} else {
+							operator = " LIKE "
+						}
+					} else {
+						operator = "="
+					}
+					filterKey := value[:i]
+					filterValue := value[i+1:]
+
+					found := false
+					for _, searchableColumn := range searchableColumns {
+						if filterKey == searchableColumn {
+							externalValues = append(externalValues, filterValue)
+							externalColumns = append(externalColumns, filterKey)
+							found = true
+							externalOperators = append(externalOperators, operator)
+							break
+						}
+					}
+					// This was not a search inside a columns, then we try to search in the json document
+					if !found {
+						if key == "search" {
+							err = fmt.Errorf("unknown search property '%s'", filterKey)
+							break switchStatement
+						}
+						filterJSONValues = append(filterJSONValues, filterValue)
+						filterJSONColumns = append(filterJSONColumns, filterKey)
+						filterJSONOperators = append(filterJSONOperators, operator)
+					}
+				}
+
+			case "metaonly":
+				metaonly, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			case "with_companion_urls":
+				withCompanionUrls, err = strconv.ParseBool(array[0])
+				if err != nil {
+					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+					return
+				}
+
+			default:
+				err = fmt.Errorf("unknown")
+			}
+
+			parameters[key] = value
+			if err != nil {
+				nillog.Errorf("parameter '%s': %s", key, err.Error())
+				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		body := r.Body
+		if r.Header.Get("Content-Encoding") == "gzip" || r.Header.Get("Kurbisio-Content-Encoding") == "gzip" {
+			body, err = gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "invalid gzipped json data: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		var bodyJSON []uuid.UUID
+		err = json.NewDecoder(body).Decode(&bodyJSON)
+		if err != nil {
+			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// convert bodyJSON list to a list of strings
+		mgetList := make([]string, len(bodyJSON))
+		for i, v := range bodyJSON {
+			mgetList[i] = fmt.Sprintf("'%v'", v)
+		}
+
+		params := mux.Vars(r)
+		selectors := map[string]string{}
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+			selectors[columns[i]] = params[columns[i]]
+		}
+		if metaonly {
+			sqlQuery = readQueryMetaWithFakeTotal
+		} else {
+			sqlQuery = readQueryWithFakeTotal
+		}
+		sqlQuery += sqlWhereAll
+		sqlQuery += fmt.Sprintf("(%s IN (%s)) ", columns[0], strings.Join(mgetList, ","))
+
+		// Build base parameters first
+		if len(externalValues) == 0 && len(filterJSONValues) == 0 {
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex)
+		} else {
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+len(externalValues)+len(filterJSONValues))
+			for i := range externalValues {
+				sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+1+i)
+				queryParameters[propertiesIndex-ownerIndex+1+i] = externalValues[i]
+			}
+			for i := range filterJSONValues {
+				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+1+i+len(externalValues))
+				queryParameters[propertiesIndex-ownerIndex+1+i+len(externalValues)] = filterJSONValues[i]
+			}
+		}
+
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-ownerIndex] = params[columns[i]]
+		}
+
+		fmt.Printf("\n\nQUERY %#v parameters: %s\n\n", sqlQuery, asJSON(queryParameters))
+		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4721: cannot execute query `%s` %+v", sqlQuery, queryParameters)
+			http.Error(w, "Error 4721", http.StatusInternalServerError)
+			return
+		}
+
+		response := []interface{}{}
+		defer rows.Close()
+		var totalCount int
+		rowCount := 0
+		for rows.Next() {
+			var timestamp time.Time
+			values, object := createScanValuesAndObjectWithMeta(metaonly, &timestamp, new(int), &totalCount)
+			err := rows.Scan(values...)
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 4725: cannot scan values")
+				http.Error(w, "Error 4725", http.StatusInternalServerError)
+				return
+			}
+			rowCount++
+
+			if !metaonly {
+				var uploadURL string
+				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
+					var key string
+					for i := 0; i < propertiesIndex; i++ {
+						key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
+					}
+
+					validitySeconds := 900
+					if rc.CompanionPresignedURLValidity > 0 {
+						validitySeconds = rc.CompanionPresignedURLValidity
+					}
+
+					uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Get, key, time.Second*time.Duration(validitySeconds))
+					if err != nil {
+						nillog.WithError(err).Errorf("Error 5736: list companion URL")
+						http.Error(w, "Error 5736", http.StatusInternalServerError)
+						return
+					}
+					object["companion_download_url"] = uploadURL
+				}
+
+				mergeProperties(object)
+				// apply defaults if applicable
+				if rc.Default != nil {
+					var defaultJSON map[string]interface{}
+					json.Unmarshal(rc.Default, &defaultJSON)
+					patchObject(defaultJSON, object)
+					object = defaultJSON
+				}
+			}
+
+			response = append(response, object)
+
+		}
+
+		// do request interceptors
+		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
+		data, err := b.intercept(r.Context(), resource, core.OperationList, uuid.UUID{}, selectors, parameters, jsonData)
+		if err != nil {
+			nillog.WithError(err).Errorf("Error 4726: cannot request interceptors")
+			http.Error(w, "Error 4726", http.StatusInternalServerError)
+			return
+		}
+		if data != nil {
+			jsonData = data
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		etag := bytesToEtag(jsonData)
+		w.Header().Set("Etag", etag)
+		if ifNoneMatchFound(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Write(jsonData)
+
+	}
+
+	mgetWithAuth := func(w http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		if b.authorizationEnabled {
+			// mget uses the same permissions as list
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationList, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		mget(w, r)
 	}
 
 	read := func(w http.ResponseWriter, r *http.Request) {
@@ -1288,13 +1529,13 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		if externalValue == "" { // delete entire collection
-			sqlQuery = clearQuery + sqlWhereAll
+			sqlQuery = clearQuery + sqlWhereAllFromUntil
 			queryParameters = make([]interface{}, propertiesIndex-1+4)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
 		} else {
-			sqlQuery = clearQuery + sqlWhereAll + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
+			sqlQuery = clearQuery + sqlWhereAllFromUntil + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+1)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
@@ -2056,6 +2297,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		listWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodGet)
 
+	// MGET
+	router.Handle(listRoute+"/mget", handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
+		mgetWithAuth(w, r)
+	}))).Methods(http.MethodOptions, http.MethodPost)
+
 	// DELETE
 	router.Handle(itemRoute, handlers.CompressHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method)
@@ -2091,4 +2338,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		deleteWithAuth(w, r)
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
+}
+func asJSON(object interface{}) string {
+	j, _ := json.Marshal(object)
+	return string(j)
 }
