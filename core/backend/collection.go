@@ -1530,7 +1530,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 
 		if externalValue == "" { // delete entire collection
 			sqlQuery = clearQuery + sqlWhereAllFromUntil
-			queryParameters = make([]interface{}, propertiesIndex-1+4)
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4)
 			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
 				queryParameters[i-ownerIndex] = params[columns[i]]
 			}
