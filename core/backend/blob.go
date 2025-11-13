@@ -906,7 +906,6 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			return
 		}
 
-		fmt.Printf("QUERY: %s.  %v\n", query, rc.Mutable)
 		err = tx.QueryRow(query, values...).Scan(&primaryID)
 		if err == sql.ErrNoRows {
 			tx.Rollback()

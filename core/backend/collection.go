@@ -927,7 +927,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			queryParameters[i-ownerIndex] = params[columns[i]]
 		}
 
-		fmt.Printf("\n\nQUERY %#v parameters: %s\n\n", sqlQuery, asJSON(queryParameters))
 		rows, err := b.db.Query(sqlQuery, queryParameters...)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4721: cannot execute query `%s` %+v", sqlQuery, queryParameters)

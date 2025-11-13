@@ -392,8 +392,21 @@ func (r Collection) Clear() (int, error) {
 // flag an error. Returns the actual http status code.
 //
 // result can be map[string]interface{} or a raw *[]byte.
-func (r Collection) List(result interface{}) (int, error) {
+func (r Collection) List(result any) (int, error) {
 	return r.client.RawGet(r.CollectionPath(), result)
+}
+
+// MGet gets all requested items from a collection
+//
+// Expects http.StatusOK as response, otherwise it will
+// flag an error. Returns the actual http status code.
+//
+// result can be map[string]interface{} or a raw *[]byte.
+func (r Collection) MGet(ids []uuid.UUID, result any) (int, error) {
+	if len(ids) == 0 {
+		return http.StatusNoContent, nil
+	}
+	return r.client.RawPost(r.CollectionPath()+"/mget", ids, result)
 }
 
 // Item represents a single item in a collection
@@ -673,6 +686,15 @@ func (r Collection) FirstPage() Page {
 	return Page{r: r}
 }
 
+// PageFromCursor returns a requester for a specific page of a collection.
+// If cursor is empty, it returns the first page.
+func (r Collection) PageFromCursor(cursor string) Page {
+	if cursor == "" {
+		return r.FirstPage()
+	}
+	return Page{r: r, cursor: &cursor}
+}
+
 // HasData returns true if the page has data (by definition true for the first page)
 func (p Page) HasData() bool {
 	return p.cursor == nil || *p.cursor != ""
@@ -681,7 +703,7 @@ func (p Page) HasData() bool {
 // Get gets one page of the collection
 func (p *Page) Get(result interface{}) (int, error) {
 	c := p.r
-	if p.cursor != nil {
+	if p.cursor != nil && *p.cursor != "" {
 		c = c.WithParameter("next_token", *p.cursor)
 	}
 	path := c.CollectionPath()
