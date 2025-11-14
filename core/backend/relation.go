@@ -1758,6 +1758,28 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			rightParam = id
 		}
 
+		// add left and right identifiers to the params for authorization purpose.
+		// Do right first, so left overwrites if both are the same
+		params[right+"_id"] = rightParam
+		params[left+"_id"] = leftParam
+
+		// now we have all parameters and can authorize
+		if b.authorizationEnabled {
+			auth := access.AuthorizationFromContext(r.Context())
+			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
+				http.Error(w, "not authorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if rc.NonDirectional && leftParam > rightParam {
+			leftParam, rightParam = rightParam, leftParam
+		}
+
+		// add left and right to the params for query purposes
+		params[leftColumn] = leftParam
+		params[rightColumn] = rightParam
+
 		leftID, err := uuid.Parse(leftParam)
 		if err != nil {
 			http.Error(w, "broken identifier", http.StatusBadRequest)
@@ -1768,29 +1790,6 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			http.Error(w, "broken identifier", http.StatusBadRequest)
 			return
 		}
-
-		// add left and right identifiers to the params for authorization purpose.
-		// Do right first, so left overwrites if both are the same
-		params[right+"_id"] = rightID.String()
-		params[left+"_id"] = leftID.String()
-
-		// now we have all parameters and can authorize
-		if b.authorizationEnabled {
-			auth := access.AuthorizationFromContext(r.Context())
-			if !auth.IsAuthorized(core.OperationUpdate, params, rc.Permits) {
-				fmt.Printf("not authorized for operation %s with params %v and permits %v\n", core.OperationUpdate, params, rc.Permits)
-				http.Error(w, "not authorized", http.StatusUnauthorized)
-				return
-			}
-		}
-
-		// add left and right to the params for query purposes
-		if rc.NonDirectional && leftParam > rightParam {
-			leftParam, rightParam = rightParam, leftParam
-		}
-
-		params[leftColumn] = leftParam
-		params[rightColumn] = rightParam
 
 		revision := 0
 		if r, ok := bodyJSON["revision"].(float64); ok {

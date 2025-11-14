@@ -526,13 +526,16 @@ func TestRelationNonDirectional(t *testing.T) {
 	}
 
 	// create a new relation between a and someAID
-	_, err = adminClient.RawPut("/a_a_relations", &MyRelation{
+	status, err = adminClient.RawPut("/a_a_relations", &MyRelation{
 		LeftAID:  a.AID,
 		RightAID: someAID,
 		Text:     "magic token",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if status != http.StatusCreated {
+		t.Fatalf("Expecting created, got %v", status)
 	}
 
 	// read it back with left and right as they are
@@ -554,6 +557,31 @@ func TestRelationNonDirectional(t *testing.T) {
 	if relation.Text != "magic token" {
 		t.Fatalf("Expecting magic token, got %s", relation.Text)
 	}
+
+	// update it with left and right swapped, should not create a new one
+	// create a new relation between a and someAID
+	status, err = adminClient.RawPut("/a_a_relations", &MyRelation{
+		LeftAID:  a.AID,
+		RightAID: someAID,
+		Text:     "new magic token",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("Expecting OK, got %v", status)
+	}
+
+	// read it back and check that the token was updated
+	relation = MyRelation{}
+	_, err = adminClient.RawGet(fmt.Sprintf("/a_a_relations/%v:%v", a.AID, someAID), &relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relation.Text != "new magic token" {
+		t.Fatalf("Expecting new magic token, got %s", relation.Text)
+	}
+
 }
 
 // use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
