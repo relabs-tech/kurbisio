@@ -761,8 +761,8 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 
 	}
 	if status != http.StatusOK {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusOK, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusOK, errors.New(strings.TrimSpace(string(resBody))))
 	}
 
 	if resBody != nil && result != nil {
@@ -818,8 +818,8 @@ func (c Client) RawGetWithHeader(path string, header map[string]string, result i
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusOK, strings.TrimSpace(string(resBody)))
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusOK, errors.New(strings.TrimSpace(string(resBody))))
 	}
 
 	if resBody != nil && result != nil {
@@ -874,8 +874,8 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 	}
 
 	if status != http.StatusOK {
-		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusOK, strings.TrimSpace(string(resBody)))
+		return status, res.Header, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusOK, errors.New(strings.TrimSpace(string(resBody))))
 	}
 
 	if resBody != nil {
@@ -935,8 +935,8 @@ func (c Client) RawPostWithHeader(path string, headers map[string]string, body i
 	}
 
 	if status != http.StatusCreated && status != http.StatusOK {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusCreated, errors.New(strings.TrimSpace(string(resBody))))
 	}
 
 	if resBody != nil && result != nil {
@@ -995,8 +995,8 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 	status := res.StatusCode
 
 	if status != http.StatusCreated {
-		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %s",
-			status, http.StatusCreated, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusCreated, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	if resBody != nil && result != nil {
 		err = json.Unmarshal(resBody, result)
@@ -1050,8 +1050,8 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 
 	// we do not return just yet in case of http.StatusConflict to be able to return the conflicting object
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent && status != http.StatusConflict {
-		return status, fmt.Errorf("handler returned wrong status code: got %v. Error: %s",
-			status, strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v. Error: %w",
+			status, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
