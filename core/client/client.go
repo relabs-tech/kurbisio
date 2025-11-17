@@ -701,7 +701,13 @@ func (p Page) HasData() bool {
 }
 
 // Get gets one page of the collection
-func (p *Page) Get(result interface{}) (int, error) {
+func (p *Page) Get(result any) (int, error) {
+	status, _, err := p.GetWithHeader(result)
+	return status, err
+}
+
+// GetWithHeader gets one page of the collection including HTTP headers
+func (p *Page) GetWithHeader(result any) (int, http.Header, error) {
 	c := p.r
 	if p.cursor != nil && *p.cursor != "" {
 		c = c.WithParameter("next_token", *p.cursor)
@@ -710,9 +716,9 @@ func (p *Page) Get(result interface{}) (int, error) {
 	status, headers, err := p.r.client.RawGetWithHeader(path, map[string]string{}, result)
 	p.nextCursor = pointers.StringPtr(headers.Get("Pagination-Next-Token"))
 	if err != nil {
-		return status, err
+		return status, headers, err
 	}
-	return status, nil
+	return status, headers, nil
 }
 
 // Next returns the next page
