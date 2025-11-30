@@ -1774,6 +1774,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 		if rc.NonDirectional && leftParam > rightParam {
 			leftParam, rightParam = rightParam, leftParam
+			// Also swap the values in bodyJSON to keep them consistent
+			bodyJSON[columns[0]], bodyJSON[columns[1]] = bodyJSON[columns[1]], bodyJSON[columns[0]]
 		}
 
 		// add left and right to the params for query purposes
