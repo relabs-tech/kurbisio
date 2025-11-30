@@ -7,6 +7,7 @@
 package backend_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/backend"
 
 	"github.com/stretchr/testify/assert"
@@ -1580,6 +1582,137 @@ func TestClearWithTimeFilters(t *testing.T) {
 
 	if result[0].ExternalID != "future_1" {
 		t.Errorf("Expected future_1 to remain, got %s", result[0].ExternalID)
+	}
+
+	// Clean up
+	testService.client.Collection("a").Clear()
+}
+
+// TestClearWithMultipleFiltersInterceptor tests that all filter parameters are passed to interceptors
+// This test would fail with the old code that only stored the last filter value
+func TestClearWithMultipleFiltersInterceptor(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	// Set up interceptor to capture parameters
+	var capturedParameters map[string]string
+	testService.backend.HandleResourceRequest("a", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
+		capturedParameters = request.Parameters
+		return data, nil
+	}, core.OperationClear)
+
+	// Create test data
+	testData := []A{
+		{ExternalID: "ext_1", SearchableProp: "search_a", Foo: "foo_1"},
+		{ExternalID: "ext_2", SearchableProp: "search_b", Foo: "foo_2"},
+	}
+
+	for _, a := range testData {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Clear with multiple filter parameters
+	status, err := testService.client.RawDelete("/as?filter=searchable_prop=search_a&filter=foo=foo_1")
+	if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+		t.Fatalf("Failed to clear: error=%v, status=%d", err, status)
+	}
+
+	// Verify that the interceptor received all filter values
+	if capturedParameters == nil {
+		t.Fatal("Interceptor was not called")
+	}
+
+	filterValue, ok := capturedParameters["filter"]
+	if !ok {
+		t.Fatal("filter parameter was not passed to interceptor")
+	}
+
+	// With the fix, filter should contain all values joined by comma
+	expectedFilter := "searchable_prop=search_a,foo=foo_1"
+	if filterValue != expectedFilter {
+		t.Errorf("Expected filter parameter to be %q, got %q", expectedFilter, filterValue)
+	}
+
+	// Clean up
+	testService.client.Collection("a").Clear()
+}
+
+// TestListWithMultipleSearchFiltersInterceptor tests that all search parameters are passed to interceptors
+func TestListWithMultipleSearchFiltersInterceptor(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop", "other_searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	// Set up interceptor to capture parameters
+	var capturedParameters map[string]string
+	testService.backend.HandleResourceRequest("a", func(ctx context.Context, request backend.Request, data []byte) ([]byte, error) {
+		capturedParameters = request.Parameters
+		return data, nil
+	}, core.OperationList)
+
+	// Create test data
+	testData := []A{
+		{ExternalID: "ext_1", SearchableProp: "value_a", OtherSearchableProp: "other_a"},
+	}
+
+	for _, a := range testData {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// List with multiple search parameters
+	var result []A
+	_, err := testService.client.RawGet("/as?search=searchable_prop=value_a&search=other_searchable_prop=other_a", &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify that the interceptor received all search values
+	if capturedParameters == nil {
+		t.Fatal("Interceptor was not called")
+	}
+
+	searchValue, ok := capturedParameters["search"]
+	if !ok {
+		t.Fatal("search parameter was not passed to interceptor")
+	}
+
+	// With the fix, search should contain all values joined by comma
+	expectedSearch := "searchable_prop=value_a,other_searchable_prop=other_a"
+	if searchValue != expectedSearch {
+		t.Errorf("Expected search parameter to be %q, got %q", expectedSearch, searchValue)
 	}
 
 	// Clean up
