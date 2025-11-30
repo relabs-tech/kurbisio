@@ -264,7 +264,7 @@ func TestRelationDirectional(t *testing.T) {
 	}
 
 	// Create 1000 b objects
-	startTime := time.Now().Add(-time.Minute * 1000).UTC()
+	startTime := time.Now().Add(-time.Minute * 1000).UTC().Truncate(time.Microsecond)
 	for i := 0; i < 1000; i++ {
 		var b B
 		status, err = adminClient.RawPost("/bs", b, &b)

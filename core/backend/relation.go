@@ -1577,7 +1577,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		timestamp := now
 		if value, ok := bodyJSON["timestamp"]; ok {
 			timestampAsString, _ := value.(string)
-			t, err := time.Parse(time.RFC3339, timestampAsString)
+			t, err := time.Parse(time.RFC3339Nano, timestampAsString)
 			if err != nil {
 				http.Error(w, "illegal timestamp: "+err.Error(), http.StatusBadRequest)
 				return
