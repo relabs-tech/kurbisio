@@ -32,12 +32,29 @@ PRIMARY KEY(key)
 	if err != nil {
 		panic(err)
 	}
-	return Registry{db: db}
+	return Registry{db: db, tableName: "_registry_"}
+}
+
+// New creates a new registry for the specified database as unlogged table
+// unlogged tables are faster but not crash-safe. This is useful for caches.
+func NewUnlogged(db *csql.DB) Registry {
+	_, err := db.Exec(`CREATE UNLOGGED TABLE IF NOT EXISTS ` + db.Schema + `."_unlogged_registry_" 
+(key varchar NOT NULL, 
+value json NOT NULL, 
+timestamp timestamp NOT NULL, 
+PRIMARY KEY(key)
+);`)
+
+	if err != nil {
+		panic(err)
+	}
+	return Registry{db: db, tableName: "_unlogged_registry_"}
 }
 
 // Registry provides a persistent registry of objects in a sql database.
 type Registry struct {
-	db *csql.DB
+	db        *csql.DB
+	tableName string
 }
 
 // Accessor is an accessor with optional prefix
@@ -69,7 +86,7 @@ func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
 	}
 
 	err := r.Registry.db.QueryRow(
-		`SELECT value, timestamp FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
+		`SELECT value, timestamp FROM `+r.Registry.db.Schema+`."`+r.Registry.tableName+`" WHERE key=$1;`,
 		key).Scan(&rawValue, &timestamp)
 	if err == csql.ErrNoRows {
 		return timestamp, nil
@@ -96,7 +113,7 @@ func (r Accessor) Write(key string, value interface{}) error {
 	}
 	now := time.Now().UTC()
 	res, err := r.Registry.db.Exec(
-		`INSERT INTO `+r.Registry.db.Schema+`."_registry_"(key,value,timestamp)
+		`INSERT INTO `+r.Registry.db.Schema+`."`+r.Registry.tableName+`"(key,value,timestamp)
 VALUES($1,$2,$3)
 ON CONFLICT (key) DO UPDATE SET value=$2,timestamp=$3;`,
 		key, string(body), now)
@@ -124,7 +141,7 @@ func (r Accessor) Delete(key string) error {
 		key = r.Prefix + ":" + key
 	}
 	_, err := r.Registry.db.Exec(
-		`DELETE FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
+		`DELETE FROM `+r.Registry.db.Schema+`."`+r.Registry.tableName+`" WHERE key=$1;`,
 		key)
 
 	if err != nil {

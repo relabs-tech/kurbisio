@@ -7,6 +7,7 @@
 package registry
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -99,4 +100,116 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("Deleted key still exists")
 	}
 
+}
+
+// BenchmarkLoggedVsUnlogged compares the performance of logged and unlogged registries
+func BenchmarkLoggedVsUnlogged(b *testing.B) {
+	type testData struct {
+		ID          int
+		Name        string
+		Description string
+		Timestamp   time.Time
+		Values      []float64
+	}
+
+	// Setup databases
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_core_registry_benchmark_test_")
+	defer db.Close()
+	db.ClearSchema()
+
+	loggedRegistry := New(db)
+	unloggedRegistry := NewUnlogged(db)
+
+	loggedAccessor := loggedRegistry.Accessor("benchmark")
+	unloggedAccessor := unloggedRegistry.Accessor("benchmark")
+
+	testValue := testData{
+		ID:          42,
+		Name:        "Test Object",
+		Description: "This is a test object for benchmarking registry performance",
+		Timestamp:   time.Now(),
+		Values:      []float64{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9},
+	}
+
+	// Write to different keys to force actual disk I/O
+	b.Run("Logged-Write-UniqueKeys", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			key := fmt.Sprintf("test_key_%d", i) // unique key each iteration
+			err := loggedAccessor.Write(key, testValue)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Unlogged-Write-UniqueKeys", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			key := fmt.Sprintf("test_key_%d", i) // unique key each iteration
+			err := unloggedAccessor.Write(key, testValue)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	// Pre-populate for read tests
+	loggedAccessor.Write("read_test", testValue)
+	unloggedAccessor.Write("read_test", testValue)
+
+	b.Run("Logged-Read", func(b *testing.B) {
+		var read testData
+		for i := 0; i < b.N; i++ {
+			_, err := loggedAccessor.Read("read_test", &read)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Unlogged-Read", func(b *testing.B) {
+		var read testData
+		for i := 0; i < b.N; i++ {
+			_, err := unloggedAccessor.Read("read_test", &read)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	// Mixed read/write workload with unique keys
+	b.Run("Logged-Mixed-UniqueKeys", func(b *testing.B) {
+		var read testData
+		for i := 0; i < b.N; i++ {
+			if i%2 == 0 {
+				key := fmt.Sprintf("mixed_test_%d", i)
+				err := loggedAccessor.Write(key, testValue)
+				if err != nil {
+					b.Fatal(err)
+				}
+			} else {
+				_, err := loggedAccessor.Read("read_test", &read)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
+
+	b.Run("Unlogged-Mixed-UniqueKeys", func(b *testing.B) {
+		var read testData
+		for i := 0; i < b.N; i++ {
+			if i%2 == 0 {
+				key := fmt.Sprintf("mixed_test_%d", i)
+				err := unloggedAccessor.Write(key, testValue)
+				if err != nil {
+					b.Fatal(err)
+				}
+			} else {
+				_, err := unloggedAccessor.Read("read_test", &read)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
 }

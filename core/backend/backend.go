@@ -52,6 +52,7 @@ type Backend struct {
 	publicURL string
 	// Registry is the JSON object registry for this backend's schema
 	Registry             registry.Registry
+	UnloggedRegistry     registry.Registry
 	authorizationEnabled bool
 	updateSchema         bool
 
@@ -167,6 +168,7 @@ func New(bb *Builder) *Backend {
 		router:                   bb.Router,
 		publicURL:                bb.PublicURL,
 		Registry:                 registry.New(bb.DB),
+		UnloggedRegistry:         registry.NewUnlogged(bb.DB),
 		authorizationEnabled:     bb.AuthorizationEnabled,
 		callbacks:                make(map[string]jobHandler),
 		rateLimits:               make(map[string]rateLimit),
