@@ -453,14 +453,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					filterValue := value[i+1:]
 
 					found := false
-					for _, searchableColumn := range searchableColumns {
-						if filterKey == searchableColumn {
-							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, filterKey)
-							found = true
-							externalOperators = append(externalOperators, operator)
-							break
-						}
+					if slices.Contains(searchableColumns, filterKey) {
+						externalValues = append(externalValues, filterValue)
+						externalColumns = append(externalColumns, filterKey)
+						found = true
+						externalOperators = append(externalOperators, operator)
 					}
 					// This was not a search inside a columns, then we try to search in the json document
 					if !found {
@@ -623,7 +620,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			return
 		}
 
-		response := []interface{}{}
+		response := []any{}
 		defer rows.Close()
 		var totalCount int
 		hasMoreData := false
@@ -811,14 +808,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					filterValue := value[i+1:]
 
 					found := false
-					for _, searchableColumn := range searchableColumns {
-						if filterKey == searchableColumn {
-							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, filterKey)
-							found = true
-							externalOperators = append(externalOperators, operator)
-							break
-						}
+					if slices.Contains(searchableColumns, filterKey) {
+						externalValues = append(externalValues, filterValue)
+						externalColumns = append(externalColumns, filterKey)
+						found = true
+						externalOperators = append(externalOperators, operator)
 					}
 					// This was not a search inside a columns, then we try to search in the json document
 					if !found {
@@ -1030,7 +1024,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		selectors := map[string]string{}
-		for i := 0; i < propertiesIndex; i++ {
+		for i := range propertiesIndex {
 			selectors[columns[i]] = params[columns[i]]
 		}
 
@@ -1053,7 +1047,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
+		for i := range propertiesIndex {
 			queryParameters[i] = params[columns[i]]
 		}
 
@@ -1319,7 +1313,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		rlog := logger.FromContext(r.Context())
 		params := mux.Vars(r)
 		selectors := map[string]string{}
-		for i := 0; i < propertiesIndex; i++ {
+		for i := range propertiesIndex {
 			selectors[columns[i]] = params[columns[i]]
 		}
 
@@ -1361,7 +1355,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		queryParameters := make([]interface{}, propertiesIndex)
-		for i := 0; i < propertiesIndex; i++ {
+		for i := range propertiesIndex {
 			queryParameters[i] = params[columns[i]]
 		}
 
@@ -1388,7 +1382,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 		if rc.needsKSS && b.KssDriver != nil {
 			var key string
-			for i := 0; i < propertiesIndex; i++ {
+			for i := range propertiesIndex {
 				key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 			}
 
@@ -1757,7 +1751,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		extract := map[string]interface{}{}
 	property_loop:
 		for key, value := range bodyJSON {
-			for i := 0; i < propertiesIndex; i++ {
+			for i := range propertiesIndex {
 				if key == columns[i] {
 					continue property_loop
 				}
