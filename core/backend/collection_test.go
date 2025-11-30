@@ -1193,3 +1193,395 @@ func testCursorPaginationWithDeletionAndReplacementHelper(t *testing.T, order st
 		len(allFetchedElements), len(initialElements), order)
 	t.Logf("Fetched %d out of %d initial elements", len(fetchedInitialIDs), len(initialElements))
 }
+
+// TestClearWithFilters tests clearing a collection with filter parameters including JSON property filtering
+func TestClearWithFilters(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	// Create test data with various properties
+	testData := []A{
+		{ExternalID: "ext_1", SearchableProp: "search_a", StaticProp: "static_1", Foo: "foo_value_1"},
+		{ExternalID: "ext_2", SearchableProp: "search_a", StaticProp: "static_2", Foo: "foo_value_2"},
+		{ExternalID: "ext_3", SearchableProp: "search_b", StaticProp: "static_1", Foo: "foo_value_1"},
+		{ExternalID: "ext_4", SearchableProp: "search_b", StaticProp: "static_2", Foo: "foo_value_3"},
+		{ExternalID: "ext_5", SearchableProp: "search_c", StaticProp: "static_3", Foo: "foo_value_1"},
+	}
+
+	for _, a := range testData {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("Clear with searchable column filter", func(t *testing.T) {
+		// Clear all items with searchable_prop=search_a
+		status, err := testService.client.RawDelete("/as?filter=searchable_prop=search_a")
+		if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+			t.Fatalf("Failed to clear with filter: error=%v, status=%d", err, status)
+		}
+
+		// Verify that only items with searchable_prop=search_a were deleted
+		var result []A
+		_, err = testService.client.RawGet("/as", &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result) != 3 {
+			t.Fatalf("Expected 3 items remaining, got %d", len(result))
+		}
+
+		for _, a := range result {
+			if a.SearchableProp == "search_a" {
+				t.Errorf("Found item with searchable_prop=search_a that should have been cleared: %s", a.ExternalID)
+			}
+		}
+	})
+
+	t.Run("Clear with JSON property filter", func(t *testing.T) {
+		// Clear all items with foo=foo_value_1
+		status, err := testService.client.RawDelete("/as?filter=foo=foo_value_1")
+		if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+			t.Fatalf("Failed to clear with JSON filter: error=%v, status=%d", err, status)
+		}
+
+		// Verify that only items with foo=foo_value_1 were deleted
+		var result []A
+		_, err = testService.client.RawGet("/as", &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result) != 1 {
+			t.Fatalf("Expected 1 item remaining, got %d", len(result))
+		}
+
+		for _, a := range result {
+			if a.Foo == "foo_value_1" {
+				t.Errorf("Found item with foo=foo_value_1 that should have been cleared: %s", a.ExternalID)
+			}
+		}
+	})
+
+	// Clean up remaining items
+	testService.client.Collection("a").Clear()
+}
+
+// TestClearWithMultipleFilters tests clearing with multiple filter parameters
+func TestClearWithMultipleFilters(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop", "other_searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	// Create test data
+	testData := []A{
+		{ExternalID: "ext_1", SearchableProp: "search_a", OtherSearchableProp: "other_a", Foo: "foo_1"},
+		{ExternalID: "ext_2", SearchableProp: "search_a", OtherSearchableProp: "other_b", Foo: "foo_1"},
+		{ExternalID: "ext_3", SearchableProp: "search_b", OtherSearchableProp: "other_a", Foo: "foo_2"},
+		{ExternalID: "ext_4", SearchableProp: "search_b", OtherSearchableProp: "other_b", Foo: "foo_2"},
+	}
+
+	for _, a := range testData {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Clear with multiple filters: searchable_prop=search_a AND foo=foo_1
+	status, err := testService.client.RawDelete("/as?filter=searchable_prop=search_a&filter=foo=foo_1")
+	if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+		t.Fatalf("Failed to clear with multiple filters: error=%v, status=%d", err, status)
+	}
+
+	// Verify results
+	var result []A
+	_, err = testService.client.RawGet("/as", &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 2 {
+		t.Fatalf("Expected 2 items remaining, got %d", len(result))
+	}
+
+	// Verify the correct items were deleted
+	for _, a := range result {
+		if a.SearchableProp == "search_a" && a.Foo == "foo_1" {
+			t.Errorf("Found item that should have been cleared: %s", a.ExternalID)
+		}
+	}
+
+	// Clean up
+	testService.client.Collection("a").Clear()
+}
+
+// TestClearWithLikeOperator tests clearing with LIKE operator using ~
+func TestClearWithLikeOperator(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+
+	t.Run("Clear with LIKE on searchable column", func(t *testing.T) {
+		testService := CreateTestService(jsonConfig, "TestClearWithLikeOperator_searchable")
+		defer testService.Db.Close()
+
+		// Create test data
+		testData := []A{
+			{ExternalID: "user_admin_1", SearchableProp: "admin_role", Foo: "type_admin"},
+			{ExternalID: "user_admin_2", SearchableProp: "admin_role", Foo: "type_admin"},
+			{ExternalID: "user_guest_1", SearchableProp: "guest_role", Foo: "type_guest"},
+			{ExternalID: "normal_user", SearchableProp: "user_role", Foo: "type_user"},
+		}
+
+		for _, a := range testData {
+			_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// Clear all items where searchable_prop contains 'admin'
+		status, err := testService.client.RawDelete("/as?filter=" + url.QueryEscape("searchable_prop~%admin%"))
+		if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+			t.Fatalf("Failed to clear with LIKE filter: error=%v, status=%d", err, status)
+		}
+
+		// Verify results
+		var result []A
+		_, err = testService.client.RawGet("/as", &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result) != 2 {
+			t.Fatalf("Expected 2 items remaining, got %d", len(result))
+		}
+
+		for _, a := range result {
+			if strings.Contains(a.SearchableProp, "admin") {
+				t.Errorf("Found item with 'admin' in searchable_prop that should have been cleared: %s", a.ExternalID)
+			}
+		}
+	})
+
+	t.Run("Clear with LIKE on JSON property", func(t *testing.T) {
+		testService := CreateTestService(jsonConfig, "TestClearWithLikeOperator_json")
+		defer testService.Db.Close()
+
+		// Create test data
+		testData := []A{
+			{ExternalID: "user_admin_1", SearchableProp: "admin_role", Foo: "type_admin"},
+			{ExternalID: "user_admin_2", SearchableProp: "admin_role", Foo: "type_admin"},
+			{ExternalID: "user_guest_1", SearchableProp: "guest_role", Foo: "type_guest"},
+			{ExternalID: "normal_user", SearchableProp: "user_role", Foo: "type_user"},
+		}
+
+		for _, a := range testData {
+			_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// Clear all items where foo contains 'guest'
+		status, err := testService.client.RawDelete("/as?filter=" + url.QueryEscape("foo~%guest%"))
+		if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+			t.Fatalf("Failed to clear with LIKE filter on JSON: error=%v, status=%d", err, status)
+		}
+
+		// Verify results
+		var result []A
+		_, err = testService.client.RawGet("/as", &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result) != 3 {
+			t.Fatalf("Expected 3 items remaining, got %d", len(result))
+		}
+
+		for _, a := range result {
+			if strings.Contains(a.Foo, "guest") {
+				t.Errorf("Found item with 'guest' in foo that should have been cleared: %s", a.ExternalID)
+			}
+		}
+	})
+}
+
+// TestClearWithSearchParameter tests that search parameter only works on searchable columns
+func TestClearWithSearchParameter(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	// Create test data
+	testData := []A{
+		{ExternalID: "ext_1", SearchableProp: "search_value", Foo: "foo_value"},
+		{ExternalID: "ext_2", SearchableProp: "other_value", Foo: "foo_value"},
+	}
+
+	for _, a := range testData {
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("Search on searchable column succeeds", func(t *testing.T) {
+		status, err := testService.client.RawDelete("/as?search=searchable_prop=search_value")
+		if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+			t.Fatalf("Failed to clear with search parameter: error=%v, status=%d", err, status)
+		}
+
+		// Verify only one item was deleted
+		var result []A
+		_, err = testService.client.RawGet("/as", &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result) != 1 {
+			t.Fatalf("Expected 1 item remaining, got %d", len(result))
+		}
+
+		if result[0].ExternalID != "ext_2" {
+			t.Errorf("Wrong item remaining: %s", result[0].ExternalID)
+		}
+	})
+
+	t.Run("Search on JSON property fails", func(t *testing.T) {
+		// This should fail because 'search' parameter only works on searchable columns
+		status, err := testService.client.RawDelete("/as?search=foo=foo_value")
+		if status == http.StatusBadRequest {
+			// Expected - this is the correct behavior
+			return
+		}
+		if err == nil && status == http.StatusNoContent {
+			t.Fatal("Expected search on JSON property to fail, but it succeeded")
+		}
+	})
+
+	// Clean up
+	testService.client.Collection("a").Clear()
+}
+
+// TestClearWithTimeFilters tests that time filters (from/until) work with search filters
+func TestClearWithTimeFilters(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a",
+		"external_index": "external_id",
+		"static_properties": ["static_prop"],
+		"searchable_properties": ["searchable_prop"]
+	  } 
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	now := time.Now().UTC()
+	past := now.Add(-24 * time.Hour)
+	future := now.Add(24 * time.Hour)
+
+	// Create test data with different timestamps
+	testData := []struct {
+		a         A
+		timestamp time.Time
+	}{
+		{A{ExternalID: "old_1", SearchableProp: "value_a", Foo: "foo"}, past},
+		{A{ExternalID: "current_1", SearchableProp: "value_a", Foo: "foo"}, now},
+		{A{ExternalID: "future_1", SearchableProp: "value_a", Foo: "foo"}, future},
+	}
+
+	for _, td := range testData {
+		td.a.Timestamp = td.timestamp
+		_, err := testService.client.WithAdminAuthorization().RawPost("/as", td.a, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Clear items with searchable_prop=value_a until now (should delete old_1 and current_1)
+	untilParam := url.QueryEscape(now.Add(time.Second).Format(time.RFC3339))
+	status, err := testService.client.RawDelete("/as?filter=searchable_prop=value_a&until=" + untilParam)
+	if err != nil || (status != http.StatusOK && status != http.StatusNoContent) {
+		t.Fatalf("Failed to clear with time filter: error=%v, status=%d", err, status)
+	}
+
+	// Verify only future_1 remains
+	var result []A
+	_, err = testService.client.RawGet("/as", &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 item remaining, got %d", len(result))
+	}
+
+	if result[0].ExternalID != "future_1" {
+		t.Errorf("Expected future_1 to remain, got %s", result[0].ExternalID)
+	}
+
+	// Clean up
+	testService.client.Collection("a").Clear()
+}

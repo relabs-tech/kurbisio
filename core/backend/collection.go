@@ -1445,58 +1445,80 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		}
 
 		var (
-			queryParameters []interface{}
-			sqlQuery        string
-			until           time.Time
-			from            time.Time
-			externalColumn  string
-			externalValue   string
+			queryParameters     []any
+			sqlQuery            string
+			until               time.Time
+			from                time.Time
+			externalColumns     []string
+			externalValues      []string
+			externalOperators   []string
+			filterJSONColumns   []string
+			filterJSONValues    []string
+			filterJSONOperators []string
 		)
 		parameters := map[string]string{}
 		urlQuery := r.URL.Query()
 		for key, array := range urlQuery {
-			var err error
-			if len(array) > 1 {
+			if key != "filter" && key != "search" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
 			value := array[0]
+		switchStatement:
 			switch key {
 			case "until":
 				until, err = time.Parse(time.RFC3339, value)
 			case "from":
 				from, err = time.Parse(time.RFC3339, value)
-			case "filter":
-				i := strings.IndexRune(value, '=')
-				if i < 0 {
-					err = fmt.Errorf("cannot parse filter, must be of type property=value")
-					break
-				}
-				filterKey := value[:i]
-				filterValue := value[i+1:]
+			case "filter", "search":
+				for _, value := range array {
+					var operator string
+					i := strings.IndexRune(value, '=')
+					if i < 0 {
+						i = strings.IndexRune(value, '~')
+						if i < 0 {
+							err = fmt.Errorf("cannot parse filter, must be of type property=value or property~value")
+							break
+						} else {
+							operator = " LIKE "
+						}
+					} else {
+						operator = "="
+					}
+					filterKey := value[:i]
+					filterValue := value[i+1:]
 
-				found := false
-				for _, searchableColumn := range searchableColumns {
-					if filterKey == searchableColumn {
-						externalValue = filterValue
-						externalColumn = searchableColumn
-						found = true
+					found := false
+					for _, searchableColumn := range searchableColumns {
+						if filterKey == searchableColumn {
+							externalValues = append(externalValues, filterValue)
+							externalColumns = append(externalColumns, filterKey)
+							found = true
+							externalOperators = append(externalOperators, operator)
+							break
+						}
+					}
+					// This was not a search inside a columns, then we try to search in the json document
+					if !found {
+						if key == "search" {
+							err = fmt.Errorf("unknown search property '%s'", filterKey)
+							break switchStatement
+						}
+						filterJSONValues = append(filterJSONValues, filterValue)
+						filterJSONColumns = append(filterJSONColumns, filterKey)
+						filterJSONOperators = append(filterJSONOperators, operator)
 					}
 				}
-				if !found {
-					err = fmt.Errorf("unknown filter property '%s'", filterKey)
-				}
-
 			default:
 				err = fmt.Errorf("unknown")
 			}
 
+			parameters[key] = value
 			if err != nil {
 				rlog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 				return
 			}
-			parameters[key] = value
 		}
 
 		_, err = b.intercept(r.Context(), resource, core.OperationClear, uuid.UUID{}, selectors, parameters, nil)
@@ -1512,22 +1534,27 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			return
 		}
 
-		if externalValue == "" { // delete entire collection
-			sqlQuery = clearQuery + sqlWhereAllFromUntil
+		sqlQuery = clearQuery + sqlWhereAllFromUntil
+
+		if len(externalValues) == 0 && len(filterJSONValues) == 0 {
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4)
-			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-ownerIndex] = params[columns[i]]
-			}
 		} else {
-			sqlQuery = clearQuery + sqlWhereAllFromUntil + fmt.Sprintf("AND (%s=$%d)", externalColumn, propertiesIndex+4)
-			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+1)
-			for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
-				queryParameters[i-ownerIndex] = params[columns[i]]
+			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+4+len(externalValues)+len(filterJSONValues))
+			for i := range externalValues {
+				sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+1+4+i)
+				queryParameters[propertiesIndex-ownerIndex+4+i] = externalValues[i]
 			}
-			queryParameters[propertiesIndex-ownerIndex+4] = externalValue
+			for i := range filterJSONValues {
+				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+1+4+i+len(externalValues))
+				queryParameters[propertiesIndex-ownerIndex+4+i+len(externalValues)] = filterJSONValues[i]
+			}
 		}
 
-		// add before and after and pagination
+		for i := ownerIndex; i < propertiesIndex; i++ { // skip ID
+			queryParameters[i-ownerIndex] = params[columns[i]]
+		}
+
+		// add before and after
 		queryParameters[propertiesIndex-ownerIndex+0] = until.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+1] = until.UTC()
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
