@@ -584,6 +584,149 @@ func TestRelationNonDirectional(t *testing.T) {
 
 }
 
+func TestRelationNonDirectionalDeterministic(t *testing.T) {
+	// This test uses predetermined UUIDs where we know leftID > rightID lexicographically
+	// to deterministically test the non-directional swap bug
+
+	if err := envdecode.Decode(&testService); err != nil {
+		panic(err)
+	}
+
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_non_directional_deterministic_test_")
+	defer db.Close()
+	db.ClearSchema()
+
+	var configurationJSON string = `{
+		"collections": [			
+	    	{
+				"resource": "a"
+		  	}
+		],
+		"relations": [
+			{
+				"resource": "a_a_relation",
+				"left": "a",
+				"right": "a",
+				"non_directional": true
+			}
+		]
+	  }
+	`
+	router := mux.NewRouter()
+	testService.backend = backend.New(&backend.Builder{
+		Config:               configurationJSON,
+		DB:                   db,
+		Router:               router,
+		UpdateSchema:         true,
+		AuthorizationEnabled: true,
+		LogLevel:             "debug",
+	})
+
+	adminClient := client.NewWithRouter(router).WithAdminAuthorization()
+
+	type A struct {
+		AID uuid.UUID `json:"a_id"`
+	}
+
+	type MyRelation struct {
+		LeftAID  uuid.UUID `json:"left_a_id"`
+		RightAID uuid.UUID `json:"right_a_id"`
+		Text     string    `json:"text,omitempty"`
+	}
+
+	// Use predetermined UUIDs where we know the lexicographic ordering
+	// leftID is intentionally > rightID to trigger the swap logic
+	leftID := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	rightID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+	// Create both A objects
+	a1 := A{AID: leftID}
+	_, err := adminClient.RawPut("/as", &a1, &a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a2 := A{AID: rightID}
+	_, err = adminClient.RawPut("/as", &a2, &a2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a relation with leftID > rightID (will be swapped internally to rightID, leftID)
+	status, err := adminClient.RawPut("/a_a_relations", &MyRelation{
+		LeftAID:  leftID,
+		RightAID: rightID,
+		Text:     "initial value",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusCreated {
+		t.Fatalf("Expecting created, got %v", status)
+	}
+
+	// Verify we can read it back
+	relation := MyRelation{}
+	_, err = adminClient.RawGet(fmt.Sprintf("/a_a_relations/%v:%v", leftID, rightID), &relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relation.Text != "initial value" {
+		t.Fatalf("Expecting initial value, got %s", relation.Text)
+	}
+
+	// Now UPDATE the relation with the same IDs (leftID > rightID)
+	// Without the fix, this would fail with "illegal left_a_id" because:
+	// 1. The swap would happen on leftParam/rightParam (becoming rightID, leftID)
+	// 2. DB lookup would use (rightID, leftID) and find the relation
+	// 3. But bodyJSON still has (leftID, rightID)
+	// 4. Validation would compare bodyJSON[left_a_id]=leftID vs DB left_a_id=rightID -> mismatch!
+	status, err = adminClient.RawPut("/a_a_relations", &MyRelation{
+		LeftAID:  leftID,
+		RightAID: rightID,
+		Text:     "updated value",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("Expecting OK, got %v", status)
+	}
+
+	// Verify the update worked
+	relation = MyRelation{}
+	_, err = adminClient.RawGet(fmt.Sprintf("/a_a_relations/%v:%v", leftID, rightID), &relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relation.Text != "updated value" {
+		t.Fatalf("Expecting updated value, got %s", relation.Text)
+	}
+
+	// Also test with the IDs in the opposite order (should still work due to non-directional)
+	status, err = adminClient.RawPut("/a_a_relations", &MyRelation{
+		LeftAID:  rightID,
+		RightAID: leftID,
+		Text:     "final value",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("Expecting OK, got %v", status)
+	}
+
+	// Verify with either ID order
+	relation = MyRelation{}
+	_, err = adminClient.RawGet(fmt.Sprintf("/a_a_relations/%v:%v", rightID, leftID), &relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relation.Text != "final value" {
+		t.Fatalf("Expecting final value, got %s", relation.Text)
+	}
+}
+
 // use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
 // and POSTGRES_PASSWORD="docker"
 type TestService struct {
