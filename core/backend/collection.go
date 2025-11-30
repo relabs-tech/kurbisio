@@ -2338,7 +2338,3 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	}))).Methods(http.MethodOptions, http.MethodDelete)
 
 }
-func asJSON(object interface{}) string {
-	j, _ := json.Marshal(object)
-	return string(j)
-}
