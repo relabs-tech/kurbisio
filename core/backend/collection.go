@@ -400,7 +400,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		parameters := map[string]string{}
 		var withCompanionUrls bool
 		for key, array := range urlQuery {
-			if key != "filter" && len(array) > 1 {
+			if key != "filter" && key != "search" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
@@ -495,7 +495,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				err = fmt.Errorf("unknown")
 			}
 
-			parameters[key] = value
+			switch key {
+			case "filter", "search":
+				parameters[key] = strings.Join(array, ",")
+			default:
+				parameters[key] = value
+			}
 			if err != nil {
 				nillog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
@@ -782,7 +787,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		parameters := map[string]string{}
 		var withCompanionUrls bool
 		for key, array := range urlQuery {
-			if key != "filter" && len(array) > 1 {
+			if key != "filter" && key != "search" && len(array) > 1 {
 				http.Error(w, "illegal parameter array '"+key+"'", http.StatusBadRequest)
 				return
 			}
@@ -844,7 +849,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				err = fmt.Errorf("unknown")
 			}
 
-			parameters[key] = value
+			switch key {
+			case "filter", "search":
+				parameters[key] = strings.Join(array, ",")
+			default:
+				parameters[key] = value
+			}
 			if err != nil {
 				nillog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
@@ -1483,14 +1493,11 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					filterValue := value[i+1:]
 
 					found := false
-					for _, searchableColumn := range searchableColumns {
-						if filterKey == searchableColumn {
-							externalValues = append(externalValues, filterValue)
-							externalColumns = append(externalColumns, filterKey)
-							found = true
-							externalOperators = append(externalOperators, operator)
-							break
-						}
+					if slices.Contains(searchableColumns, filterKey) {
+						externalValues = append(externalValues, filterValue)
+						externalColumns = append(externalColumns, filterKey)
+						found = true
+						externalOperators = append(externalOperators, operator)
 					}
 					// This was not a search inside a columns, then we try to search in the json document
 					if !found {
@@ -1507,7 +1514,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				err = fmt.Errorf("unknown")
 			}
 
-			parameters[key] = value
+			switch key {
+			case "filter", "search":
+				parameters[key] = strings.Join(array, ",")
+			default:
+				parameters[key] = value
+			}
 			if err != nil {
 				rlog.Errorf("parameter '%s': %s", key, err.Error())
 				http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
@@ -1574,7 +1586,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					return
 				}
 				var key string
-				for i := 0; i < propertiesIndex; i++ {
+				for i := range propertiesIndex {
 					key += "/" + resources[i] + "_id/" + values[propertiesIndex-i-1].(*uuid.UUID).String()
 				}
 				err = b.KssDriver.DeleteAllWithPrefix(key)
