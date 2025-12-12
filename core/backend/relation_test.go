@@ -727,6 +727,154 @@ func TestRelationNonDirectionalDeterministic(t *testing.T) {
 	}
 }
 
+func TestRelationRevision(t *testing.T) {
+
+	if err := envdecode.Decode(&testService); err != nil {
+		panic(err)
+	}
+
+	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_revision_unit_test_")
+	defer db.Close()
+	db.ClearSchema()
+
+	var configurationJSON string = `{
+		"collections": [
+			{
+				"resource": "a"
+			}
+		],
+		"relations": [
+			{
+				"resource": "a_a_relation",
+				"left": "a",
+				"right": "a",
+				"non_directional": true
+			}
+		]
+	  }
+	`
+	router := mux.NewRouter()
+	testService.backend = backend.New(&backend.Builder{
+		Config:               configurationJSON,
+		DB:                   db,
+		Router:               router,
+		UpdateSchema:         true,
+		AuthorizationEnabled: true,
+		LogLevel:             "debug",
+	})
+
+	adminClient := client.NewWithRouter(router).WithAdminAuthorization()
+
+	type A struct {
+		AID uuid.UUID `json:"a_id"`
+	}
+
+	type MyRelation struct {
+		LeftAID  uuid.UUID `json:"left_a_id"`
+		RightAID uuid.UUID `json:"right_a_id"`
+		Text     string    `json:"text,omitempty"`
+		Revision int       `json:"revision,omitempty"`
+	}
+
+	// First we create an a
+	a1ID, _ := uuid.Parse("22daf902-18e7-4122-9fbe-3bfd5cd0c425")
+	a1 := A{AID: a1ID}
+	_, err := adminClient.RawPut("/as", &a1, &a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then we create another a
+	a2ID, _ := uuid.Parse("ef8f24e0-9f8c-4141-8784-8faf921054dd")
+	a2 := A{AID: a2ID}
+	_, err = adminClient.RawPut("/as", &a2, &a2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then we create a relation between a1 and a2. We use revision -1 which means "create only"
+	relation := MyRelation{
+		LeftAID:  a1.AID,
+		RightAID: a2.AID,
+		Text:     "revision 1",
+		Revision: -1,
+	}
+	status, err := adminClient.RawPut("/a_a_relations", &relation, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusCreated {
+		t.Fatalf("Expecting created, got %v", status)
+	}
+
+	// Updating the relation with revision -1 will fail
+	relation = MyRelation{
+		LeftAID:  a1.AID,
+		RightAID: a2.AID,
+		Text:     "revision 2",
+		Revision: -1,
+	}
+	status, err = adminClient.RawPut("/a_a_relations", &relation, nil)
+	if status != http.StatusConflict || err == nil {
+		t.Fatalf("Expecting conflict, got %v (%v)", status, err)
+	}
+
+	// It also fails when we swap it
+	relation = MyRelation{
+		LeftAID:  a2.AID,
+		RightAID: a1.AID,
+		Text:     "revision 2",
+		Revision: -1,
+	}
+	status, err = adminClient.RawPut("/a_a_relations", &relation, nil)
+	if status != http.StatusConflict || err == nil {
+		t.Fatalf("Expecting conflict, got %v (%v)", status, err)
+	}
+
+	// Now we update it with revision 0, which is the revision that ALWAYS works
+	relation = MyRelation{
+		LeftAID:  a1.AID,
+		RightAID: a2.AID,
+		Text:     "revision 2",
+		Revision: 0,
+	}
+	var result MyRelation
+	status, err = adminClient.RawPut("/a_a_relations", &relation, &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("Expecting OK, got %v", status)
+	}
+	if result.Revision != 2 {
+		t.Fatalf("Expecting revision 2, got %d", result.Revision)
+	}
+	if result.Text != "revision 2" {
+		t.Fatalf("Expecting text revision 2, got %s", result.Text)
+	}
+
+	// Finally, we update it with the correct revision, this time swapped
+	relation = MyRelation{
+		LeftAID:  a2.AID,
+		RightAID: a1.AID,
+		Text:     "revision 3",
+		Revision: 2,
+	}
+	status, err = adminClient.RawPut("/a_a_relations", &relation, &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("Expecting OK, got %v", status)
+	}
+	if result.Revision != 3 {
+		t.Fatalf("Expecting revision 3, got %d", result.Revision)
+	}
+	if result.Text != "revision 3" {
+		t.Fatalf("Expecting text revision 3, got %s", result.Text)
+	}
+}
+
 // use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
 // and POSTGRES_PASSWORD="docker"
 type TestService struct {
