@@ -1,37 +1,94 @@
-// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited
-// Proprietary and confidential
-// info@dalarub.com
-//
-
 package backend
 
 import (
 	"net/http"
+	"net/url"
 
-	"github.com/relabs-tech/kurbisio/core/logger"
+	"github.com/gorilla/handlers"
 )
 
-func (b *Backend) handleCORS() {
+// CORSOption configures the CORS middleware.
+type CORSOption func(*corsConfig)
 
-	corsMiddleware := func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers for all requests
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, PATCH")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, If-None-Match, Access-Control-Allow-Origin, Kurbisio-Content-Encoding, X-Application-Token")
-			w.Header().Set("Access-Control-Expose-Headers", "*")
-			w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
+type corsConfig struct {
+	allowLocalhost bool
+	allowedOrigins []string
+}
 
-			// Handle preflight OPTIONS request
-			if r.Method == http.MethodOptions {
-				logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method, " (handled by CORS middleware)")
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			h.ServeHTTP(w, r)
-		})
+// WithOrigins adds the given origins to the CORS allowlist.
+func WithOrigins(origins ...string) CORSOption {
+	return func(c *corsConfig) {
+		c.allowedOrigins = append(c.allowedOrigins, origins...)
 	}
-	b.router.Use(corsMiddleware)
+}
+
+// WithLocalhost allows http://localhost and http://127.0.0.1 origins.
+func WithLocalhost() CORSOption {
+	return func(c *corsConfig) {
+		c.allowLocalhost = true
+	}
+}
+
+// isLocalhostOrigin returns true only when the origin has scheme "http" and a hostname
+// of exactly "localhost" or "127.0.0.1" (with any port or none). This prevents
+// bypasses via origins like "http://localhost.evil.com" or "http://localhost-bad".
+func isLocalhostOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname() // strips port
+	return host == "localhost" || host == "127.0.0.1"
+}
+
+// CORS returns a CORS middleware handler with predefined settings suitable for Kurbisio backend services.
+// If no WithOrigins option is provided, all origins are allowed.
+// Use WithLocalhost() to additionally allow http://localhost and http://127.0.0.1 origins.
+func CORS(opts ...CORSOption) func(http.Handler) http.Handler {
+	cfg := &corsConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	allowedOriginsMap := map[string]bool{}
+	for _, origin := range cfg.allowedOrigins {
+		allowedOriginsMap[origin] = true
+	}
+	return handlers.CORS(
+		handlers.ExposedHeaders([]string{
+			"Access-Control-Allow-Origin",
+			"Access-Control-Allow-Methods",
+			"Access-Control-Allow-Headers",
+			"Access-Control-Expose-Headers",
+			"Access-Control-Max-Age",
+			"ETag",
+			"Kurbisio-Content-Encoding",
+		}),
+		handlers.AllowedOriginValidator(func(o string) bool {
+			if len(allowedOriginsMap) == 0 {
+				return true // Allow all origins if no specific allowed origins are provided
+			}
+			_, ok := allowedOriginsMap[o]
+			return ok || (cfg.allowLocalhost && isLocalhostOrigin(o))
+		}),
+		handlers.AllowedMethods([]string{
+			"DELETE",
+			"GET",
+			"OPTIONS",
+			"PATCH",
+			"POST",
+			"PUT",
+		}),
+		handlers.AllowedHeaders([]string{
+			"Accept-Encoding",
+			"Authorization",
+			"Content-Length",
+			"Content-Type",
+			"ETag",
+			"If-None-Match",
+			"Kurbisio-Content-Encoding",
+			"X-Application-Token",
+			"X-CSRF-Token",
+		}),
+		handlers.MaxAge(600),
+	)
 }

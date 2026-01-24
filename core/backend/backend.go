@@ -118,6 +118,9 @@ type Builder struct {
 
 	// Extensions are the extensions to be used by the backend
 	Extensions []KExtension
+
+	// If defined, the list of CORSOptions to be used for CORS configuration
+	CorsOptions []CORSOption
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -239,7 +242,8 @@ func New(bb *Builder) *Backend {
 		log.Fatalf("Invalid json %v", err)
 	}
 	logger.AddRequestID(b.router)
-	b.handleCORS()
+
+	b.router.Use(CORS(bb.CorsOptions...))
 	access.HandleAuthorizationRoute(b.router)
 	b.handleResourceRoutes()
 	b.handleStatistics(b.router)
