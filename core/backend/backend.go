@@ -118,6 +118,10 @@ type Builder struct {
 
 	// Extensions are the extensions to be used by the backend
 	Extensions []KExtension
+
+	// If defined, the provided allowed origins will be used for the default CORS handler.
+	// If not defined or empty, all origins will be allowed.
+	CorsAllowedOrigins []string
 }
 
 // New realizes the actual backend. It creates the sql relations (if they
@@ -239,7 +243,8 @@ func New(bb *Builder) *Backend {
 		log.Fatalf("Invalid json %v", err)
 	}
 	logger.AddRequestID(b.router)
-	b.handleCORS()
+
+	b.router.Use(CORS(bb.CorsAllowedOrigins...))
 	access.HandleAuthorizationRoute(b.router)
 	b.handleResourceRoutes()
 	b.handleStatistics(b.router)

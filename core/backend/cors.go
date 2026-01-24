@@ -1,37 +1,56 @@
-// Copyright 2021 Dalarub & Ettrich GmbH - All Rights Reserved
-// Unauthorized copying of this file, via any medium is strictly prohibited
-// Proprietary and confidential
-// info@dalarub.com
-//
-
 package backend
 
 import (
 	"net/http"
+	"strings"
 
-	"github.com/relabs-tech/kurbisio/core/logger"
+	"github.com/gorilla/handlers"
 )
 
-func (b *Backend) handleCORS() {
-
-	corsMiddleware := func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers for all requests
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, PATCH")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, If-None-Match, Access-Control-Allow-Origin, Kurbisio-Content-Encoding, X-Application-Token")
-			w.Header().Set("Access-Control-Expose-Headers", "*")
-			w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
-
-			// Handle preflight OPTIONS request
-			if r.Method == http.MethodOptions {
-				logger.FromContext(r.Context()).Debugln("called route for", r.URL, r.Method, " (handled by CORS middleware)")
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-
-			h.ServeHTTP(w, r)
-		})
+// CORS returns a CORS middleware handler with predefined settings suitable for Kurbisio backend services
+// with the allowed origin set to allowedOrigins. If no allowed origins are provided, it defaults to allowing all origins
+func CORS(allowedOrigins ...string) func(http.Handler) http.Handler {
+	allowedOriginsMap := map[string]bool{}
+	for _, origin := range allowedOrigins {
+		allowedOriginsMap[origin] = true
 	}
-	b.router.Use(corsMiddleware)
+	return handlers.CORS(
+		handlers.ExposedHeaders([]string{
+			"Access-Control-Allow-Origin",
+			"Access-Control-Allow-Methods",
+			"Access-Control-Allow-Headers",
+			"Access-Control-Expose-Headers",
+			"Access-Control-Max-Age",
+			"ETag",
+			"If-None-Match",
+			"Kurbisio-Content-Encoding",
+		}),
+		handlers.AllowedOriginValidator(func(o string) bool {
+			if len(allowedOriginsMap) == 0 {
+				return true // Allow all origins if no specific allowed origins are provided
+			}
+			_, ok := allowedOriginsMap[o]
+			return ok || strings.HasPrefix(o, "http://localhost") || strings.HasPrefix(o, "http://127.0.0.1")
+		}),
+		handlers.AllowedMethods([]string{
+			"DELETE",
+			"GET",
+			"OPTIONS",
+			"PATCH",
+			"POST",
+			"PUT",
+		}),
+		handlers.AllowedHeaders([]string{
+			"Accept-Encoding",
+			"Authorization",
+			"Content-Length",
+			"Content-Type",
+			"ETag",
+			"If-None-Match",
+			"Kurbisio-Content-Encoding",
+			"X-Application-Token",
+			"X-CSRF-Token",
+		}),
+		handlers.MaxAge(600),
+	)
 }
