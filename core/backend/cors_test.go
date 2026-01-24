@@ -183,6 +183,7 @@ func TestCORS_ExposedHeaders(t *testing.T) {
 	handler := corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set various headers that should be exposed
 		w.Header().Set("ETag", `"test-etag-value"`)
+		w.Header().Set("If-None-Match", `"some-value"`)
 		w.Header().Set("Kurbisio-Content-Encoding", "gzip")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -202,10 +203,12 @@ func TestCORS_ExposedHeaders(t *testing.T) {
 	assert.True(t,
 		strings.Contains(exposedHeaders, "ETag") || strings.Contains(exposedHeaders, "Etag"),
 		"ETag should be in exposed headers")
+	assert.Contains(t, exposedHeaders, "If-None-Match", "If-None-Match should be in exposed headers")
 	assert.Contains(t, exposedHeaders, "Kurbisio-Content-Encoding", "Kurbisio-Content-Encoding should be in exposed headers")
 
 	// Verify the actual header values are set
 	assert.Equal(t, `"test-etag-value"`, rec.Header().Get("ETag"))
+	assert.Equal(t, `"some-value"`, rec.Header().Get("If-None-Match"))
 	assert.Equal(t, "gzip", rec.Header().Get("Kurbisio-Content-Encoding"))
 }
 

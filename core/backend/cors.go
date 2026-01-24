@@ -61,6 +61,7 @@ func CORS(opts ...CORSOption) func(http.Handler) http.Handler {
 			"Access-Control-Expose-Headers",
 			"Access-Control-Max-Age",
 			"ETag",
+			"If-None-Match",
 			"Kurbisio-Content-Encoding",
 		}),
 		handlers.AllowedOriginValidator(func(o string) bool {
