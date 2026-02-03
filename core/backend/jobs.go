@@ -125,6 +125,7 @@ func (b *Backend) handleJobs(router *mux.Router) {
 		PRIMARY KEY(serial)
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS $JUSTTABLENAME_event_compression ON $TABLENAME(type,key,resource,resource_id) WHERE job = 'event' AND attempts_left>0;
+		CREATE UNIQUE INDEX IF NOT EXISTS $JUSTTABLENAME_notification_compression ON $TABLENAME(type,key,resource,resource_id) WHERE job = 'notification' AND attempts_left>0;
 		CREATE index IF NOT EXISTS $JUSTTABLENAME_scheduled_at_index ON $TABLENAME(scheduled_at);
 		`)
 
@@ -1050,9 +1051,14 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var serial int
-	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
-		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
-		"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
+
+	query := "INSERT INTO " + b.db.Schema + ".\"_job_\"" +
+		`(job,type,resource,resource_id,payload,timestamp,attempts_left,context)
+	VALUES('notification',$1,$2,$3,$4,$5,5,$6) ON CONFLICT (type,key,resource,resource_id) WHERE job = 'notification' AND attempts_left>0
+	DO UPDATE SET payload=$4,timestamp=$5,attempts_left=5,context=$6
+	RETURNING serial;`
+
+	err := tx.QueryRow(query,
 		operation,
 		resource,
 		resourceID,

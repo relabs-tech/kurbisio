@@ -1022,7 +1022,19 @@ func TestNotifications(t *testing.T) {
 	// do notification processing
 	backend.ProcessJobsSync(0)
 
-	// update child collection object with singleton path and 3 points
+	// now we do multiple updatees to child collection object with singleton path, but
+	// we do not process the queue, so they all should get coalesced into a single update
+	// notification
+
+	nsres["points"] = int64(42)
+	for range 10 {
+		_, err = client.RawPut("/notifications/"+nid+"/single", &nsres, &nsres)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// update child collection object one final time with singleton path and 3 points
 	nsres["points"] = int64(3)
 	_, err = client.RawPut("/notifications/"+nid+"/single", &nsres, &nsres)
 	if err != nil {
@@ -1050,7 +1062,7 @@ func TestNotifications(t *testing.T) {
 	if createCount != 4 {
 		t.Fatalf("unexpected number of creates: %d", createCount)
 	}
-	if updateCount != 4 {
+	if updateCount != 4 { // because 10 updates are overwritten and do not need to be handled
 		t.Fatalf("unexpected number of updates: %d", updateCount)
 	}
 	if deleteCount != 4 {
