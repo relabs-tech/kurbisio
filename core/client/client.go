@@ -1003,6 +1003,7 @@ func (c Client) RawPost(path string, body interface{}, result interface{}) (int,
 // flag an error. Returns the actual http status code.
 //
 // The path can be extend with query strings.
+// result can also be nil or a raw *[]byte.
 func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPost, c.url+path, bytes.NewBuffer(blob))
@@ -1038,7 +1039,11 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 			status, http.StatusCreated, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	if resBody != nil && result != nil {
-		err = json.Unmarshal(resBody, result)
+		if raw, ok := result.(*[]byte); ok {
+			*raw = resBody
+		} else {
+			err = json.Unmarshal(resBody, result)
+		}
 	}
 	return status, err
 }
@@ -1050,7 +1055,8 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 //
 // The path can be extend with query strings.
 //
-// body can also be a []byte, result can also be raw *[]byte.
+// body can also be a []byte
+// result can also be raw *[]byte.
 // result can be nil.
 func (c Client) RawPut(path string, body interface{}, result interface{}) (int, error) {
 
@@ -1111,7 +1117,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 // The path can be extend with query strings.
 //
 // Returns the actual http status code.
-// result can be nil.
+// result can also be nil or a raw *[]byte.
 func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, result interface{}) (int, error) {
 
 	r, _ := http.NewRequestWithContext(c.Context(), http.MethodPut, c.url+path, bytes.NewBuffer(blob))
@@ -1146,7 +1152,11 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 		return status, errors.New(strings.TrimSpace(string(resBody)))
 	}
 	if resBody != nil && result != nil {
-		err = json.Unmarshal(resBody, result)
+		if raw, ok := result.(*[]byte); ok {
+			*raw = resBody
+		} else {
+			err = json.Unmarshal(resBody, result)
+		}
 	}
 	return status, err
 }
@@ -1156,8 +1166,8 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 //
 // The path can be extend with query strings.
 //
-// body can also be a []byte, result can also be raw *[]byte.
-// result can be nil.
+// body can also be a []byte.
+// result can also be nil or a raw *[]byte.
 func (c Client) RawPatch(path string, body interface{}, result interface{}) (int, error) {
 
 	var err error
