@@ -283,39 +283,6 @@
                 }
             }
         },
-        "relations_old": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                    "left",
-                    "right"
-                ],
-                "properties": {
-                    "resource": {
-                        "type": "string"
-                    },
-                    "left": {
-                        "type": "string",
-                        "minLength": 1
-                    },
-                    "description": {
-                        "type": "string"
-                    },
-                    "right": {
-                        "type": "string",
-                        "minLength": 1
-                    },
-                    "right_permits": {
-                        "$ref": "#/definitions/permits"
-                    },
-                    "left_permits": {
-                        "$ref": "#/definitions/permits"
-                    }
-                }
-            }
-        },
         "shortcuts": {
             "type": "array",
             "items": {
