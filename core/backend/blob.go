@@ -8,7 +8,6 @@ package backend
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"slices"
@@ -18,7 +17,7 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"net/http"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
+	"github.com/relabs-tech/kurbisio/core/csql"
 	"github.com/relabs-tech/kurbisio/core/logger"
 )
 
@@ -125,7 +125,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 
 	var err error
 	if b.updateSchema {
-		_, err = b.db.Exec(createQuery)
+		_, err = b.db.Exec(context.Background(), createQuery)
 		if err != nil {
 			panic(err)
 		}
@@ -395,7 +395,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			sqlQuery += sqlPagination
 		}
 
-		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		rows, err := b.db.Query(r.Context(), sqlQuery, queryParameters...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -507,8 +507,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 				// loading the entire binary blob into memory for no good reason
 				var timestamp time.Time
 				values, object := createScanValuesAndObject(&timestamp)
-				err = b.db.QueryRow(readQueryMeta+sqlWhereOne+";", queryParameters...).Scan(values...)
-				if err == sql.ErrNoRows {
+				err = b.db.QueryRow(r.Context(), readQueryMeta+sqlWhereOne+";", queryParameters...).Scan(values...)
+				if err == csql.ErrNoRows {
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
 				}
@@ -540,8 +540,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		var timestamp time.Time
 		values, object := createScanValuesAndObject(&timestamp, &blob)
 
-		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
+		err = b.db.QueryRow(r.Context(), readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
+		if err == csql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
@@ -549,7 +549,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			status := http.StatusInternalServerError
 
 			// Invalid UUIDs are reported as "invalid_text_representation" which is Code 22P02
-			if err, ok := err.(*pq.Error); ok && err.Code == "22P02" {
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "22P02" {
 				status = http.StatusBadRequest
 			}
 			http.Error(w, err.Error(), status)
@@ -703,29 +703,29 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		metaDataJSON, _ = json.Marshal(metaJSON)
 		values[metaDataIndex] = metaDataJSON
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		var id uuid.UUID
-		err = tx.QueryRow(insertQuery, values...).Scan(&id)
+		err = tx.QueryRow(r.Context(), insertQuery, values...).Scan(&id)
 		if err != nil {
 			status := http.StatusBadRequest
 			// Non unique external keys are reported as code Code 23505
-			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
 				status = http.StatusConflict
 			}
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, "cannot create "+this+": "+err.Error(), status)
 			return
 		}
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = tx.QueryRow(readQueryMeta+"WHERE "+this+"_id = $1;", id).Scan(values...)
+		err = tx.QueryRow(r.Context(), readQueryMeta+"WHERE "+this+"_id = $1;", id).Scan(values...)
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 5322: create blob")
 			http.Error(w, "Error 5322: cannot create object", http.StatusInternalServerError)
 			return
@@ -738,7 +738,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 			err := b.KssDriver.UploadData(key, blob)
 			if err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				rlog.WithError(err).Errorf("Error 5321: upload externally stored data `%s`", key)
 				http.Error(w, "Error 5321: cannot store data", http.StatusFailedDependency)
 				return
@@ -879,7 +879,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		metaDataJSON, _ = json.Marshal(metaJSON)
 		values[metaDataIndex] = metaDataJSON
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -898,9 +898,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			return
 		}
 
-		err = tx.QueryRow(query, values...).Scan(&primaryID)
-		if err == sql.ErrNoRows {
-			tx.Rollback()
+		err = tx.QueryRow(r.Context(), query, values...).Scan(&primaryID)
+		if err == csql.ErrNoRows {
+			tx.Rollback(context.Background())
 			if authorizedForCreate {
 				http.Error(w, "cannot create "+this, http.StatusUnprocessableEntity)
 			} else {
@@ -910,8 +910,8 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		}
 
 		if err != nil {
-			tx.Rollback()
-			if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
+			tx.Rollback(context.Background())
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
 				if !rc.Mutable {
 					http.Error(w, "collection is not mutable", http.StatusConflict)
 				}
@@ -924,14 +924,14 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 
 		// re-read meta data and return as json
 		values, response := createScanValuesAndObject(&time.Time{})
-		err = tx.QueryRow(readQueryMeta+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
-		if err == sql.ErrNoRows {
-			tx.Rollback()
+		err = tx.QueryRow(r.Context(), readQueryMeta+"WHERE "+this+"_id = $1;", &primaryID).Scan(values...)
+		if err == csql.ErrNoRows {
+			tx.Rollback(context.Background())
 			http.Error(w, "upsert failed, no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -943,7 +943,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			}
 			err := b.KssDriver.UploadData(key, blob)
 			if err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				rlog.WithError(err).Errorf("Error 5323: upload externally stored data `%s`", key)
 				http.Error(w, "Error 5323: cannot store data", http.StatusFailedDependency)
 				return
@@ -954,7 +954,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		jsonData, _ := json.MarshalWithOption(response, json.DisableHTMLEscape())
 
 		if silent {
-			err = tx.Commit()
+			err = tx.Commit(context.Background())
 		} else {
 			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		}
@@ -1056,7 +1056,7 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			return
 		}
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4731: BeginTx")
 			http.Error(w, "Error 4731", http.StatusInternalServerError)
@@ -1084,9 +1084,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 		queryParameters[propertiesIndex-ownerIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex-ownerIndex+3] = from.UTC()
 
-		rows, err := tx.Query(sqlQuery+sqlReturnMeta, queryParameters...)
+		rows, err := tx.Query(r.Context(), sqlQuery+sqlReturnMeta, queryParameters...)
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
@@ -1114,6 +1114,9 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 				}
 			}
 		}
+
+		// Close rows before using transaction again (pgx requirement)
+		rows.Close()
 
 		// add collection identifiers to parameters for the notification
 		for i := 1; i < propertiesIndex; i++ {
@@ -1157,21 +1160,21 @@ func (b *Backend) createBlobResource(router *mux.Router, rc BlobConfiguration) {
 			queryParameters[i] = params[columns[i]]
 		}
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		var timestamp time.Time
 		values, object := createScanValuesAndObject(&timestamp)
-		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnMeta, queryParameters...).Scan(values...)
-		if err == sql.ErrNoRows {
-			tx.Rollback()
+		err = tx.QueryRow(context.Background(), deleteQuery+sqlWhereOne+sqlReturnMeta, queryParameters...).Scan(values...)
+		if err == csql.ErrNoRows {
+			tx.Rollback(context.Background())
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

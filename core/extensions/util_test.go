@@ -11,11 +11,11 @@ import (
 )
 
 type TestService struct {
-	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
-	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
-	backend          *backend.Backend
-	client           client.Client
-	close            func() error
+	backend *backend.Backend
+	client  client.Client
+	close   func() error
+
+	csql.DBConfig
 }
 
 // create a user and return the id of the account and a client with the authorization
@@ -59,7 +59,7 @@ func createTestService(config, schemaName string, extensions ...backend.KExtensi
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(s.Postgres, s.PostgresPassword, schemaName)
+	db := csql.OpenWithSchema(s.PostgresConfigString(), schemaName)
 	db.ClearSchema()
 
 	builder := backend.Builder{
@@ -70,7 +70,10 @@ func createTestService(config, schemaName string, extensions ...backend.KExtensi
 		UpdateSchema:         true,
 		Extensions:           extensions,
 	}
-	s.close = db.Close
+	s.close = func() error {
+		db.Close()
+		return nil
+	}
 	s.backend = backend.New(&builder)
 	s.client = client.NewWithRouter(builder.Router)
 

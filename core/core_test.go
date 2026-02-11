@@ -12,7 +12,6 @@ import (
 
 	"github.com/goccy/go-json"
 
-	_ "github.com/lib/pq"
 )
 
 func TestMain(m *testing.M) {

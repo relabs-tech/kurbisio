@@ -19,7 +19,6 @@ jobs:
         env:
           POSTGRES_USER: runner
           POSTGRES_PASSWORD: docker
-          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         # needed because the postgres container does not provide a healthcheck
@@ -40,8 +39,9 @@ jobs:
         run: |
           go test ./... -race -count 1 -timeout 600s
         env:
-          POSTGRES: "host=localhost port=5432 user=runner dbname=postgres sslmode=disable"
-          POSTGRES_PASSWORD: "docker"
+          POSTGRES_USER: runner
+          POSTGRES_PASSWORD: docker
+          POSTGRES_HOST: localhost
 
       - name: build examples
         run: |

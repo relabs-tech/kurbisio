@@ -88,7 +88,7 @@ func (b *Backend) fileUploadedCallBack(event kss.FileUpdatedEvent) error {
 	// TODO store information about the file (etags and size at least) in the resource.
 	// The Tx will be useful in this case and this avoid to refactor commitWithNotification to be
 	// able to use it without a Tx
-	tx, err := b.db.BeginTx(context.TODO(), nil)
+	tx, err := b.db.Begin(context.TODO())
 	if err != nil {
 		return fmt.Errorf("fileUploadedCallBack cannot BeginTx %w", err)
 	}

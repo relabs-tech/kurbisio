@@ -7,6 +7,7 @@
 package access
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/goccy/go-json"
@@ -28,7 +29,7 @@ func EnsureFunctionAccounts(db *csql.DB, accounts ...FunctionAccount) error {
 	}
 	for _, account := range accounts {
 		properties, _ := json.Marshal(Roles{Roles: account.Roles})
-		_, err := db.Exec(insertQuery, account.Identity, properties)
+		_, err := db.Exec(context.Background(), insertQuery, account.Identity, properties)
 		if err != nil {
 			return err
 		}
