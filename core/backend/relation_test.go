@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/joeshaw/envdecode"
-	_ "github.com/lib/pq"
 
 	"github.com/relabs-tech/kurbisio/core/backend"
 	"github.com/relabs-tech/kurbisio/core/client"
@@ -28,7 +27,7 @@ func TestRelationDirectional(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_directional_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_directional_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -356,7 +355,7 @@ func TestRelationNonDirectional(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_non_directional_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_non_directional_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -592,7 +591,7 @@ func TestRelationNonDirectionalDeterministic(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_non_directional_deterministic_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_non_directional_deterministic_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -733,7 +732,7 @@ func TestRelationRevision(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_relation_revision_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_revision_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -875,16 +874,13 @@ func TestRelationRevision(t *testing.T) {
 	}
 }
 
-// use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
-// and POSTGRES_PASSWORD="docker"
 type TestService struct {
-	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
-	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
-	backend          *backend.Backend
-	client           client.Client
-	clientNoAuth     client.Client
-	Db               *csql.DB
-	Router           *mux.Router
+	csql.DBConfig
+	backend      *backend.Backend
+	client       client.Client
+	clientNoAuth client.Client
+	Db           *csql.DB
+	Router       *mux.Router
 }
 
 var testService TestService

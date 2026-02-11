@@ -26,7 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/relabs-tech/kurbisio/core"
 	"github.com/relabs-tech/kurbisio/core/access"
 	"github.com/relabs-tech/kurbisio/core/backend/kss"
@@ -190,7 +190,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 	var err error
 	if b.updateSchema {
-		_, err = b.db.Exec(createQuery)
+		_, err = b.db.Exec(context.Background(), createQuery)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error while updating schema when running: %s", createQuery)
 			panic(fmt.Sprintf("invalid configuration updating: err: %v", err))
@@ -670,7 +670,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 		// fmt.Printf("sqlQuery: %s, values: %#v\n", sqlQuery, queryParameters)
 
-		rows, err := b.db.Query(sqlQuery, queryParameters...)
+		rows, err := b.db.Query(r.Context(), sqlQuery, queryParameters...)
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4721: cannot execute query `%s` %+v", sqlQuery, queryParameters)
 			http.Error(w, "Error 4721", http.StatusInternalServerError)
@@ -776,7 +776,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 				// we need a second query
 				queryParameters[propertiesIndex+4] = 1
 				queryParameters[propertiesIndex+5] = 0
-				rows, err := b.db.Query(sqlQuery, queryParameters...)
+				rows, err := b.db.Query(r.Context(), sqlQuery, queryParameters...)
 				if err != nil {
 					nillog.WithError(err).Errorf("Error 4722: cannot execute query `%s` %v", sqlQuery, queryParameters)
 					http.Error(w, "Error 4722", http.StatusInternalServerError)
@@ -871,7 +871,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 
 		values, object := createScanValuesAndObject(&time.Time{}, new(int))
-		err = b.db.QueryRow(readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
+		err = b.db.QueryRow(r.Context(), readQuery+sqlWhereOne+";", queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
@@ -880,7 +880,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			status := http.StatusInternalServerError
 
 			// Invalid UUIDs are reported as "invalid_text_representation" which is Code 22P02
-			if err, ok := err.(*pq.Error); ok && err.Code == "22P02" {
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "22P02" {
 				status = http.StatusBadRequest
 				http.Error(w, "invalid uuid", status)
 				return
@@ -1032,7 +1032,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 		queryParameters[i] = value
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			nillog.WithError(err).Errorf("Error 4729: cannot BeginTx")
 			http.Error(w, "Error 4729", http.StatusInternalServerError)
@@ -1040,14 +1040,14 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 
 		var leftID, rightID uuid.UUID
-		err = tx.QueryRow(query, queryParameters...).Scan(&leftID, &rightID)
+		err = tx.QueryRow(r.Context(), query, queryParameters...).Scan(&leftID, &rightID)
 		if err == csql.ErrNoRows {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			nillog.WithError(err).Errorf("Error 4728: cannot QueryRow query:`%s`", query)
 			http.Error(w, "Error 4728", http.StatusInternalServerError)
 			return
@@ -1112,7 +1112,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			queryParameters[i] = params[columns[i]]
 		}
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4729: cannot BeginTx")
 			http.Error(w, "Error 4729", http.StatusInternalServerError)
@@ -1121,14 +1121,14 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 		var timestamp time.Time
 		values, object := createScanValuesAndObject(&timestamp, new(int))
-		err = tx.QueryRow(deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
+		err = tx.QueryRow(r.Context(), deleteQuery+sqlWhereOne+sqlReturnObject, queryParameters...).Scan(values...)
 		if err == csql.ErrNoRows {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, "no such "+this, http.StatusNotFound)
 			return
 		}
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4730: cannot QueryRow")
 			http.Error(w, "Error 4730", http.StatusInternalServerError)
 			return
@@ -1154,7 +1154,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 
 		if silent {
-			err = tx.Commit()
+			err = tx.Commit(context.Background())
 
 		} else {
 			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationDelete, uuid.Nil, jsonData)
@@ -1303,7 +1303,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			return
 		}
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4731: BeginTx")
 			http.Error(w, "Error 4731", http.StatusInternalServerError)
@@ -1336,9 +1336,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		queryParameters[propertiesIndex+2] = from.IsZero()
 		queryParameters[propertiesIndex+3] = from.UTC()
 
-		rows, err := tx.Query(sqlQuery+sqlReturnMeta, queryParameters...)
+		rows, err := tx.Query(r.Context(), sqlQuery+sqlReturnMeta, queryParameters...)
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4732: sqlQuery `%s`", sqlQuery)
 			http.Error(w, "Error 4732", http.StatusInternalServerError)
 			return
@@ -1365,6 +1365,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 				}
 			}
 		}
+
+		// Close rows before using transaction again (pgx requirement)
+		rows.Close()
 
 		// add collection identifiers to parameters for the notification
 		for i := 1; i < propertiesIndex; i++ {
@@ -1589,7 +1592,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		values[i] = &timestamp
 		i++
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4733: BeginTx")
 			http.Error(w, "Error 4733", http.StatusInternalServerError)
@@ -1597,26 +1600,26 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 
 		var leftID, rightID uuid.UUID
-		err = tx.QueryRow(insertQuery, values...).Scan(&leftID, &rightID)
+		err = tx.QueryRow(r.Context(), insertQuery, values...).Scan(&leftID, &rightID)
 		if err == csql.ErrNoRows {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, "relation "+this+" already exists", http.StatusUnprocessableEntity)
 			return
 		} else if err != nil {
 			status := http.StatusInternalServerError
 			msg := "Error 4734"
-			if err, ok := err.(*pq.Error); ok && (err.Code == "23505" || err.Code == "23502" || err.Code == "23503") {
-				if err.Code == "23505" {
+			if pgErr, ok := err.(*pgconn.PgError); ok && (pgErr.Code == "23505" || pgErr.Code == "23502" || pgErr.Code == "23503") {
+				if pgErr.Code == "23505" {
 					// Non unique external keys are reported as code Code 23505
 					status = http.StatusConflict
 					msg = "constraint violation"
 					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
-				} else if err.Code == "23502" {
+				} else if pgErr.Code == "23502" {
 					// Not null constraints are reported as Code 23502
 					status = http.StatusUnprocessableEntity
 					msg = "constraint violation"
 					rlog.WithError(err).Infof("Constraint violation: QueryRow query: `%s`", insertQuery)
-				} else if err.Code == "23503" {
+				} else if pgErr.Code == "23503" {
 					// 23503 is FOREIGN KEY VIOLATION and means that the resource does not exist. This should only happen for singleton
 					status = http.StatusNotFound
 					msg = "foreign key violation"
@@ -1624,16 +1627,16 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			} else {
 				rlog.WithError(err).Errorf("Error 4734: QueryRow query: `%s`", insertQuery)
 			}
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, msg, status)
 			return
 		}
 
 		// re-read data and return as json
 		values, object := createScanValuesAndObject(&timestamp, new(int))
-		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", leftID, rightID).Scan(values...)
+		err = tx.QueryRow(r.Context(), readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", leftID, rightID).Scan(values...)
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4735: re-read object")
 			http.Error(w, "Error 4735", http.StatusInternalServerError)
 			return
@@ -1654,7 +1657,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
 			if err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				rlog.WithError(err).Errorf("Error 5736: create companion URL")
 				http.Error(w, "Error 5736", http.StatusInternalServerError)
 				return
@@ -1665,7 +1668,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 
 		if silent {
-			err = tx.Commit()
+			err = tx.Commit(context.Background())
 		} else {
 			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationCreate, uuid.Nil, jsonData)
 		}
@@ -1798,7 +1801,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			revision = int(r)
 		}
 
-		tx, err := b.db.BeginTx(r.Context(), nil)
+		tx, err := b.db.Begin(r.Context())
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4736: Update of resource `%s`", resource)
 			http.Error(w, "Error 4736", http.StatusInternalServerError)
@@ -1810,19 +1813,19 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		retried := false
 	Retry:
 		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
-		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2 FOR UPDATE;", &leftID, &rightID).Scan(current...)
+		err = tx.QueryRow(r.Context(), readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2 FOR UPDATE;", &leftID, &rightID).Scan(current...)
 		if err == csql.ErrNoRows {
 			// item does not exist yet.
 			if r.Method == http.MethodPatch {
 				// cannot patch an object which does not exist
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				http.Error(w, "no such "+this, http.StatusNotFound)
 				return
 			} else if b.authorizationEnabled {
 				// normal upsert, check whether we can create the object
 				auth := access.AuthorizationFromContext(r.Context())
 				if !auth.IsAuthorized(core.OperationCreate, params, rc.Permits) {
-					tx.Rollback()
+					tx.Rollback(context.Background())
 					http.Error(w, "no such "+this, http.StatusNotFound)
 					return
 				}
@@ -1832,7 +1835,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			create(rec, r, bodyJSON)
 			if rec.Code == http.StatusCreated {
 				// all is good, we are done, we can rollback this transaction
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusCreated)
 				w.Write(rec.Body.Bytes())
@@ -1842,18 +1845,18 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 				retried = true
 				goto Retry
 			}
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, rec.Body.String(), rec.Code)
 			return
 		}
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Error("Error 4737: Rollback")
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
 		if revision != 0 && revision != currentRevision {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			// revision does not match, return conflict status with the conflicting object
 			mergeProperties(object)
 			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
@@ -1905,7 +1908,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 			// validate that the paramaters  match the object
 			if params[k] != "all" && params[k] != idAsString {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				http.Error(w, "no such "+this, http.StatusNotFound)
 				return
 			}
@@ -1914,7 +1917,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			value, ok := bodyJSON[k]
 			// zero uuid counts as no uuid
 			if ok && value != "00000000-0000-0000-0000-000000000000" && value != idAsString {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				http.Error(w, "illegal "+k, http.StatusBadRequest)
 				return
 			}
@@ -1928,7 +1931,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			if !b.JsonValidator.HasSchema(rc.SchemaID) {
 				rlog.Errorf("ERROR: invalid configuration for resource %s, schemaID %s is unknown. Validation is deactivated for this resource", rc.Resource, rc.SchemaID)
 			} else if err := b.JsonValidator.ValidateString(string(jsonData), rc.SchemaID); err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				rlog.WithError(err).Errorf("properties '%v' field does not follow schemaID %s",
 					string(jsonData), rc.SchemaID)
 				http.Error(w, fmt.Sprintf("document '%v' field does not follow schemaID %s, %v",
@@ -1944,14 +1947,14 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			}
 			data, err := b.intercept(r.Context(), resource, core.OperationUpdate, uuid.Nil, selectors, nil, jsonData)
 			if err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			if data != nil {
 				err = json.Unmarshal(data, &bodyJSON)
 				if err != nil {
-					tx.Rollback()
+					tx.Rollback(context.Background())
 					rlog.WithError(err).Errorf("Error 4738: interceptor")
 					http.Error(w, "Error 4738", http.StatusInternalServerError)
 					return
@@ -1986,7 +1989,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
 			if !ok {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
 				return
 			}
@@ -2008,13 +2011,13 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		values[i] = timestamp
 		i++
 
-		err = tx.QueryRow(updateQuery, values...).Scan(&leftID, &rightID)
+		err = tx.QueryRow(r.Context(), updateQuery, values...).Scan(&leftID, &rightID)
 		if err == csql.ErrNoRows {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		} else if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4739: update object")
 			http.Error(w, "Error 4739", http.StatusInternalServerError)
 			return
@@ -2022,9 +2025,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 		// re-read new values and return as json
 		values, response := createScanValuesAndObject(&timestamp, &revision)
-		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", &leftID, &rightID).Scan(values...)
+		err = tx.QueryRow(r.Context(), readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2;", &leftID, &rightID).Scan(values...)
 		if err != nil {
-			tx.Rollback()
+			tx.Rollback(context.Background())
 			rlog.WithError(err).Errorf("Error 4740: re-read object")
 			http.Error(w, "Error 4740", http.StatusInternalServerError)
 			return
@@ -2047,7 +2050,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 			uploadURL, err = b.KssDriver.GetPreSignedURL(kss.Put, key, time.Second*time.Duration(validitySeconds))
 			if err != nil {
-				tx.Rollback()
+				tx.Rollback(context.Background())
 				rlog.WithError(err).Errorf("Error 5736: create companion URL")
 				http.Error(w, "Error 5736", http.StatusInternalServerError)
 				return
@@ -2055,7 +2058,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		}
 
 		if silent {
-			err = tx.Commit()
+			err = tx.Commit(context.Background())
 		} else {
 			err = b.commitWithNotification(r.Context(), tx, resource, core.OperationUpdate, *values[0].(*uuid.UUID), jsonData)
 		}

@@ -35,7 +35,9 @@ type BackdoorMiddlewareBuilder struct {
 // The key for the backdoors map is the bearer token passed with the request.
 //
 // Example: if you specify the backdoor
-//   "please": Authorization{Roles:[]string{"admin"}}
+//
+//	"please": Authorization{Roles:[]string{"admin"}}
+//
 // then any request with an authorization bearer token consisting of the single
 // magic word "please" will be authorized with the admin role.
 //
@@ -101,11 +103,16 @@ func NewBackdoorMiddelware(bmb *BackdoorMiddlewareBuilder) mux.MiddlewareFunc {
 					// maybe we also have an authorization
 					var authID uuid.UUID
 					var properties json.RawMessage
-					err := bmb.DB.QueryRow(authQuery, vip).Scan(&authID, &properties)
-
-					if err == nil {
+					err := bmb.DB.QueryRow(r.Context(), authQuery, vip).Scan(&authID, &properties)
+					if err != nil {
+						if err != csql.ErrNoRows && rlog != nil {
+							rlog.WithError(err).Error("error looking up VIP ticket")
+						}
+					} else {
 						auth = &Authorization{}
-						json.Unmarshal(properties, auth)
+						if err := json.Unmarshal(properties, auth); err != nil && rlog != nil {
+							rlog.WithError(err).Warn("invalid authorization properties JSON")
+						}
 					}
 				}
 			}

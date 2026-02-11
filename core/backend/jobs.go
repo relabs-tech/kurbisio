@@ -8,7 +8,6 @@ package backend
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/jackc/pgx/v5"
 	"github.com/sirupsen/logrus"
 
 	"github.com/google/uuid"
@@ -128,23 +128,23 @@ func (b *Backend) handleJobs(router *mux.Router) {
 		CREATE index IF NOT EXISTS $JUSTTABLENAME_scheduled_at_index ON $TABLENAME(scheduled_at);
 		`)
 
-		_, err := b.db.Exec(createQuery[PriorityForeground])
+		_, err := b.db.Exec(context.Background(), createQuery[PriorityForeground])
 		if err != nil {
 			panic(err)
 		}
 
-		_, err = b.db.Exec(createQuery[PriorityBackground])
+		_, err = b.db.Exec(context.Background(), createQuery[PriorityBackground])
 		if err != nil {
 			panic(err)
 		}
 
-		_, err = b.db.Exec(`CREATE table IF NOT EXISTS ` + b.db.Schema + `."_schedule_" 
+		_, err = b.db.Exec(context.Background(), `CREATE table IF NOT EXISTS `+b.db.Schema+`."_schedule_" 
 (serial SERIAL,
 event VARCHAR NOT NULL DEFAULT '',
 scheduled_at TIMESTAMP,
 PRIMARY KEY(serial)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON ` + b.db.Schema + `._schedule_(event);
+CREATE UNIQUE INDEX IF NOT EXISTS schedules_identity ON `+b.db.Schema+`._schedule_(event);
 `)
 
 		if err != nil {
@@ -170,11 +170,11 @@ SET attempts_left = attempts_left - 1,
 last_implicit_schedule = implicit_schedule,
 implicit_schedule = TRUE,
 last_scheduled_at = scheduled_at,
-scheduled_at = CASE WHEN attempts_left>4 then $2 WHEN attempts_left=4 THEN $3 ELSE $4 END::TIMESTAMP
+scheduled_at = CASE WHEN attempts_left>4 then $2::TIMESTAMP WHEN attempts_left=4 THEN $3::TIMESTAMP ELSE $4::TIMESTAMP END
 WHERE serial = (
 SELECT serial
  FROM $TABLENAME
- WHERE attempts_left > 0 AND (scheduled_at IS NULL OR $1 > scheduled_at)
+ WHERE attempts_left > 0 AND (scheduled_at IS NULL OR $1::TIMESTAMP > scheduled_at)
  ORDER BY serial
  FOR UPDATE SKIP LOCKED
  LIMIT 1
@@ -188,9 +188,9 @@ WHERE serial = $1 AND attempts_left < 5 RETURNING serial;`)
 WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0 RETURNING serial;`)
 
 	b.rateLimitQuery = `INSERT INTO ` + b.db.Schema + `."_schedule_" (event,scheduled_at)VALUES($1,$2)
-ON CONFLICT(event)DO UPDATE SET scheduled_at=CASE WHEN _schedule_.scheduled_at + $3 > $2
-THEN _schedule_.scheduled_at + $3
-ELSE $2 END::TIMESTAMP
+ON CONFLICT(event)DO UPDATE SET scheduled_at=CASE WHEN _schedule_.scheduled_at + make_interval(secs => $3) > $2::TIMESTAMP
+THEN _schedule_.scheduled_at + make_interval(secs => $3)
+ELSE $2::TIMESTAMP END
 RETURNING scheduled_at;
 `
 	b.jobsResetImplicitScheduleQuery = b.prioritizedJobQueries(`UPDATE $TABLENAME
@@ -199,7 +199,7 @@ RETURNING scheduled_at;
 	WHERE serial = $1 AND implicit_schedule = true RETURNING serial;`)
 
 	b.jobsRenewImplicitScheduleQuery = b.prioritizedJobQueries(`UPDATE $TABLENAME
-	SET scheduled_at = CASE WHEN attempts_left>4 then $2 WHEN attempts_left=4 THEN $3 ELSE $4 END::TIMESTAMP
+	SET scheduled_at = CASE WHEN attempts_left>4 then $2::TIMESTAMP WHEN attempts_left=4 THEN $3::TIMESTAMP ELSE $4::TIMESTAMP END
 	WHERE serial = $1 AND implicit_schedule = true RETURNING serial;`)
 
 	b.jobsUpdateScheduleQuery = b.prioritizedJobQueries(`UPDATE $TABLENAME
@@ -274,23 +274,24 @@ type Health struct {
 func (b *Backend) Health(includeDetails bool) (Health, error) {
 
 	doJobs := func(priority EventPriority, jobs *HealthJobs) error {
+		ctx := context.Background()
 		// get the number of scheduled jobs
 		scheduledJobsQuery := b.prioritizedJobQueries(`SELECT count(*) OVER()  from $TABLENAME WHERE attempts_left = 5 limit 1;`)
-		err := b.db.QueryRow(scheduledJobsQuery[priority]).Scan(&jobs.Scheduled)
+		err := b.db.QueryRow(ctx, scheduledJobsQuery[priority]).Scan(&jobs.Scheduled)
 		if err != nil && err != csql.ErrNoRows {
 			return err
 		}
 
 		// get the number of failed jobs
 		failedJobsQuery := b.prioritizedJobQueries(`SELECT count(*) OVER()  from $TABLENAME WHERE attempts_left = 0 limit 1;`)
-		err = b.db.QueryRow(failedJobsQuery[priority]).Scan(&jobs.Failed)
+		err = b.db.QueryRow(ctx, failedJobsQuery[priority]).Scan(&jobs.Failed)
 		if err != nil && err != csql.ErrNoRows {
 			return err
 		}
 
 		// get the number of jobs who failed at least once but are still scheduled for a retry
 		failingJobsQuery := b.prioritizedJobQueries(`SELECT count(*) OVER()  from $TABLENAME WHERE attempts_left > 0 AND attempts_left < 3 limit 1;`)
-		err = b.db.QueryRow(failingJobsQuery[priority]).Scan(&jobs.Failing)
+		err = b.db.QueryRow(ctx, failingJobsQuery[priority]).Scan(&jobs.Failing)
 		if err != nil && err != csql.ErrNoRows {
 			return err
 		}
@@ -301,7 +302,7 @@ func (b *Backend) Health(includeDetails bool) (Health, error) {
 		// get the number of jobs who should have been executed at least ten minutes ago
 		overdueJobsQuery := b.prioritizedJobQueries(`SELECT count(*) OVER()  from $TABLENAME WHERE attempts_left > 0 AND
 		((scheduled_at IS NULL AND $1 > timestamp) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)) limit 1;`)
-		err = b.db.QueryRow(overdueJobsQuery[priority], tenMinutesAgo).Scan(&jobs.Overdue)
+		err = b.db.QueryRow(ctx, overdueJobsQuery[priority], tenMinutesAgo).Scan(&jobs.Overdue)
 		if err != nil && err != csql.ErrNoRows {
 			return err
 		}
@@ -309,7 +310,7 @@ func (b *Backend) Health(includeDetails bool) (Health, error) {
 		if includeDetails {
 			jobsDetailsQuery := b.prioritizedJobQueries(`SELECT serial, job, type, key, resource, resource_id, timestamp, attempts_left, scheduled_at from $TABLENAME WHERE
 		attempts_left = 0 OR (attempts_left > 0 AND	((scheduled_at IS NULL AND $1 > timestamp) OR (scheduled_at IS NOT NULL AND $1 > scheduled_at)));`)
-			rows, err := b.db.Query(jobsDetailsQuery[priority], tenMinutesAgo)
+			rows, err := b.db.Query(ctx, jobsDetailsQuery[priority], tenMinutesAgo)
 			if err != nil {
 				if err == csql.ErrNoRows {
 					return nil
@@ -351,11 +352,11 @@ func (b *Backend) Health(includeDetails bool) (Health, error) {
 // HealthPurge deletes old health data. Currently this is only failed jobs
 func (b *Backend) HealthPurge() error {
 	deleteFailedJobsQuery := b.prioritizedJobQueries(`DELETE from $TABLENAME WHERE attempts_left = 0;`)
-	_, err := b.db.Exec(deleteFailedJobsQuery[PriorityForeground])
+	_, err := b.db.Exec(context.Background(), deleteFailedJobsQuery[PriorityForeground])
 	if err != nil {
 		return err
 	}
-	_, err = b.db.Exec(deleteFailedJobsQuery[PriorityBackground])
+	_, err = b.db.Exec(context.Background(), deleteFailedJobsQuery[PriorityBackground])
 	return err
 }
 
@@ -503,13 +504,13 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 					// job may be retried because timeout is reached, but processing is still going on. Hence we
 					// update the implicit scheduled
 					var serial int
-					err := b.db.QueryRow(b.jobsRenewImplicitScheduleQuery[jb.Priority],
+					err := b.db.QueryRow(context.Background(), b.jobsRenewImplicitScheduleQuery[jb.Priority],
 						&jb.Serial,
 						now.Add(timeouts[0]), // first retry timeout
 						now.Add(timeouts[1]), // second retry timeout
 						now.Add(timeouts[2]), // third retry timeout before we give up
 					).Scan(&serial)
-					if err != nil && err != sql.ErrNoRows {
+					if err != nil && err != csql.ErrNoRows {
 						rlog.WithError(err).Error("could not renew schedule of currently processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 					}
 				}
@@ -544,7 +545,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 							time.Since(*event.ScheduledAt) > rateLimit.maxAge) {
 						var rateLimitedSchedule time.Time
 						deltaPG := rateLimit.delta.Seconds()
-						err = b.db.QueryRow(b.rateLimitQuery,
+						err = b.db.QueryRow(context.Background(), b.rateLimitQuery,
 							event.Type,
 							time.Now().UTC(),
 							deltaPG,
@@ -553,7 +554,7 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 							err = fmt.Errorf("cannot get new time slot for rate limited event: %s #%d - %w", event.Type, jb.Serial, err)
 						} else {
 							var serial int
-							err = b.db.QueryRow(b.jobsUpdateScheduleQuery[jb.Priority], &jb.Serial, &rateLimitedSchedule).Scan(&serial)
+							err = b.db.QueryRow(context.Background(), b.jobsUpdateScheduleQuery[jb.Priority], &jb.Serial, &rateLimitedSchedule).Scan(&serial)
 							if err != nil {
 								err = fmt.Errorf("could not update schedule for rate limited event: %s #%d - %w", event.Type, jb.Serial, err)
 							} else {
@@ -586,13 +587,13 @@ func (b *Backend) pipelineWorker(jobs <-chan job, ready chan<- bool, timeouts [3
 			rlog.Debug("successfully processed " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 			// job handled successfully, delete from queue (unless it has been rescheduled and attempts_left is back at 5)
 			var serial int
-			err = b.db.QueryRow(b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
-			if err != nil && err != sql.ErrNoRows {
+			err = b.db.QueryRow(context.Background(), b.jobsDeleteQuery[jb.Priority], &jb.Serial).Scan(&serial)
+			if err != nil && err != csql.ErrNoRows {
 				rlog.WithError(err).Error("could not delete processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
-			} else if err == sql.ErrNoRows {
+			} else if err == csql.ErrNoRows {
 				// job was recursively raised again, if we still have an impicit schedule, we must reset it
-				err = b.db.QueryRow(b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
-				if err != nil && err != sql.ErrNoRows {
+				err = b.db.QueryRow(context.Background(), b.jobsResetImplicitScheduleQuery[jb.Priority], &jb.Serial).Scan(&serial)
+				if err != nil && err != csql.ErrNoRows {
 					rlog.WithError(err).Error("could not reset schedule of processed job " + key + "[" + jb.Key + "] #" + strconv.Itoa(jb.Serial))
 				}
 			}
@@ -679,7 +680,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 	getJob := func(priority EventPriority) (j job, err error) {
 		j.Priority = priority
 		now := time.Now().UTC()
-		err = b.db.QueryRow(b.jobsUpdateQuery[priority],
+		err = b.db.QueryRow(context.Background(), b.jobsUpdateQuery[priority],
 			now,
 			now.Add(timeouts[0]), // first retry timeout
 			now.Add(timeouts[1]), // second retry timeout
@@ -698,7 +699,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			&j.ScheduledAt,
 			&j.ImplicitSchedule,
 		)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && err != csql.ErrNoRows {
 			rlog.Errorln("failed to retrieve job:", err.Error())
 		}
 		return
@@ -732,7 +733,7 @@ func (b *Backend) ProcessJobsSyncWithTimeouts(max time.Duration, timeouts [3]tim
 			if err == nil {
 				jobCountForeground++
 				jobs <- job
-			} else if err == sql.ErrNoRows {
+			} else if err == csql.ErrNoRows {
 				// we have nothing to do and still time for more jobs, let's try a background job
 				job, err := getJob(PriorityBackground)
 				if err == nil {
@@ -860,7 +861,7 @@ func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 	}
 	job := "event"
 	var serial int
-	err := b.db.QueryRow(b.jobsCancelQuery[event.Priority],
+	err := b.db.QueryRow(context.Background(), b.jobsCancelQuery[event.Priority],
 		job,
 		event.Type,
 		event.Key,
@@ -868,7 +869,7 @@ func (b *Backend) CancelEvent(ctx context.Context, event Event) (bool, error) {
 		event.ResourceID,
 	).Scan(&serial)
 
-	if err == sql.ErrNoRows {
+	if err == csql.ErrNoRows {
 		return false, nil
 	}
 	return err == nil, err
@@ -885,7 +886,7 @@ func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time
  WHERE job = $1 AND type = $2 AND key = $3 AND resource = $4 AND resource_id = $5 AND attempts_left > 0  
  ORDER BY serial LIMIT 1;`
 	job := "event"
-	err := b.db.QueryRow(query,
+	err := b.db.QueryRow(context.Background(), query,
 		job,
 		event.Type,
 		event.Key,
@@ -893,7 +894,7 @@ func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time
 		event.ResourceID,
 	).Scan(&schedule)
 
-	if err == sql.ErrNoRows {
+	if err == csql.ErrNoRows {
 		return schedule, nil
 	}
 	return schedule, err
@@ -929,7 +930,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 		if rateLimit, ok := b.rateLimits[event.Type]; ok {
 			var rateLimitedSchedule time.Time
 			deltaPG := rateLimit.delta.Seconds()
-			err := b.db.QueryRow(b.rateLimitQuery,
+			err := b.db.QueryRow(context.Background(), b.rateLimitQuery,
 				event.Type,
 				time.Now().UTC(),
 				deltaPG,
@@ -946,7 +947,7 @@ func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string
 	if ifNotExist {
 		query = b.jobsInsertIfNotExistQuery
 	}
-	err = b.db.QueryRow(query[event.Priority],
+	err = b.db.QueryRow(context.Background(), query[event.Priority],
 		job,
 		event.Type,
 		event.Key,
@@ -1032,14 +1033,14 @@ func eventJobKey(event string) string {
 	return "event: " + event
 }
 
-func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
+func (b *Backend) commitWithNotification(ctx context.Context, tx pgx.Tx, resource string, operation core.Operation, resourceID uuid.UUID, payload []byte) error {
 	rlog := logger.FromContext(ctx)
 	rlog.Debugf("commitWithNotification START")
 	request := notificationJobKey(resource, operation)
 
 	// only create a notification if somebody requested it
 	if _, ok := b.callbacks[request]; !ok {
-		return tx.Commit()
+		return tx.Commit(context.Background())
 	}
 
 	if len(payload) == 0 {
@@ -1050,7 +1051,7 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 
 	rlog.Debugf("commitWithNotification before: tx.QueryRow")
 	var serial int
-	err := tx.QueryRow("INSERT INTO "+b.db.Schema+".\"_job_\""+
+	err := tx.QueryRow(context.Background(), "INSERT INTO "+b.db.Schema+".\"_job_\""+
 		"(job,type,resource,resource_id,payload,timestamp,attempts_left,context)"+
 		"VALUES('notification',$1,$2,$3,$4,$5,4,$6) RETURNING serial;",
 		operation,
@@ -1062,13 +1063,13 @@ func (b *Backend) commitWithNotification(ctx context.Context, tx *sql.Tx, resour
 	).Scan(&serial)
 
 	if err != nil {
-		rlog.Debugf("commitWithNotification before: tx.Rollback()")
-		tx.Rollback()
+		rlog.Debugf("commitWithNotification before: tx.Rollback(context.Background())")
+		tx.Rollback(context.Background())
 		return err
 	}
-	rlog.Debugf("commitWithNotification before: err = tx.Commit()")
-	err = tx.Commit()
-	rlog.Debugf("commitWithNotification after: err = tx.Commit()")
+	rlog.Debugf("commitWithNotification before: err = tx.Commit(context.Background())")
+	err = tx.Commit(context.Background())
+	rlog.Debugf("commitWithNotification after: err = tx.Commit(context.Background())")
 	if err == nil {
 		b.TriggerJobs()
 		rlog.Debugf("commitWithNotification after: b.TriggerJobs()")

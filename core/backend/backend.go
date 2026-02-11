@@ -229,7 +229,7 @@ func New(bb *Builder) *Backend {
 
 	advisoryLock := len(b.db.Schema) // lock number is the schema length, a bit primity as a check sum but does the job
 	if b.updateSchema {
-		_, err := b.db.Exec(fmt.Sprintf("SELECT pg_advisory_lock(%d);", advisoryLock))
+		_, err := b.db.Exec(context.Background(), fmt.Sprintf("SELECT pg_advisory_lock(%d);", advisoryLock))
 		if err != nil {
 			logger.Default().Fatalf("Cannot obtain schema update advisory lock %v", err)
 		}
@@ -252,7 +252,7 @@ func New(bb *Builder) *Backend {
 	b.handleJobs(b.router)
 	if b.updateSchema {
 		registry.Write("schema_version", newVersion)
-		_, err = b.db.Exec(fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
+		_, err = b.db.Exec(context.Background(), fmt.Sprintf("SELECT pg_advisory_unlock(%d);", advisoryLock))
 		if err != nil {
 			logger.Default().Fatalf("Cannot release schema update advisory lock %v", err)
 		}
