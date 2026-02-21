@@ -87,7 +87,7 @@ func TestClient_Page_From(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -162,7 +162,7 @@ func TestUpsert(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -220,7 +220,7 @@ func TestClient_limit(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -275,7 +275,7 @@ func TestClientCursorPaginationSameTimestamps(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
