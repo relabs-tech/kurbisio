@@ -157,7 +157,7 @@ func testCompanion(t *testing.T, kssDrv kss.DriverType) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_companion_unit_test_"+t.Name())
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_companion_unit_test_"+t.Name())
 	defer db.Close()
 	db.ClearSchema()
 
@@ -292,7 +292,7 @@ func TestCompanionPut(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_companion_unit_test_"+t.Name())
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_companion_unit_test_"+t.Name())
 	defer db.Close()
 	db.ClearSchema()
 
@@ -372,7 +372,7 @@ func testCompanion_Delete(t *testing.T, kssDrv kss.DriverType) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_companion_unit_test_"+t.Name())
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_companion_unit_test_"+t.Name())
 	defer db.Close()
 	db.ClearSchema()
 
@@ -624,7 +624,7 @@ func testCompanion_Notifications(t *testing.T, kssDrv kss.DriverType) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_companion_unit_test_"+t.Name())
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_companion_unit_test_"+t.Name())
 	defer db.Close()
 	db.ClearSchema()
 

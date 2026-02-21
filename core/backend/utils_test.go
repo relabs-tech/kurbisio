@@ -38,7 +38,7 @@ func createTestServiceInternal(config, schemaName string, clearSchema bool) *Tes
 		panic(err)
 	}
 
-	s.Db = csql.OpenWithSchema(s.PostgresConfigString(), schemaName)
+	s.Db = csql.OpenWithSchema(s.PostgresConfigString(), "_test_"+schemaName)
 	if clearSchema {
 		s.Db.ClearSchema()
 	}

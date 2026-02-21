@@ -27,7 +27,7 @@ func TestRelationDirectional(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_directional_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_relation_directional_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -355,7 +355,7 @@ func TestRelationNonDirectional(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_non_directional_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_relation_non_directional_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -591,7 +591,7 @@ func TestRelationNonDirectionalDeterministic(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_non_directional_deterministic_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_relation_non_directional_deterministic_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -732,7 +732,7 @@ func TestRelationRevision(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_relation_revision_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_relation_revision_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

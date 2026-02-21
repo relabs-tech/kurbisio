@@ -204,7 +204,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_backend_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

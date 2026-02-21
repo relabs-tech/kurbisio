@@ -59,7 +59,7 @@ func createTestService(config, schemaName string, extensions ...backend.KExtensi
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(s.PostgresConfigString(), schemaName)
+	db := csql.OpenWithSchema(s.PostgresConfigString(), "_test_"+schemaName)
 	db.ClearSchema()
 
 	builder := backend.Builder{
