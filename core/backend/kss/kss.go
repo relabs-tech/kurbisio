@@ -83,6 +83,18 @@ type S3Configuration struct {
 
 	// SQSNotificationQueue defines the queue to listen to get event notification
 	SQSNotificationQueue string
+
+	// EndpointURL overrides the AWS endpoint. Use this for LocalStack ("http://localhost:4566")
+	// or other S3-compatible backends (e.g. MinIO). Empty means use real AWS.
+	EndpointURL string
+
+	// UsePathStyle enables path-style S3 addressing (required for LocalStack and MinIO).
+	UsePathStyle bool
+
+	// AutoCreateBucket creates the S3 bucket and SQS queue on startup if they do not
+	// already exist. Useful for LocalStack / local development. Defaults to false to
+	// avoid accidental resource creation against real AWS.
+	AutoCreateBucket bool
 }
 
 // S3Credentials contains S3 Credentials

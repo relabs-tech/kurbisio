@@ -1,69 +1,123 @@
-//go:build integration
-
-// These tests require to have access to S3
-// to run these tests:
-//     - define S3_ACCESS_ID, and S3_ACCESS_KEY to have access to the kss-test repo
-//     - execute: 'go test -tags=integration'
+// These tests require a running LocalStack instance.
+// Start it with:
+//
+//	docker compose -f docker-compose.localstack.yml up -d
+//
+// Then run:
+//
+//	go test ./...
 
 package kss_test
 
 import (
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/joeshaw/envdecode"
 	"github.com/relabs-tech/kurbisio/core/backend/kss"
 	"github.com/relabs-tech/kurbisio/core/client"
 )
 
-func TestMain(m *testing.M) {
-	if err := envdecode.Decode(&s3Credentials); err != nil {
-		fmt.Println("S3 tests require s3Credentials to be provided in environment variables")
-		panic(err)
+const (
+	localStackEndpoint = "http://localhost:4566"
+	localStackBucket   = "kss-test"
+	localStackRegion   = "eu-central-1"
+	localStackQueue    = "kss-test-queue"
+)
+
+// localStackConfig returns an S3Configuration pre-wired for LocalStack.
+// AutoCreateBucket=true ensures the bucket and queue are created on first use.
+func localStackConfig(keyPrefix string) kss.S3Configuration {
+	hash := sha256.Sum256([]byte(keyPrefix))
+	hashedPrefix := hex.EncodeToString(hash[:])
+	queueName := hashedPrefix + localStackQueue
+	return kss.S3Configuration{
+		AccessID:             "test",
+		AccessKey:            "test",
+		AWSBucketName:        localStackBucket,
+		AWSRegion:            localStackRegion,
+		KeyPrefix:            keyPrefix,
+		EndpointURL:          localStackEndpoint,
+		UsePathStyle:         true,
+		AutoCreateBucket:     true,
+		SQSNotificationQueue: queueName,
 	}
-	m.Run()
 }
 
-var s3Credentials kss.S3Credentials
-
 func Test_S3_PresignedURL_PutGet(t *testing.T) {
-	// Test upload and download with pre signed URL
-
-	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
-		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
-	}
-
-	s, err := kss.NewS3(kss.S3Configuration{
-		AccessID:             s3Credentials.AccessID,
-		AccessKey:            s3Credentials.AccessKey,
-		AWSBucketName:        "kss-test",
-		AWSRegion:            "eu-central-1",
-		KeyPrefix:            t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
-		SQSNotificationQueue: "TestS3BucketNotificationToSQS",
-	})
+	s, err := kss.NewS3(localStackConfig(t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cl := client.NewWithURL("")
 
-	test_PresignedURL_PostGet(t, s, cl)
+	// NOTE: LocalStack (free tier) does not enforce presigned URL signatures, so the usual
+	// URL-tampering and URL-expiry 403 checks from generic_test.go are skipped here.
+	// This test covers the meaningful S3 + SQS behaviour: upload, callback delivery, download.
+
+	key := "some_key"
+
+	pushURL, err := s.GetPreSignedURL(kss.Put, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	called := make(chan bool, 1)
+	s.WithCallBack(func(e kss.FileUpdatedEvent) error {
+		if e.Key != key {
+			return nil
+		}
+		if e.Type != "uploaded" {
+			t.Errorf("Expecting 'uploaded' got '%v'", e.Type)
+		}
+		if e.Size != 3 {
+			t.Errorf("Expecting size 3 got %v", e.Size)
+		}
+		if e.Etags == "" {
+			t.Errorf("Expected a non-empty ETag")
+		}
+		called <- true
+		return nil
+	})
+
+	_, err = cl.RawPut(pushURL, []byte("123"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(15 * time.Second):
+		t.Fatal("Timeout waiting for SQS callback event")
+	case <-called:
+	}
+
+	getURL, err := s.GetPreSignedURL(kss.Get, key, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	_, _, err = cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "123" {
+		t.Fatalf("Expecting '123' got '%v'", string(data))
+	}
+
+	if err := s.Delete(key); err != nil {
+		t.Fatal(err)
+	}
+	status, _, _ := cl.RawGetBlobWithHeader(getURL, map[string]string{}, &data)
+	if status != http.StatusNotFound {
+		t.Fatalf("After delete: expecting 404 got %v", status)
+	}
 }
 
 func Test_S3_Delete(t *testing.T) {
-	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
-		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
-	}
-
-	s, err := kss.NewS3(kss.S3Configuration{
-		AccessID:      s3Credentials.AccessID,
-		AccessKey:     s3Credentials.AccessKey,
-		AWSBucketName: "kss-test",
-		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
-	})
+	s, err := kss.NewS3(localStackConfig(t.Name() + time.Now().Format("2006-01-0215.04.05.9.00")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,36 +126,16 @@ func Test_S3_Delete(t *testing.T) {
 }
 
 func Test_S3_DeleteAllWithPrefix(t *testing.T) {
-	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
-		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
-	}
-
-	s, err := kss.NewS3(kss.S3Configuration{
-		AccessID:      s3Credentials.AccessID,
-		AccessKey:     s3Credentials.AccessKey,
-		AWSBucketName: "kss-test",
-		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
-	})
+	s, err := kss.NewS3(localStackConfig(t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/"))
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	cl := client.NewWithURL("")
 	test_DeleteAllWithPrefix(t, s, cl)
 }
 
 func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
-	if s3Credentials.AccessID == "" || s3Credentials.AccessKey == "" {
-		t.Fatal("S3 tests require s3Credentials to be provided in environment variables")
-	}
-	s, err := kss.NewS3(kss.S3Configuration{
-		AccessID:      s3Credentials.AccessID,
-		AccessKey:     s3Credentials.AccessKey,
-		AWSBucketName: "kss-test",
-		AWSRegion:     "eu-central-1",
-		KeyPrefix:     t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/",
-	})
+	s, err := kss.NewS3(localStackConfig(t.Name() + time.Now().Format("2006-01-0215.04.05.9.00") + "/"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +162,7 @@ func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(keys) != 4 {
-		t.Fatalf("Expecting %v, got %v", 1, len(keys))
+		t.Fatalf("Expecting %v, got %v", 4, len(keys))
 	}
 
 	err = s.DeleteAllWithPrefix("")
@@ -146,22 +180,17 @@ func Test_S3_ListAllWithPrefix_DeleteAllWithPrefix(t *testing.T) {
 }
 
 func test_DeleteAllWithPrefix(t *testing.T, driver kss.Driver, cl client.Client) {
-	// Test that a file can be deleted
-
 	var urls []string
 	for _, key := range []string{"key/1", "key/2"} {
-		// Push some data
 		pushURL, err := driver.GetPreSignedURL(kss.Put, key, time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		_, err = cl.PostMultipart(pushURL, []byte("123"))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		// Now try to read the data
 		getURL, err := driver.GetPreSignedURL(kss.Get, key, time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -186,5 +215,4 @@ func test_DeleteAllWithPrefix(t *testing.T, driver kss.Driver, cl client.Client)
 			t.Fatalf("Expecting %v got '%v'", http.StatusNotFound, status)
 		}
 	}
-
 }
