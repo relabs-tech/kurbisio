@@ -27,6 +27,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - name: Start MinIO and ElasticMQ
+        run: |
+          docker compose -f docker/docker-compose.local-aws.yml up -d
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/live > /dev/null && \
+               curl -fsS 'http://localhost:9324/?Action=ListQueues&Version=2012-11-05' > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker/docker-compose.local-aws.yml logs
+          exit 1
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.25"
