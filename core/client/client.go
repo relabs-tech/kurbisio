@@ -1149,7 +1149,8 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 	status := res.StatusCode
 
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, errors.New(strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusOK, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -1203,7 +1204,8 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 	}
 	status := res.StatusCode
 	if status != http.StatusOK && status != http.StatusCreated && status != http.StatusNoContent {
-		return status, errors.New(strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusOK, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	if resBody != nil && result != nil {
 		if raw, ok := result.(*[]byte); ok {
@@ -1247,7 +1249,8 @@ func (c Client) RawDelete(path string) (int, error) {
 	}
 	status := res.StatusCode
 	if status != http.StatusNoContent {
-		return status, errors.New(strings.TrimSpace(string(resBody)))
+		return status, fmt.Errorf("handler returned wrong status code: got %v want %v. Error: %w",
+			status, http.StatusNoContent, errors.New(strings.TrimSpace(string(resBody))))
 	}
 	return status, nil
 }
