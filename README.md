@@ -24,9 +24,10 @@ Dima Shelamov
 
 ## Unit Tests
 
-You need a postgres database:
+You need a postgres database and a localstack instance for running :
 ```
 docker run --rm --name some-postgres -p 5432:5432 -e POSTGRES_PASSWORD=docker -d postgres
+docker compose -f docker/docker-compose.localstack.yml up -d
 ```
 
 Then use standard go commands, like

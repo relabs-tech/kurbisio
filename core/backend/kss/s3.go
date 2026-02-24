@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/relabs-tech/kurbisio/core/logger"
@@ -36,6 +37,27 @@ type S3 struct {
 	stopListeningAt      time.Time
 	stopListeningAtMutex sync.Mutex
 	logger               *logrus.Entry
+	usePathStyle         bool
+	endpointURL          string
+}
+
+// newS3Client returns an S3 client configured with the instance's endpoint and path-style settings.
+func (s *S3) newS3Client() *s3.Client {
+	return s3.NewFromConfig(s.config, func(o *s3.Options) {
+		o.UsePathStyle = s.usePathStyle
+		if s.endpointURL != "" {
+			o.BaseEndpoint = aws.String(s.endpointURL)
+		}
+	})
+}
+
+// newSQSClient returns an SQS client configured with the instance's endpoint settings.
+func (s *S3) newSQSClient() *sqs.Client {
+	return sqs.NewFromConfig(s.config, func(o *sqs.Options) {
+		if s.endpointURL != "" {
+			o.BaseEndpoint = aws.String(s.endpointURL)
+		}
+	})
 }
 
 // NewS3 returns a new S3
@@ -72,11 +94,121 @@ func NewS3(kssConfig S3Configuration) (*S3, error) {
 		listenToSQS:          make(chan bool),
 		stopListeningAtMutex: sync.Mutex{},
 		logger:               rlog,
+		usePathStyle:         kssConfig.UsePathStyle,
+		endpointURL:          kssConfig.EndpointURL,
+	}
+	if kssConfig.AutoCreateBucket {
+		if err := s.ensureBucketAndQueueExist(); err != nil {
+			return nil, err
+		}
 	}
 	if s.sqsQueueName != "" {
 		s.listenSQS()
 	}
 	return &s, nil
+}
+
+// ensureBucketAndQueueExist creates the S3 bucket and SQS queue if they do not already exist,
+// then wires S3→SQS bucket notifications and the queue policy that allows S3 to publish.
+// This mirrors the CloudFormation NotificationConfiguration + QueuePolicy resources.
+// Useful for local development with LocalStack or MinIO.
+func (s *S3) ensureBucketAndQueueExist() error {
+	cl := s.newS3Client()
+
+	_, err := cl.HeadBucket(context.TODO(), &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
+	if err != nil {
+		s.logger.Infof("Bucket %s not found, creating it", s.bucket)
+		input := &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}
+		// LocationConstraint is required for all regions except us-east-1
+		if region := s.config.Region; region != "" && region != "us-east-1" {
+			input.CreateBucketConfiguration = &s3types.CreateBucketConfiguration{
+				LocationConstraint: s3types.BucketLocationConstraint(region),
+			}
+		}
+		if _, err := cl.CreateBucket(context.TODO(), input); err != nil {
+			return fmt.Errorf("failed to create bucket %s: %w", s.bucket, err)
+		}
+		s.logger.Infof("Created bucket %s", s.bucket)
+	} else {
+		s.logger.Infof("Bucket %s already exists", s.bucket)
+	}
+
+	if s.sqsQueueName == "" {
+		return nil
+	}
+
+	sqsCl := s.newSQSClient()
+
+	// Ensure the queue exists and get its URL.
+	var queueURL string
+	urlResult, err := sqsCl.GetQueueUrl(context.TODO(), &sqs.GetQueueUrlInput{QueueName: &s.sqsQueueName})
+	if err != nil {
+		s.logger.Infof("SQS queue %s not found, creating it", s.sqsQueueName)
+		createResult, err := sqsCl.CreateQueue(context.TODO(), &sqs.CreateQueueInput{QueueName: &s.sqsQueueName})
+		if err != nil {
+			return fmt.Errorf("failed to create SQS queue %s: %w", s.sqsQueueName, err)
+		}
+		queueURL = *createResult.QueueUrl
+		s.logger.Infof("Created SQS queue %s", s.sqsQueueName)
+	} else {
+		queueURL = *urlResult.QueueUrl
+		s.logger.Infof("SQS queue %s already exists", s.sqsQueueName)
+	}
+
+	// Get the queue ARN — needed for both the queue policy and the bucket notification config.
+	attrResult, err := sqsCl.GetQueueAttributes(context.TODO(), &sqs.GetQueueAttributesInput{
+		QueueUrl:       aws.String(queueURL),
+		AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get queue ARN for %s: %w", s.sqsQueueName, err)
+	}
+	queueARN := attrResult.Attributes[string(types.QueueAttributeNameQueueArn)]
+
+	// Set the SQS queue policy to allow S3 to send messages.
+	// Equivalent to the CloudFormation QueuePolicy resource.
+	bucketARN := "arn:aws:s3:::" + s.bucket
+	policy := fmt.Sprintf(`{
+		"Version": "2012-10-17",
+		"Statement": [{
+			"Effect": "Allow",
+			"Principal": { "Service": "s3.amazonaws.com" },
+			"Action": "sqs:SendMessage",
+			"Resource": %q,
+			"Condition": { "ArnLike": { "aws:SourceArn": %q } }
+		}]
+	}`, queueARN, bucketARN)
+
+	_, err = sqsCl.SetQueueAttributes(context.TODO(), &sqs.SetQueueAttributesInput{
+		QueueUrl: aws.String(queueURL),
+		Attributes: map[string]string{
+			string(types.QueueAttributeNamePolicy): policy,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set queue policy for %s: %w", s.sqsQueueName, err)
+	}
+	s.logger.Infof("Set queue policy for %s", s.sqsQueueName)
+
+	// Wire S3→SQS bucket notifications.
+	// Equivalent to the CloudFormation NotificationConfiguration / QueueConfigurations block.
+	_, err = cl.PutBucketNotificationConfiguration(context.TODO(), &s3.PutBucketNotificationConfigurationInput{
+		Bucket: aws.String(s.bucket),
+		NotificationConfiguration: &s3types.NotificationConfiguration{
+			QueueConfigurations: []s3types.QueueConfiguration{
+				{
+					Events:   []s3types.Event{s3types.EventS3ObjectCreated},
+					QueueArn: aws.String(queueARN),
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set bucket notification configuration for %s: %w", s.bucket, err)
+	}
+	s.logger.Infof("Configured S3→SQS notifications: bucket %s → queue %s", s.bucket, s.sqsQueueName)
+
+	return nil
 }
 
 // WithCallBack Replaces the current callback with WithCallBack
@@ -87,7 +219,7 @@ func (s *S3) WithCallBack(callback FileUpdatedCallBack) {
 // Delete deletes a the key file
 func (s *S3) Delete(key string) error {
 	s.logger.Infoln("Deleting ", s.baseKeyName+key)
-	client := s3.NewFromConfig(s.config)
+	client := s.newS3Client()
 
 	input := &s3.DeleteObjectInput{
 		Bucket: &s.bucket,
@@ -107,7 +239,7 @@ func (s *S3) Delete(key string) error {
 // DeleteAllWithPrefix all keys starting with
 func (s *S3) DeleteAllWithPrefix(key string) error {
 	s.logger.Infoln("Deleting all ", s.baseKeyName+key)
-	client := s3.NewFromConfig(s.config)
+	client := s.newS3Client()
 
 	keys, err := s.ListAllWithPrefix(key)
 	if err != nil {
@@ -136,7 +268,7 @@ func (s *S3) DeleteAllWithPrefix(key string) error {
 func (s *S3) GetPreSignedURL(method Method, key string, expireIn time.Duration) (URL string, err error) {
 	logger.Default().Infoln("GetPreSignedURL ", s.baseKeyName+key)
 
-	client := s3.NewPresignClient(s3.NewFromConfig(s.config))
+	client := s3.NewPresignClient(s.newS3Client())
 
 	var resp *v4.PresignedHTTPRequest
 	switch method {
@@ -174,7 +306,7 @@ func (s *S3) GetPreSignedURL(method Method, key string, expireIn time.Duration) 
 
 // UploadData uploads data into a new key object
 func (s *S3) UploadData(key string, data []byte) error {
-	cl := s3.NewFromConfig(s.config)
+	cl := s.newS3Client()
 
 	_, err := cl.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
@@ -190,7 +322,7 @@ func (s *S3) UploadData(key string, data []byte) error {
 
 // DownloadData downloads data from key object
 func (s *S3) DownloadData(key string) ([]byte, error) {
-	cl := s3.NewFromConfig(s.config)
+	cl := s.newS3Client()
 
 	downloader := manager.NewDownloader(cl)
 
@@ -210,7 +342,7 @@ func (s *S3) DownloadData(key string) ([]byte, error) {
 // ListAllWithPrefix Lists all keys with prefix
 func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
 	s.logger.Infoln("ListAllWithPrefix all ", s.baseKeyName+key)
-	client := s3.NewFromConfig(s.config)
+	client := s.newS3Client()
 
 	var continuationToken *string
 	for {
@@ -240,7 +372,7 @@ func (s *S3) ListAllWithPrefix(key string) (keys []string, err error) {
 
 func (s *S3) listenSQS() {
 	s.logger.Infof("Listening to SQS queue %s\n", s.sqsQueueName)
-	client := sqs.NewFromConfig(s.config)
+	client := s.newSQSClient()
 
 	// Get URL of queue
 	urlResult, err := client.GetQueueUrl(
