@@ -392,3 +392,93 @@ func TestRaiseEventRecursive(t *testing.T) {
 		t.Fatalf("received %d events, but expected %d", len(events), numExpectedEvents)
 	}
 }
+
+func TestNextJobTime(t *testing.T) {
+	ctx := context.Background()
+
+	// With no scheduled jobs, NextJobTime should return nil.
+	nextJob, err := testService.backend.NextJobTime(ctx)
+	if err != nil {
+		t.Fatalf("NextJobTime error: %v", err)
+	}
+	if nextJob != nil {
+		t.Fatalf("expected nil, got %v", nextJob)
+	}
+
+	// Register a handler so ScheduleEvent accepts the event type.
+	eventType := "next-job-time-test"
+	received := make(chan backend.Event, 10)
+	testService.backend.HandleEvent(eventType, func(ctx context.Context, event backend.Event) error {
+		received <- event
+		return nil
+	})
+
+	// Schedule an event 10 seconds in the future.
+	scheduleAt := time.Now().Add(10 * time.Second)
+	err = testService.backend.ScheduleEvent(ctx, backend.Event{
+		Type:       eventType,
+		Resource:   "something",
+		ResourceID: uuid.New(),
+	}, scheduleAt)
+	if err != nil {
+		t.Fatalf("ScheduleEvent error: %v", err)
+	}
+
+	// NextJobTime should now return approximately the scheduled time.
+	nextJob, err = testService.backend.NextJobTime(ctx)
+	if err != nil {
+		t.Fatalf("NextJobTime error: %v", err)
+	}
+	if nextJob == nil {
+		t.Fatal("expected a non-nil time, got nil")
+	}
+	// Allow 2 seconds of tolerance for DB clock drift.
+	if diff := nextJob.Sub(scheduleAt); diff < -2*time.Second || diff > 2*time.Second {
+		t.Fatalf("expected scheduled time ~%v, got %v (diff=%v)", scheduleAt, *nextJob, diff)
+	}
+
+	// Schedule a second event further in the future — NextJobTime should still
+	// return the earlier one.
+	laterScheduleAt := time.Now().Add(30 * time.Second)
+	err = testService.backend.ScheduleEvent(ctx, backend.Event{
+		Type:       eventType,
+		Resource:   "something",
+		ResourceID: uuid.New(),
+	}, laterScheduleAt)
+	if err != nil {
+		t.Fatalf("ScheduleEvent error: %v", err)
+	}
+
+	nextJob, err = testService.backend.NextJobTime(ctx)
+	if err != nil {
+		t.Fatalf("NextJobTime error: %v", err)
+	}
+	if nextJob == nil {
+		t.Fatal("expected a non-nil time, got nil")
+	}
+	if diff := nextJob.Sub(scheduleAt); diff < -2*time.Second || diff > 2*time.Second {
+		t.Fatalf("expected earliest scheduled time ~%v, got %v (diff=%v)", scheduleAt, *nextJob, diff)
+	}
+
+	// Process all scheduled jobs (use a long enough window).
+	// First wait for them to become due, then process.
+	time.Sleep(11 * time.Second)
+	testService.backend.ProcessJobsSync(-1)
+
+	// Drain received events.
+	for len(received) > 0 {
+		<-received
+	}
+
+	// The first event has been processed. NextJobTime should return the later one.
+	nextJob, err = testService.backend.NextJobTime(ctx)
+	if err != nil {
+		t.Fatalf("NextJobTime error: %v", err)
+	}
+	if nextJob == nil {
+		t.Fatal("expected non-nil time for remaining scheduled event")
+	}
+	if diff := nextJob.Sub(laterScheduleAt); diff < -2*time.Second || diff > 2*time.Second {
+		t.Fatalf("expected later scheduled time ~%v, got %v (diff=%v)", laterScheduleAt, *nextJob, diff)
+	}
+}

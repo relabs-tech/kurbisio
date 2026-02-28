@@ -901,6 +901,32 @@ func (b *Backend) RetrieveEventSchedule(ctx context.Context, event Event) (*time
 	return schedule, err
 }
 
+// NextJobTime returns the earliest scheduled_at time for pending jobs across both
+// foreground and background job tables. Only considers jobs with attempts_left > 0
+// and a non-null scheduled_at in the future. Returns nil if no upcoming jobs exist.
+func (b *Backend) NextJobTime(ctx context.Context) (*time.Time, error) {
+	var earliest *time.Time
+
+	for _, priority := range []EventPriority{PriorityForeground, PriorityBackground} {
+		table := "_job_"
+		if priority == PriorityBackground {
+			table = "_backgroundjob_"
+		}
+		query := `SELECT MIN(scheduled_at) FROM ` + b.db.Schema + `.` + table +
+			` WHERE attempts_left > 0 AND scheduled_at IS NOT NULL AND scheduled_at > now();`
+
+		var t *time.Time
+		err := b.db.QueryRow(ctx, query).Scan(&t)
+		if err != nil && err != csql.ErrNoRows {
+			return nil, err
+		}
+		if t != nil && (earliest == nil || t.Before(*earliest)) {
+			earliest = t
+		}
+	}
+	return earliest, nil
+}
+
 // raiseEventWithResourceInternal returns the http status code as well
 func (b *Backend) raiseEventWithResourceInternal(ctx context.Context, job string, event Event, scheduleAt *time.Time, ifNotExist bool) (int, error) {
 	if event.Priority != PriorityForeground && event.Priority != PriorityBackground {
