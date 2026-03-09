@@ -773,7 +773,7 @@ func TestRelationRevision(t *testing.T) {
 		LeftAID  uuid.UUID `json:"left_a_id"`
 		RightAID uuid.UUID `json:"right_a_id"`
 		Text     string    `json:"text,omitempty"`
-		Revision int       `json:"revision,omitempty"`
+		Revision int       `json:"revision"`
 	}
 
 	// First we create an a
@@ -792,14 +792,27 @@ func TestRelationRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Then we create a relation between a1 and a2. We use revision -1 which means "create only"
+	// Then we try to create a relation between a1 and a2 with a specific revision, which will fail because
+	// the relation does not exist yet
 	relation := MyRelation{
 		LeftAID:  a1.AID,
 		RightAID: a2.AID,
-		Text:     "revision 1",
-		Revision: -1,
+		Text:     "revision 42",
+		Revision: 42,
 	}
 	status, err := adminClient.RawPut("/a_a_relations", &relation, nil)
+	if status != http.StatusConflict || err == nil {
+		t.Fatalf("Expecting conflict, got %v (%v)", status, err)
+	}
+
+	// Then we actually create a relation between a1 and a2. We use revision zero which means "create only"
+	relation = MyRelation{
+		LeftAID:  a1.AID,
+		RightAID: a2.AID,
+		Text:     "revision 1",
+		Revision: 0,
+	}
+	status, err = adminClient.RawPut("/a_a_relations", &relation, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,12 +820,12 @@ func TestRelationRevision(t *testing.T) {
 		t.Fatalf("Expecting created, got %v", status)
 	}
 
-	// Updating the relation with revision -1 will fail
+	// Updating the relation with revision zero will fail
 	relation = MyRelation{
 		LeftAID:  a1.AID,
 		RightAID: a2.AID,
 		Text:     "revision 2",
-		Revision: -1,
+		Revision: 0,
 	}
 	status, err = adminClient.RawPut("/a_a_relations", &relation, nil)
 	if status != http.StatusConflict || err == nil {
@@ -824,19 +837,19 @@ func TestRelationRevision(t *testing.T) {
 		LeftAID:  a2.AID,
 		RightAID: a1.AID,
 		Text:     "revision 2",
-		Revision: -1,
+		Revision: 0,
 	}
 	status, err = adminClient.RawPut("/a_a_relations", &relation, nil)
 	if status != http.StatusConflict || err == nil {
 		t.Fatalf("Expecting conflict, got %v (%v)", status, err)
 	}
 
-	// Now we update it with revision 0, which is the revision that ALWAYS works
+	// Now we update it with revision -1, which is the revision that ALWAYS works
 	relation = MyRelation{
 		LeftAID:  a1.AID,
 		RightAID: a2.AID,
 		Text:     "revision 2",
-		Revision: 0,
+		Revision: -1,
 	}
 	var result MyRelation
 	status, err = adminClient.RawPut("/a_a_relations", &relation, &result)

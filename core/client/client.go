@@ -786,7 +786,7 @@ func (c Client) RawGet(path string, result interface{}) (int, error) {
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -842,7 +842,7 @@ func (c Client) RawGetWithHeader(path string, header map[string]string, result i
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, nil, err
+			return res.StatusCode, nil, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -897,7 +897,7 @@ func (c *Client) RawGetBlobWithHeader(path string, header map[string]string, blo
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, nil, err
+			return res.StatusCode, nil, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -962,7 +962,7 @@ func (c Client) RawPostWithHeader(path string, headers map[string]string, body i
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -1027,7 +1027,7 @@ func (c Client) RawPostBlob(path string, header map[string]string, blob []byte, 
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -1086,7 +1086,7 @@ func (c Client) RawPut(path string, body interface{}, result interface{}) (int, 
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -1141,7 +1141,7 @@ func (c Client) RawPutBlob(path string, header map[string]string, blob []byte, r
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -1197,7 +1197,7 @@ func (c Client) RawPatch(path string, body interface{}, result interface{}) (int
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)
@@ -1242,7 +1242,7 @@ func (c Client) RawDelete(path string) (int, error) {
 		}
 		res, err = c.httpClient.Do(r)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return res.StatusCode, err
 		}
 		defer res.Body.Close()
 		resBody, _ = io.ReadAll(res.Body)

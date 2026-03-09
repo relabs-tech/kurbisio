@@ -1982,7 +1982,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
-		revision := 0
+		revision := -1
 		if r, ok := bodyJSON["revision"].(float64); ok {
 			revision = int(r)
 		}
@@ -2000,6 +2000,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	Retry:
 		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
 		err = tx.QueryRow(readQuery+"WHERE "+primary+"_id = $1 FOR UPDATE;", &primaryID).Scan(current...)
+		if revision >= 0 && revision != currentRevision {
+			tx.Rollback()
+			// revision does not match, return conflict status with the conflicting object
+			mergeProperties(object)
+			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusConflict)
+			w.Write(jsonData)
+			return
+		}
+
 		if err == csql.ErrNoRows {
 			// item does not exist yet.
 			if singleton {
@@ -2041,16 +2052,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			tx.Rollback()
 			rlog.WithError(err).Error("Error 4737: Rollback")
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
-			return
-		}
-		if revision != 0 && revision != currentRevision {
-			tx.Rollback()
-			// revision does not match, return conflict status with the conflicting object
-			mergeProperties(object)
-			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusConflict)
-			w.Write(jsonData)
 			return
 		}
 		mergeProperties(object)

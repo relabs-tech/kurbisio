@@ -183,9 +183,10 @@ you would simply query /user/devices.
 
 Every item has an integer property "revision", which is incremented every time the item is updated. Revisions can be
 used to make updates safe in systems with multiple concurrent writers. If a PUT or PATCH request contains a
-non-zero revision number which does not match the item's current revision, then the request is discarded and
-the conflicting newer version of the object is returned with an error status (409 - Conflict).
-A PUT or PATCH request with a revision of zero, or no revision at all, will not be checked for possible conflicts.
+non-negative revision number which does not match the item's current revision, then the request is discarded and
+the conflicting newer version of the object is returned with an error status (409 - Conflict). Passing zero as revision
+number guarantees that the item will only be created if it does not exist yet, but it will not update an existing item.
+A PUT or PATCH request with a negative revision , or no revision at all, will not be checked for possible conflicts.
 
 # Wildcard Queries
 
