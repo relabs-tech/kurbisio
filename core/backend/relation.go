@@ -1793,11 +1793,10 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			return
 		}
 
-		revision := 0
+		revision := -1
 		if r, ok := bodyJSON["revision"].(float64); ok {
 			revision = int(r)
 		}
-
 		tx, err := b.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			rlog.WithError(err).Errorf("Error 4736: Update of resource `%s`", resource)
@@ -1811,6 +1810,17 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 	Retry:
 		current, object := createScanValuesAndObject(&timestamp, &currentRevision)
 		err = tx.QueryRow(readQuery+"WHERE "+leftColumn+" = $1 AND "+rightColumn+" = $2 FOR UPDATE;", &leftID, &rightID).Scan(current...)
+		if revision >= 0 && revision != currentRevision {
+			tx.Rollback()
+			// revision does not match, return conflict status with the conflicting object
+			mergeProperties(object)
+			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusConflict)
+			w.Write(jsonData)
+			return
+		}
+
 		if err == csql.ErrNoRows {
 			// item does not exist yet.
 			if r.Method == http.MethodPatch {
@@ -1852,7 +1862,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
-		if revision != 0 && revision != currentRevision {
+		if revision >= 0 && revision != currentRevision {
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
 			mergeProperties(object)

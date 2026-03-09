@@ -1718,3 +1718,112 @@ func TestListWithMultipleSearchFiltersInterceptor(t *testing.T) {
 	// Clean up
 	testService.client.Collection("a").Clear()
 }
+
+// TestUpsertWithRevision tests upserting a collection with revision handling
+func TestUpsertWithRevision(t *testing.T) {
+	jsonConfig := `{
+	"collections": [
+	  {
+		"resource": "a"
+	  }
+	],
+	"singletons": [],
+	"blobs": [],
+	"shortcuts": []
+  }
+`
+	testService := CreateTestService(jsonConfig, t.Name())
+	defer testService.Db.Close()
+
+	type A struct {
+		AId      uuid.UUID `json:"a_id"`
+		Text     string    `json:"text"`
+		Revision *int64    `json:"revision,omitempty"`
+	}
+
+	a := A{
+		AId:  uuid.New(),
+		Text: "Initial text",
+	}
+
+	_, err := testService.client.Collection("a").Upsert(a, &a)
+	assert.Nil(t, err)
+	assert.NotNil(t, a.Revision)
+	assert.Equal(t, int64(1), *a.Revision)
+
+	int64Ptr := func(i int64) *int64 { return &i }
+	aUpdate := A{
+		AId:      a.AId,
+		Text:     "Updated text",
+		Revision: int64Ptr(1),
+	}
+	_, err = testService.client.Collection("a").Upsert(aUpdate, &aUpdate)
+	assert.Nil(t, err)
+	assert.NotNil(t, aUpdate.Revision)
+	assert.Equal(t, int64(2), *aUpdate.Revision)
+
+	// Attempt to update with old revision - should fail
+	aConflict := A{
+		AId:      a.AId,
+		Text:     "Conflict text",
+		Revision: int64Ptr(1),
+	}
+	status, err := testService.client.Collection("a").Upsert(aConflict, &aConflict)
+	assert.NotNil(t, err)
+	assert.Equal(t, 409, status)
+
+	// Attempt to update with zero revision also fails
+	aZeroRevision := A{
+		AId:      a.AId,
+		Text:     "Zero revision text",
+		Revision: int64Ptr(0),
+	}
+	status, err = testService.client.Collection("a").Upsert(aZeroRevision, &aZeroRevision)
+	assert.NotNil(t, err)
+	assert.Equal(t, 409, status)
+
+	// Attempt to update with no revision succeeds
+	aNoRevision := A{
+		AId:  a.AId,
+		Text: "No revision update",
+	}
+	_, err = testService.client.Collection("a").Upsert(aNoRevision, &aNoRevision)
+	assert.Nil(t, err)
+	assert.NotNil(t, aNoRevision.Revision)
+	assert.Equal(t, int64(3), *aNoRevision.Revision)
+
+	// Attempt to update with negative revision succeeds
+	aNegativeRevision := A{
+		AId:      a.AId,
+		Text:     "Negative revision text",
+		Revision: int64Ptr(-1),
+	}
+	_, err = testService.client.Collection("a").Upsert(aNegativeRevision, &aNegativeRevision)
+	assert.Nil(t, err)
+	assert.NotNil(t, aNegativeRevision.Revision)
+	assert.Equal(t, int64(4), *aNegativeRevision.Revision)
+
+	// Attempt to create new item with specific revision fails because item doesn't exist
+	aNewWithRevision := A{
+		AId:      uuid.New(),
+		Text:     "New item with revision",
+		Revision: int64Ptr(1),
+	}
+	status, err = testService.client.Collection("a").Upsert(aNewWithRevision, &aNewWithRevision)
+	assert.NotNil(t, err)
+	assert.Equal(t, 409, status)
+
+	// Attempt to create new item with revision zero works
+	aNewZeroRevision := A{
+		AId:      uuid.New(),
+		Text:     "New item with zero revision",
+		Revision: int64Ptr(0),
+	}
+	_, err = testService.client.Collection("a").Upsert(aNewZeroRevision, &aNewZeroRevision)
+	assert.Nil(t, err)
+	assert.NotNil(t, aNewZeroRevision.Revision)
+	assert.Equal(t, int64(1), *aNewZeroRevision.Revision)
+
+	// Clean up remaining items
+	testService.client.Collection("a").Clear()
+}
