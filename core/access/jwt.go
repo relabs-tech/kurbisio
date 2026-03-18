@@ -301,6 +301,12 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 			tokenString := ""
 			bearer := r.Header.Get("Authorization")
+
+			if strings.HasPrefix(bearer, "AuthToken: ") {
+				// This is an auth token, we should not try to parse it as a JWT
+				h.ServeHTTP(w, r)
+				return
+			}
 			if len(bearer) > 0 && bearer != "null" {
 				if len(bearer) >= 8 && strings.ToLower(bearer[:7]) == "bearer " {
 					tokenString = bearer[7:]

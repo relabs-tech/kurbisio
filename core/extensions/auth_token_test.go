@@ -86,7 +86,7 @@ func TestAuthToken(t *testing.T) {
 		t.Fatalf("Should have been able to list tokens: %v", err)
 	}
 
-	_,userCl, err := testService.createAccount()
+	_, userCl, err := testService.createAccount()
 	if err != nil {
 		t.Fatalf("Should have been able to create account: %v", err)
 	}
