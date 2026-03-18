@@ -29,6 +29,7 @@ import (
 // Usage:
 // - Add token to requests using header: "Authorization: AuthToken: <token>"
 // - Token format: base64-encoded account ID followed by random string
+// - The middleware needs to be added to the router to handle authentication using these tokens
 //
 // Requirements:
 // - Requires the "account" collection in the configuration
@@ -201,10 +202,22 @@ func (a AuthToken) UpdateMux(router *mux.Router) error {
 			fmt.Fprintf(w, `{"token": "%s"}`, metadata.Token)
 		},
 	).Methods("POST")
+	router.Use(authTokenMiddleware(router))
+	return nil
+}
 
-	// Add middleware to verify token authentication
-	router.Use(func(next http.Handler) http.Handler {
+// authTokenMiddleware is a middleware that checks for the presence of an AuthToken in the Authorization header,
+func authTokenMiddleware(router *mux.Router) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := access.AuthorizationFromContext(r.Context())
+			identity := access.IdentityFromContext(r.Context())
+
+			if auth != nil || len(identity) > 0 { // already authorized or at least authenticated?
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			rlog := logger.FromContext(r.Context())
 			if token := r.Header.Get("Authorization"); strings.HasPrefix(token, "AuthToken: ") {
 				// Verify token and set appropriate context
@@ -259,8 +272,7 @@ func (a AuthToken) UpdateMux(router *mux.Router) error {
 			}
 			next.ServeHTTP(w, r)
 		})
-	})
-	return nil
+	}
 }
 
 // generateSalt creates a cryptographically secure random salt
