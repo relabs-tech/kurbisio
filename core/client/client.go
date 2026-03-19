@@ -70,8 +70,9 @@ func (c Client) WithHeader(key string, value string) Client {
 // WithToken adds an authorization token to the request header.
 func NewWithURL(url string) Client {
 	return Client{
-		url:        url,
-		httpClient: &http.Client{Timeout: 20 * time.Second},
+		url:            url,
+		defaultHeaders: map[string]string{},
+		httpClient:     &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
