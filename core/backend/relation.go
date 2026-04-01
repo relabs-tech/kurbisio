@@ -853,7 +853,6 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 					http.Error(w, "parameter '"+key+"': "+err.Error(), http.StatusBadRequest)
 					return
 				}
-			case "children":
 			default:
 				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
 				return
@@ -919,41 +918,17 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			object["companion_download_url"] = downloadURL
 		}
 
-		// do request interceptors
 		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
-		data, err := b.intercept(r.Context(), resource, core.OperationRead, uuid.Nil, selectors, nil, jsonData)
-		if err != nil {
-			nillog.WithError(err).Errorf("Error 4748: interceptor")
-			http.Error(w, "Error 4748", http.StatusInternalServerError)
-			return
-		}
-		if data != nil {
-			jsonData = data
-		}
-
-		// add children if requested
-		for key, array := range urlQuery {
-			switch key {
-			case "nointercept":
-			case "children":
-				if data != nil { // data was changed in interceptor
-					err = json.Unmarshal(jsonData, &object)
-					if err != nil {
-						nillog.WithError(err).Errorf("Error 4749: interceptor")
-						http.Error(w, "Error 4749", http.StatusInternalServerError)
-						return
-					}
-				}
-
-				status, err := b.addChildrenToGetResponse(array, noIntercept, r, object)
-				if err != nil {
-					http.Error(w, err.Error(), status)
-					return
-				}
-				jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
-			default:
-				http.Error(w, "parameter '"+key+"': unknown query parameter", http.StatusBadRequest)
+		// do request interceptors
+		if !noIntercept {
+			data, err := b.intercept(r.Context(), resource, core.OperationRead, uuid.Nil, selectors, nil, jsonData)
+			if err != nil {
+				nillog.WithError(err).Errorf("Error 4748: interceptor")
+				http.Error(w, "Error 4748", http.StatusInternalServerError)
 				return
+			}
+			if data != nil {
+				jsonData = data
 			}
 		}
 

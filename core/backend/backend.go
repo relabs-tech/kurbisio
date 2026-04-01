@@ -598,3 +598,21 @@ func (b *Backend) Config() Configuration {
 func (b *Backend) DidUpdateSchema() bool {
 	return b.updateSchema
 }
+
+func debugQuery(query string, args ...any) string {
+	for r := range args {
+		i := len(args) - r - 1 // start with last parameter in case we have more than $9 in the query
+		var val string
+		switch a := args[i].(type) {
+		case string:
+			val = "'" + strings.ReplaceAll(a, "'", "''") + "'"
+		case time.Time:
+			val = "'" + a.Format(time.RFC3339) + "'"
+		default:
+			val = fmt.Sprintf("%v", a)
+		}
+		// Replace $n with value
+		query = strings.ReplaceAll(query, fmt.Sprintf("$%d", i+1), val)
+	}
+	return query
+}
