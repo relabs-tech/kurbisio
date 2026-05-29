@@ -599,6 +599,7 @@ func (b *Backend) DidUpdateSchema() bool {
 	return b.updateSchema
 }
 
+/*
 func debugQuery(query string, args ...any) string {
 	for r := range args {
 		i := len(args) - r - 1 // start with last parameter in case we have more than $9 in the query
@@ -616,3 +617,4 @@ func debugQuery(query string, args ...any) string {
 	}
 	return query
 }
+*/
