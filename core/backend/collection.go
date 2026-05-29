@@ -178,9 +178,19 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property, property, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+		}
 		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property, property, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+		}
 		columns = append(columns, property)
 		searchableColumns = append(searchableColumns, property)
 	}
