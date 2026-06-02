@@ -169,12 +169,14 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
 		columns = append(columns, property)
 	}
 
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
 		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property, property, property)
@@ -204,6 +206,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"external_index_"+this+"_"+name,
 			schema, resource, name, name, name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, name) // compatibility with schemata <= 4
 		// the log index is not unique
 		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"external_index_"+this+"_"+name,
