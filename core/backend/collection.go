@@ -181,17 +181,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property, property, property)
 		if len(majorSearchColumns) > 0 {
-			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s);",
 				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
-				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+				schema, resource, property, strings.Join(majorSearchColumns, ","))
 		}
 		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property, property, property)
 		if len(majorSearchColumns) > 0 {
-			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s);",
 				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
-				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+				schema, resource, property, strings.Join(majorSearchColumns, ","))
 		}
 		columns = append(columns, property)
 		searchableColumns = append(searchableColumns, property)
@@ -203,14 +203,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, name)
+		createIndicesQuery += fmt.Sprintf("DROP index IF EXISTS %s;", "external_index_"+this+"_"+name)
 		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
-			"external_index_"+this+"_"+name,
+			"unique_property_"+this+"_"+name,
 			schema, resource, name, name, name)
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, name) // compatibility with schemata <= 4
 		// the log index is not unique
-		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
-			"external_index_"+this+"_"+name,
-			schema, resource, name, name, name)
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			"unique_property_"+this+"_"+name,
+			schema, resource, name)
 		columns = append(columns, name)
 		searchableColumns = append(searchableColumns, name)
 	}
