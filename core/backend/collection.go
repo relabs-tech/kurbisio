@@ -177,17 +177,17 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	for _, property := range rc.SearchableProperties {
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
 		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
-		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
-			schema, resource, property, property, property)
+			schema, resource, property)
 		if len(majorSearchColumns) > 0 {
 			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s);",
 				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
 				schema, resource, property, strings.Join(majorSearchColumns, ","))
 		}
-		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
 			"searchable_property_"+this+"_"+property,
-			schema, resource, property, property, property)
+			schema, resource, property)
 		if len(majorSearchColumns) > 0 {
 			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s);",
 				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
