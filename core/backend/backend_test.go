@@ -245,12 +245,6 @@ type A struct {
 func ptrString(s string) *string {
 	return &s
 }
-func saveString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 func TestCollectionA(t *testing.T) {
 	testService := CreateTestService(configurationJSON, t.Name())
 	defer testService.Db.Close()
