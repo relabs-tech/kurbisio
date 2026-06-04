@@ -197,8 +197,6 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		searchableColumns = append(searchableColumns, property)
 	}
 
-	propertiesEndIndex := len(columns) // where properties end
-
 	// an external index is a unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
@@ -215,6 +213,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		columns = append(columns, name)
 		searchableColumns = append(searchableColumns, name)
 	}
+
+	propertiesEndIndex := len(columns) // where properties end
 
 	// the "device" collection gets an additional UUID column for the web token
 	if this == "device" {
@@ -2212,7 +2212,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
-			if !ok {
+			if !ok && i < staticPropertiesIndex { // static properties and external indices are non mandatory, we can update them to null
 				tx.Rollback()
 				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
 				return

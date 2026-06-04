@@ -54,6 +54,8 @@ func createTestServiceInternal(config, schemaName string, clearSchema bool) *Tes
 		DB:                   s.Db,
 		Router:               s.Router,
 		AuthorizationEnabled: true,
+		JSONSchemas:          []string{schemaWorkoutString},
+		JSONSchemasRefs:      []string{schemaRefString},
 		UpdateSchema:         true,
 		KssConfiguration: kss.Configuration{
 			DriverType: kss.DriverTypeLocal,

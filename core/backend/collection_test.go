@@ -242,6 +242,21 @@ func TestCollectionExternalID(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, status, err)
 }
 
+func TestCollectionOptionalSearchableProperty(t *testing.T) {
+	a := A{}
+	// point here is that we do not set a value for the optional searchable property, and yet
+	// we can do an upsert using put
+	_, err := testService.client.RawPost("/as", a, &a)
+	assert.Nil(t, err)
+	a.Foo = "updated"
+	var result A
+	_, err = testService.client.RawPut("/as/"+a.AID.String(), a, &result)
+	assert.Nil(t, err)
+	assert.Equal(t, a.Foo, result.Foo)
+	_, err = testService.client.RawDelete("/as/" + result.AID.String())
+	assert.Nil(t, err)
+}
+
 func TestCollectionWithSchemaValidation(t *testing.T) {
 	type withSchema struct {
 		WithSchemaID uuid.UUID `json:"with_schema_id"`
@@ -734,6 +749,9 @@ func TestPatch(t *testing.T) {
 }
 
 func TestCursorPaginationCollection(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Clear any existing data
 	_, err := testService.client.RawDelete("/as")
 	if err != nil {
@@ -798,6 +816,9 @@ func TestCursorPaginationCollection(t *testing.T) {
 }
 
 func TestCursorPaginationMutualExclusion(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Test that page and next_token are mutually exclusive
 	cursor := backend.PaginationCursor{
 		Timestamp: time.Now().UTC(),
@@ -814,6 +835,9 @@ func TestCursorPaginationMutualExclusion(t *testing.T) {
 }
 
 func TestCursorPaginationInvalidToken(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Test invalid cursor format
 	path := "/as?next_token=invalid_token"
 	var as []A
@@ -825,6 +849,9 @@ func TestCursorPaginationInvalidToken(t *testing.T) {
 }
 
 func TestCursorPaginationCollectionWithOrdering(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Clear any existing data
 	_, err := testService.client.RawDelete("/as")
 	if err != nil {
@@ -953,6 +980,9 @@ func TestCursorPaginationCollectionWithOrdering(t *testing.T) {
 }
 
 func TestCursorPaginationCollectionEmptyCollection(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Clear any existing data
 	_, err := testService.client.RawDelete("/as")
 	if err != nil {
@@ -972,6 +1002,9 @@ func TestCursorPaginationCollectionEmptyCollection(t *testing.T) {
 }
 
 func TestCursorPaginationCollectionWithTimeFiltering(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Clear any existing data
 	_, err := testService.client.RawDelete("/as")
 	if err != nil {
@@ -1029,6 +1062,9 @@ func TestCursorPaginationCollectionWithTimeFiltering(t *testing.T) {
 }
 
 func TestCursorPaginationWithDeletionAndReplacement(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Clear any existing data
 	_, err := testService.client.RawDelete("/as")
 	if err != nil {
@@ -1055,7 +1091,7 @@ func TestCursorPaginationWithDeletionAndReplacement(t *testing.T) {
 
 	// Test with ascending order
 	t.Run("ascending_order", func(t *testing.T) {
-		testCursorPaginationWithDeletionAndReplacementHelper(t, "asc", initialElements, "asc")
+		testCursorPaginationWithDeletionAndReplacementHelper(t, testService, "asc", initialElements, "asc")
 
 		// Clean up after ascending test
 		_, err = testService.client.RawDelete("/as")
@@ -1079,12 +1115,12 @@ func TestCursorPaginationWithDeletionAndReplacement(t *testing.T) {
 
 	// Test with descending order
 	t.Run("descending_order", func(t *testing.T) {
-		testCursorPaginationWithDeletionAndReplacementHelper(t, "desc", initialElements, "desc")
+		testCursorPaginationWithDeletionAndReplacementHelper(t, testService, "desc", initialElements, "desc")
 	})
 
 }
 
-func testCursorPaginationWithDeletionAndReplacementHelper(t *testing.T, order string, initialElements []A, testPrefix string) {
+func testCursorPaginationWithDeletionAndReplacementHelper(t *testing.T, testService *TestService, order string, initialElements []A, testPrefix string) {
 	limit := 10
 	var allFetchedElements []A
 	var nextToken string
@@ -1306,10 +1342,10 @@ func TestClearWithMultipleFilters(t *testing.T) {
 
 	// Create test data
 	testData := []A{
-		{ExternalID: "ext_1", SearchableProp: "search_a", OtherSearchableProp: "other_a", Foo: "foo_1"},
-		{ExternalID: "ext_2", SearchableProp: "search_a", OtherSearchableProp: "other_b", Foo: "foo_1"},
-		{ExternalID: "ext_3", SearchableProp: "search_b", OtherSearchableProp: "other_a", Foo: "foo_2"},
-		{ExternalID: "ext_4", SearchableProp: "search_b", OtherSearchableProp: "other_b", Foo: "foo_2"},
+		{ExternalID: "ext_1", SearchableProp: "search_a", OptionalSearchableProp: ptrString("other_a"), Foo: "foo_1"},
+		{ExternalID: "ext_2", SearchableProp: "search_a", OptionalSearchableProp: ptrString("other_b"), Foo: "foo_1"},
+		{ExternalID: "ext_3", SearchableProp: "search_b", OptionalSearchableProp: ptrString("other_a"), Foo: "foo_2"},
+		{ExternalID: "ext_4", SearchableProp: "search_b", OptionalSearchableProp: ptrString("other_b"), Foo: "foo_2"},
 	}
 
 	for _, a := range testData {
@@ -1682,7 +1718,7 @@ func TestListWithMultipleSearchFiltersInterceptor(t *testing.T) {
 
 	// Create test data
 	testData := []A{
-		{ExternalID: "ext_1", SearchableProp: "value_a", OtherSearchableProp: "other_a"},
+		{ExternalID: "ext_1", SearchableProp: "value_a", OptionalSearchableProp: ptrString("other_a")},
 	}
 
 	for _, a := range testData {
