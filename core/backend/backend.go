@@ -42,7 +42,7 @@ var ConfigSchemaJSON string
 
 // InternalDatabaseSchemaVersion is a sequential versioning number of the database schema.
 // If it increases, the backend will try to update the schema.
-const InternalDatabaseSchemaVersion = 5
+const InternalDatabaseSchemaVersion = 6
 
 // Backend is the generic rest backend
 type Backend struct {

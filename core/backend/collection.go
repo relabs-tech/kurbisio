@@ -144,8 +144,48 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
+
 	// query to create all indices after the table creation
-	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
+	var createIndicesQuery string
+
+	if singleton {
+		// singletons do not have a primary id, hence we missed the main index.
+		// the code here creates a unique index and at the same time handles
+		// migration by deduplicating existing entries if there are any
+		singletonIndexName := "uq_" + this + "_" + owner + "_id"
+		singletonIndex := fmt.Sprintf(
+			`DO $$
+BEGIN
+  BEGIN
+    EXECUTE '
+      CREATE UNIQUE INDEX IF NOT EXISTS %s
+      ON %s."%s"(%s_id)
+    ';
+  EXCEPTION
+    WHEN unique_violation THEN
+      DELETE FROM %s."%s" a
+      USING %s."%s" b
+      WHERE a.%s_id = b.%s_id
+        AND a.ctid > b.ctid;
+      EXECUTE '
+        CREATE UNIQUE INDEX IF NOT EXISTS %s
+        ON %s."%s"(%s_id)
+      ';
+  END;
+END
+$$;`,
+			singletonIndexName,
+			schema, resource, owner,
+			schema, resource,
+			schema, resource,
+			owner, owner,
+			singletonIndexName,
+			schema, resource, owner)
+
+		createIndicesQuery += singletonIndex
+	}
+
+	createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
 		"sort_index_"+this+"_timestamp",
 		schema, resource)
 
