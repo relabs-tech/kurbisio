@@ -43,7 +43,7 @@ var configurationJSON string = `{
 		"resource": "a",
 		"external_index": "external_id",
 		"static_properties": ["static_prop"],
-		"searchable_properties": ["searchable_prop", "other_searchable_prop"]
+		"searchable_properties": ["searchable_prop", "optional_searchable_prop"]
 	  },
 	  {
 		"resource": "b",
@@ -233,24 +233,29 @@ func TestMain(m *testing.M) {
 }
 
 type A struct {
-	AID                 uuid.UUID `json:"a_id"`
-	ExternalID          string    `json:"external_id"`
-	StaticProp          string    `json:"static_prop"`
-	SearchableProp      string    `json:"searchable_prop"`
-	OtherSearchableProp string    `json:"other_searchable_prop"`
-	Timestamp           time.Time `json:"timestamp"`
-	Foo                 string    `json:"foo"`
+	AID                    uuid.UUID `json:"a_id"`
+	ExternalID             string    `json:"external_id"`
+	StaticProp             string    `json:"static_prop"`
+	SearchableProp         string    `json:"searchable_prop"`
+	OptionalSearchableProp *string   `json:"optional_searchable_prop,omitempty"`
+	Timestamp              time.Time `json:"timestamp"`
+	Foo                    string    `json:"foo"`
 }
 
+func ptrString(s string) *string {
+	return &s
+}
 func TestCollectionA(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
 
 	aNew := A{
-		Foo:                 "bar",
-		ExternalID:          "external",
-		StaticProp:          "static",
-		SearchableProp:      "searchable",
-		OtherSearchableProp: "other",
-		Timestamp:           time.Now().UTC().Round(time.Millisecond), // round to postgres precision
+		Foo:                    "bar",
+		ExternalID:             "external",
+		StaticProp:             "static",
+		SearchableProp:         "searchable",
+		OptionalSearchableProp: ptrString("optional"),
+		Timestamp:              time.Now().UTC().Round(time.Millisecond), // round to postgres precision
 	}
 
 	a := A{}
@@ -339,7 +344,7 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("unexpected number of items in collection, expected only 2:", asJSON(collectionResult))
 	}
 
-	// we now search for the searachable property and should only find our single item a
+	// we now search for the searchable property and should only find our single item a
 	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable", &collectionResult)
 	if err != nil {
 		t.Fatal(err)
@@ -351,8 +356,8 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("wrong item in collection:", asJSON(collectionResult))
 	}
 
-	// we now search for the searachable property with secondary filter and should find nothing
-	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=other_searchable_prop=fail", &collectionResult)
+	// we now search for the searchable property with secondary filter and should find nothing
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=optional_searchable_prop=fail", &collectionResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,8 +365,8 @@ func TestCollectionA(t *testing.T) {
 		t.Fatal("unexpected number of items in collection, expected only 0:", asJSON(collectionResult))
 	}
 
-	// we now search for the searachable property with correct secondary filter and should only find our single item a
-	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=other_searchable_prop=other", &collectionResult)
+	// we now search for the searchable property with correct secondary filter and should only find our single item a
+	_, err = testService.client.RawGet("/as?filter=searchable_prop=searchable&filter=optional_searchable_prop=optional", &collectionResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1314,6 +1319,9 @@ func TestResourceDefaults(t *testing.T) {
 }
 
 func TestPaginationCollection(t *testing.T) {
+	testService := CreateTestService(configurationJSON, t.Name())
+	defer testService.Db.Close()
+
 	// Populate the DB with elements created at two timestamps
 	numberOfElements := 210
 	timestampFirst50 := time.Now().UTC().Round(time.Millisecond)

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"slices"
@@ -146,39 +147,53 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 	staticPropertiesIndex := len(columns) // where static properties start
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
 		columns = append(columns, property)
 	}
 
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
-		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
+		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
-			schema, resource, property)
-		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
+			schema, resource, property, property, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+		}
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
 			"searchable_property_"+this+"_"+property,
-			schema, resource, property)
+			schema, resource, property, property, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s) WHERE %s IS NOT NULL AND %s <> '';",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","), property, property)
+		}
 		columns = append(columns, property)
 		searchableColumns = append(searchableColumns, property)
 	}
 
-	propertiesEndIndex := len(columns) // where properties end
-
 	// an external index is a unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
-		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
-			"external_index_"+this+"_"+name,
-			schema, resource, name, name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, name) // compatibility with schemata <= 4
+		createIndicesQuery += fmt.Sprintf("DROP index IF EXISTS %s;", "external_index_"+this+"_"+name)
+		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
+			"unique_property_"+this+"_"+name,
+			schema, resource, name, name, name)
 		// the log index is not unique
-		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
-			"external_index_"+this+"_"+name,
-			schema, resource, name)
+		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
+			"unique_property_"+this+"_"+name,
+			schema, resource, name, name, name)
 		columns = append(columns, name)
 		searchableColumns = append(searchableColumns, name)
 	}
+
+	propertiesEndIndex := len(columns) // where properties end
 
 	// the "device" collection gets an additional UUID column for the web token
 	if this == "device" {
@@ -302,9 +317,9 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		i++
 
 		for ; i < len(columns); i++ {
-			str := ""
-			values[i] = &str
-			object[columns[i]] = values[i]
+			nullStr := &sql.NullString{}
+			values[i] = nullStr
+			object[columns[i]] = nullStr
 
 		}
 
@@ -315,6 +330,20 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		object["revision"] = revision
 		values = append(values, extra...)
 		return values, object
+	}
+
+	normalizeNullableStrings := func(object map[string]interface{}) {
+		for key, value := range object {
+			nullStr, ok := value.(*sql.NullString)
+			if !ok {
+				continue
+			}
+			if nullStr.Valid {
+				object[key] = nullStr.String
+			} else {
+				object[key] = nil
+			}
+		}
 	}
 
 	createScanValuesAndObjectMeta := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
@@ -726,6 +755,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 					object["companion_download_url"] = uploadURL
 				}
 
+				normalizeNullableStrings(object)
 				mergeProperties(object)
 				// apply defaults if applicable
 				if rc.Default != nil {
@@ -888,6 +918,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			http.Error(w, "Error 4727", status)
 			return
 		}
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 
 		// apply defaults if applicable
@@ -1120,6 +1151,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			}
 		}
 
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 
@@ -1542,7 +1574,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
 			if !ok {
-				value = ""
+				value = nil
 			}
 			values[i] = value
 		}
@@ -1636,6 +1668,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			}
 		}
 
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 		jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 
@@ -1788,6 +1821,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		if revision >= 0 && revision != currentRevision {
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
+			normalizeNullableStrings(object)
 			mergeProperties(object)
 			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1840,6 +1874,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 		if revision >= 0 && revision != currentRevision {
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
+			normalizeNullableStrings(object)
 			mergeProperties(object)
 			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1847,6 +1882,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			w.Write(jsonData)
 			return
 		}
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 
 		// for MethodPatch we get the existing object from the database and patch property by property
@@ -1970,7 +2006,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
-			if !ok {
+			if !ok && i < staticPropertiesIndex { // static properties and external indices are non mandatory, we can update them to null
 				tx.Rollback()
 				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
 				return
@@ -2014,6 +2050,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			http.Error(w, "Error 4740", http.StatusInternalServerError)
 			return
 		}
+		normalizeNullableStrings(response)
 		mergeProperties(response)
 		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 

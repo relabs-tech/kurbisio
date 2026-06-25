@@ -9,6 +9,7 @@ package backend
 import (
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"slices"
@@ -143,8 +144,48 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	}
 
 	createColumns = append(createColumns, "properties json NOT NULL DEFAULT '{}'::jsonb")
+
 	// query to create all indices after the table creation
-	createIndicesQuery := fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
+	var createIndicesQuery string
+
+	if singleton {
+		// singletons do not have a primary id, hence we missed the main index.
+		// the code here creates a unique index and at the same time handles
+		// migration by deduplicating existing entries if there are any
+		singletonIndexName := "uq_" + this + "_" + owner + "_id"
+		singletonIndex := fmt.Sprintf(
+			`DO $$
+BEGIN
+  BEGIN
+    EXECUTE '
+      CREATE UNIQUE INDEX IF NOT EXISTS %s
+      ON %s."%s"(%s_id)
+    ';
+  EXCEPTION
+    WHEN unique_violation THEN
+      DELETE FROM %s."%s" a
+      USING %s."%s" b
+      WHERE a.%s_id = b.%s_id
+        AND a.ctid > b.ctid;
+      EXECUTE '
+        CREATE UNIQUE INDEX IF NOT EXISTS %s
+        ON %s."%s"(%s_id)
+      ';
+  END;
+END
+$$;`,
+			singletonIndexName,
+			schema, resource, owner,
+			schema, resource,
+			schema, resource,
+			owner, owner,
+			singletonIndexName,
+			schema, resource, owner)
+
+		createIndicesQuery += singletonIndex
+	}
+
+	createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(timestamp);",
 		"sort_index_"+this+"_timestamp",
 		schema, resource)
 
@@ -167,39 +208,53 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 	staticPropertiesIndex := len(columns) // where static properties start
 	// static properties are varchars
 	for _, property := range rc.StaticProperties {
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
 		columns = append(columns, property)
 	}
 
 	// static searchable properties are varchars with a non-unique index
 	for _, property := range rc.SearchableProperties {
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, property)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, property) // compatibility with schemata <= 4
 		createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQuery += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s\"(%s,%s);",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","))
+		}
 		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
 			"searchable_property_"+this+"_"+property,
 			schema, resource, property)
+		if len(majorSearchColumns) > 0 {
+			createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s,%s);",
+				"searchable_property_"+this+"_"+property+"_"+strings.Join(majorSearchColumns, "_"),
+				schema, resource, property, strings.Join(majorSearchColumns, ","))
+		}
 		columns = append(columns, property)
 		searchableColumns = append(searchableColumns, property)
 	}
 
-	propertiesEndIndex := len(columns) // where properties end
-
 	// an external index is a unique varchar property.
 	if len(rc.ExternalIndex) > 0 {
 		name := rc.ExternalIndex
-		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar NOT NULL DEFAULT '';", schema, resource, name)
-		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s <> '';",
-			"external_index_"+this+"_"+name,
-			schema, resource, name, name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ADD COLUMN IF NOT EXISTS \"%s\" varchar DEFAULT NULL;", schema, resource, name)
+		createIndicesQuery += fmt.Sprintf("DROP index IF EXISTS %s;", "external_index_"+this+"_"+name)
+		createIndicesQuery += fmt.Sprintf("CREATE UNIQUE index IF NOT EXISTS %s ON %s.\"%s\"(%s) WHERE %s IS NOT NULL AND %s <> '';",
+			"unique_property_"+this+"_"+name,
+			schema, resource, name, name, name)
+		createPropertiesQuery += fmt.Sprintf("ALTER TABLE %s.\"%s\" ALTER COLUMN \"%s\" DROP NOT NULL;", schema, resource, name) // compatibility with schemata <= 4
 		// the log index is not unique
 		createIndicesQueryLog += fmt.Sprintf("CREATE index IF NOT EXISTS %s ON %s.\"%s/log\"(%s);",
-			"external_index_"+this+"_"+name,
+			"unique_property_"+this+"_"+name,
 			schema, resource, name)
 		columns = append(columns, name)
 		searchableColumns = append(searchableColumns, name)
 	}
+
+	propertiesEndIndex := len(columns) // where properties end
 
 	// the "device" collection gets an additional UUID column for the web token
 	if this == "device" {
@@ -330,9 +385,9 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		i++
 
 		for ; i < len(columns); i++ {
-			str := ""
-			values[i] = &str
-			object[columns[i]] = values[i]
+			nullStr := &sql.NullString{}
+			values[i] = nullStr
+			object[columns[i]] = nullStr
 
 		}
 
@@ -343,6 +398,20 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		object["revision"] = revision
 		values = append(values, extra...)
 		return values, object
+	}
+
+	normalizeNullableStrings := func(object map[string]interface{}) {
+		for key, value := range object {
+			nullStr, ok := value.(*sql.NullString)
+			if !ok {
+				continue
+			}
+			if nullStr.Valid {
+				object[key] = nullStr.String
+			} else {
+				object[key] = nil
+			}
+		}
 	}
 
 	createScanValuesAndObjectMeta := func(timestamp *time.Time, revision *int, extra ...interface{}) ([]interface{}, map[string]interface{}) {
@@ -651,6 +720,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			lastTimestamp = timestamp
 			lastID = *values[0].(*uuid.UUID) // First value is always the ID
 			if !metaonly {
+				normalizeNullableStrings(object)
 				var uploadURL string
 				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
 					var key string
@@ -939,6 +1009,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			rowCount++
 
 			if !metaonly {
+				normalizeNullableStrings(object)
 				var uploadURL string
 				if rc.WithCompanionFile && withCompanionUrls && b.KssDriver != nil {
 					var key string
@@ -1131,6 +1202,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			http.Error(w, "Error 4727", status)
 			return
 		}
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 
 		// apply defaults if applicable
@@ -1402,6 +1474,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 		jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 
@@ -1787,7 +1860,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
 			if !ok {
-				value = ""
+				value = nil
 			}
 			values[i] = value
 		}
@@ -1881,6 +1954,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 		jsonData, _ = json.MarshalWithOption(object, json.DisableHTMLEscape())
 
@@ -2003,6 +2077,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 		if revision >= 0 && revision != currentRevision {
 			tx.Rollback()
 			// revision does not match, return conflict status with the conflicting object
+			normalizeNullableStrings(object)
 			mergeProperties(object)
 			jsonData, _ := json.MarshalWithOption(object, json.DisableHTMLEscape())
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -2054,6 +2129,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
+		normalizeNullableStrings(object)
 		mergeProperties(object)
 
 		primaryUUID := *current[0].(*uuid.UUID)
@@ -2176,7 +2252,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 
 		for ; i < len(columns); i++ {
 			value, ok := bodyJSON[columns[i]]
-			if !ok {
+			if !ok && i < staticPropertiesIndex { // static properties and external indices are non mandatory, we can update them to null
 				tx.Rollback()
 				http.Error(w, "missing property or index "+columns[i], http.StatusBadRequest)
 				return
@@ -2220,6 +2296,7 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			http.Error(w, "Error 4740", http.StatusInternalServerError)
 			return
 		}
+		normalizeNullableStrings(response)
 		mergeProperties(response)
 		jsonData, _ = json.MarshalWithOption(response, json.DisableHTMLEscape())
 
