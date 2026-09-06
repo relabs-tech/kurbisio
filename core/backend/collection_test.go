@@ -1248,7 +1248,7 @@ func TestClearWithFilters(t *testing.T) {
 	"shortcuts": []
   }
 `
-	testService := CreateTestService(jsonConfig, t.Name())
+	testService := CreateTestService(jsonConfig, "_test_"+t.Name())
 	defer testService.Db.Close()
 
 	// Create test data with various properties

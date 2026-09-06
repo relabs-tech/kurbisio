@@ -34,7 +34,6 @@ import (
 	"github.com/relabs-tech/kurbisio/core/csql"
 
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
 )
 
 var configurationJSON string = `{
@@ -205,7 +204,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_backend_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_backend_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

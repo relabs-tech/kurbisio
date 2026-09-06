@@ -7,7 +7,6 @@
 package access
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
@@ -140,7 +140,6 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				tokenString = cookie.Value
 			}
 			if len(tokenString) == 0 {
-				fmt.Printf("--------- Bearer: '%s'\n", bearer)
 				h.ServeHTTP(w, r) // no token no auth, moving on
 				return
 			}
@@ -186,16 +185,18 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 				var authID uuid.UUID
 				var properties json.RawMessage
-				err = jmb.DB.QueryRow(authQuery, identity).Scan(&authID, &properties)
+				err = jmb.DB.QueryRow(r.Context(), authQuery, identity).Scan(&authID, &properties)
 
-				if err != nil && err != sql.ErrNoRows {
+				if err != nil && err != pgx.ErrNoRows {
 					rlog.WithError(err).Errorf("Error 4723: cannot execute authorization query `%s`", authQuery)
 					http.Error(w, "Error 4723", http.StatusInternalServerError)
 					return
 				}
 				if err == nil {
 					auth = &Authorization{}
-					json.Unmarshal(properties, auth)
+					if err := json.Unmarshal(properties, auth); err != nil {
+						rlog.WithError(err).Warn("invalid authorization properties JSON")
+					}
 					authCache.Write(tokenString, auth)
 				}
 			}
@@ -310,7 +311,6 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				tokenString = cookie.Value
 			}
 			if len(tokenString) == 0 {
-				fmt.Printf("--------- Bearer: '%s'\n", bearer)
 				h.ServeHTTP(w, r) // no token no auth, moving on
 				return
 			}
@@ -367,22 +367,22 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			var authID uuid.UUID
 			var email string
 			var properties json.RawMessage
-			err = jmb.DB.QueryRow(authQuery, identity).Scan(&authID, &email, &properties)
+			err = jmb.DB.QueryRow(r.Context(), authQuery, identity).Scan(&authID, &email, &properties)
 
-			if err != nil && err != sql.ErrNoRows {
-				if err != sql.ErrNoRows {
+			if err != nil && err != pgx.ErrNoRows {
+				if err != pgx.ErrNoRows {
 					rlog.WithError(err).Errorf("Error 4723: cannot execute authorization query `%s`", authQuery)
 					http.Error(w, "Error 4723", http.StatusInternalServerError)
 					return
 				}
 			}
 
-			if err == sql.ErrNoRows && emailIdentity != "" {
+			if err == pgx.ErrNoRows && emailIdentity != "" {
 				// compatibility, maybe we find the account by email?
-				err = jmb.DB.QueryRow(authQuery, emailIdentity).Scan(&authID, &email, &properties)
+				err = jmb.DB.QueryRow(r.Context(), authQuery, emailIdentity).Scan(&authID, &email, &properties)
 
-				if err != nil && err != sql.ErrNoRows {
-					if err != sql.ErrNoRows {
+				if err != nil && err != pgx.ErrNoRows {
+					if err != pgx.ErrNoRows {
 						rlog.WithError(err).Errorf("Error 4723: cannot execute authorization query `%s`", authQuery)
 						http.Error(w, "Error 4723", http.StatusInternalServerError)
 						return
@@ -395,13 +395,15 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				return
 			}
 			auth = &Authorization{}
-			json.Unmarshal(properties, auth)
+			if err := json.Unmarshal(properties, auth); err != nil {
+				rlog.WithError(err).Warn("invalid authorization properties JSON")
+			}
 			authCache.Write(tokenString, auth)
 
 			// update identity and email in database if necessary
 			if emailIdentity != "" && emailIdentity != email {
 				query := fmt.Sprintf("UPDATE %s.account SET identity=$2, email=$3 WHERE account_id=$1 RETURNING account_id;", jmb.DB.Schema)
-				err = jmb.DB.QueryRow(query, authID, identity, emailIdentity).Scan(&authID)
+				err = jmb.DB.QueryRow(r.Context(), query, authID, identity, emailIdentity).Scan(&authID)
 				if err != nil {
 					rlog.WithError(err).Errorf("Error 4924: cannot execute update account query `%s`", query)
 					http.Error(w, "Error 4924", http.StatusInternalServerError)

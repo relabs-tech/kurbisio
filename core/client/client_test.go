@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/joeshaw/envdecode"
-	_ "github.com/lib/pq"
 	"github.com/relabs-tech/kurbisio/core/backend"
 	"github.com/relabs-tech/kurbisio/core/client"
 	"github.com/relabs-tech/kurbisio/core/csql"
@@ -88,7 +87,7 @@ func TestClient_Page_From(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -151,12 +150,9 @@ func TestClient_Page_From(t *testing.T) {
 	}
 }
 
-// use POSTGRES="host=localhost port=5432 user=postgres dbname=postgres sslmode=disable"
-// and POSTRGRES_PASSWORD="docker"
 type TestService struct {
-	Postgres         string `env:"POSTGRES,required" description:"the connection string for the Postgres DB without password"`
-	PostgresPassword string `env:"POSTGRES_PASSWORD,optional" description:"password to the Postgres DB"`
-	backend          *backend.Backend
+	csql.DBConfig
+	backend *backend.Backend
 }
 
 var testService TestService
@@ -166,7 +162,7 @@ func TestUpsert(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -224,7 +220,7 @@ func TestClient_limit(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 
@@ -279,7 +275,7 @@ func TestClientCursorPaginationSameTimestamps(t *testing.T) {
 		panic(err)
 	}
 
-	db := csql.OpenWithSchema(testService.Postgres, testService.PostgresPassword, "_client_unit_test_")
+	db := csql.OpenWithSchema(testService.PostgresConfigString(), "_test_client_unit_test_")
 	defer db.Close()
 	db.ClearSchema()
 

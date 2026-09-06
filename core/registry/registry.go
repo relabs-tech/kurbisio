@@ -12,6 +12,7 @@ The package uses JSON to serialize the data.
 package registry
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 
 // New creates a new registry for the specified database
 func New(db *csql.DB) Registry {
-	_, err := db.Exec(`CREATE table IF NOT EXISTS ` + db.Schema + `."_registry_" 
+	_, err := db.Exec(context.Background(), `CREATE table IF NOT EXISTS `+db.Schema+`."_registry_"
 (key varchar NOT NULL, 
 value json NOT NULL, 
 timestamp timestamp NOT NULL, 
@@ -69,6 +70,7 @@ func (r Accessor) Read(key string, value interface{}) (time.Time, error) {
 	}
 
 	err := r.Registry.db.QueryRow(
+		context.Background(),
 		`SELECT value, timestamp FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
 		key).Scan(&rawValue, &timestamp)
 	if err == csql.ErrNoRows {
@@ -96,6 +98,7 @@ func (r Accessor) Write(key string, value interface{}) error {
 	}
 	now := time.Now().UTC()
 	res, err := r.Registry.db.Exec(
+		context.Background(),
 		`INSERT INTO `+r.Registry.db.Schema+`."_registry_"(key,value,timestamp)
 VALUES($1,$2,$3)
 ON CONFLICT (key) DO UPDATE SET value=$2,timestamp=$3;`,
@@ -104,10 +107,7 @@ ON CONFLICT (key) DO UPDATE SET value=$2,timestamp=$3;`,
 	if err != nil {
 		return err
 	}
-	count, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
+	count := res.RowsAffected()
 	if count == 0 {
 		return fmt.Errorf("could not write key %s", key)
 	}
@@ -124,6 +124,7 @@ func (r Accessor) Delete(key string) error {
 		key = r.Prefix + ":" + key
 	}
 	_, err := r.Registry.db.Exec(
+		context.Background(),
 		`DELETE FROM `+r.Registry.db.Schema+`."_registry_" WHERE key=$1;`,
 		key)
 
