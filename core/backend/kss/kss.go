@@ -83,6 +83,26 @@ type S3Configuration struct {
 
 	// SQSNotificationQueue defines the queue to listen to get event notification
 	SQSNotificationQueue string
+
+	// EndpointURL overrides the S3 endpoint, e.g. "http://localhost:9000" for MinIO.
+	// It also serves as the SQS endpoint unless SQSEndpointURL is set. Empty means use real AWS.
+	EndpointURL string
+
+	// SQSEndpointURL overrides the SQS endpoint, e.g. "http://localhost:9324" for ElasticMQ.
+	SQSEndpointURL string
+
+	// UsePathStyle enables path-style S3 addressing (required for MinIO).
+	UsePathStyle bool
+
+	// AutoCreateBucket creates the S3 bucket and SQS queue on startup if they do not
+	// already exist. Useful for local development. Defaults to false to
+	// avoid accidental resource creation against real AWS.
+	AutoCreateBucket bool
+
+	// SkipBucketNotifications skips automatic S3-to-SQS notification and queue policy
+	// configuration when AutoCreateBucket is enabled. Use this with MinIO and ElasticMQ,
+	// which require an external notification bridge or explicitly published SQS events.
+	SkipBucketNotifications bool
 }
 
 // S3Credentials contains S3 Credentials
