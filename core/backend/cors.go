@@ -16,14 +16,19 @@ func CORS(allowedOrigins ...string) func(http.Handler) http.Handler {
 	}
 	return handlers.CORS(
 		handlers.ExposedHeaders([]string{
-			"Access-Control-Allow-Origin",
-			"Access-Control-Allow-Methods",
 			"Access-Control-Allow-Headers",
+			"Access-Control-Allow-Methods",
+			"Access-Control-Allow-Origin",
 			"Access-Control-Expose-Headers",
 			"Access-Control-Max-Age",
 			"ETag",
 			"If-None-Match",
 			"Kurbisio-Content-Encoding",
+			"Pagination-Limit",
+			"Pagination-Next-Token",
+			"X-RateLimit-Limit",
+			"X-RateLimit-Remaining",
+			"X-RateLimit-Reset",
 		}),
 		handlers.AllowedOriginValidator(func(o string) bool {
 			if len(allowedOriginsMap) == 0 {
