@@ -231,3 +231,83 @@ func TestCORS_DisallowedOriginHeaders(t *testing.T) {
 	assert.NotEqual(t, "https://malicious.com", rec.Header().Get("Access-Control-Allow-Origin"),
 		"Malicious origin should not be allowed")
 }
+
+func TestCORS_RejectedPreflightWritesForbidden(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			called := false
+			handler := CORS("https://example.com")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+			req.Header.Set("Origin", "https://unapproved.example")
+			req.Header.Set("Access-Control-Request-Method", method)
+			req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusForbidden, rec.Code)
+			assert.Empty(t, rec.Body.String())
+			assert.False(t, called, "rejected preflights must not invoke the downstream handler")
+			for _, name := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Allow-Credentials"} {
+				assert.Empty(t, rec.Header().Get(name), "rejected preflight grants access through %s", name)
+			}
+		})
+	}
+}
+
+func TestCORS_PreflightOriginRules(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		origins []string
+		origin  string
+	}{
+		{"approved", []string{"https://example.com"}, "https://example.com"},
+		{"localhost", []string{"https://example.com"}, "http://localhost:3005"},
+		{"loopback", []string{"https://example.com"}, "http://127.0.0.1:3005"},
+		{"no allowlist", nil, "https://other.example"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			handler := CORS(test.origins...)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			}))
+			req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+			req.Header.Set("Origin", test.origin)
+			req.Header.Set("Access-Control-Request-Method", http.MethodPut)
+			req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, test.origin, rec.Header().Get("Access-Control-Allow-Origin"))
+			assert.Equal(t, http.MethodPut, rec.Header().Get("Access-Control-Allow-Methods"))
+			assert.Contains(t, rec.Header().Get("Access-Control-Allow-Headers"), "Authorization")
+			assert.Equal(t, "600", rec.Header().Get("Access-Control-Max-Age"))
+			assert.False(t, called)
+		})
+	}
+}
+
+func TestCORS_NoOriginUnchanged(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodOptions} {
+		t.Run(method, func(t *testing.T) {
+			called := false
+			handler := CORS("https://example.com")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(method, "/test", nil))
+			if method == http.MethodGet {
+				assert.True(t, called)
+				assert.Equal(t, http.StatusAccepted, rec.Code)
+			} else {
+				assert.False(t, called)
+				assert.Equal(t, http.StatusOK, rec.Code)
+			}
+			assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+		})
+	}
+}

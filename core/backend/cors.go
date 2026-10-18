@@ -14,7 +14,14 @@ func CORS(allowedOrigins ...string) func(http.Handler) http.Handler {
 	for _, origin := range allowedOrigins {
 		allowedOriginsMap[origin] = true
 	}
-	return handlers.CORS(
+	isOriginAllowed := func(origin string) bool {
+		if len(allowedOriginsMap) == 0 {
+			return true // Allow all origins if no specific allowed origins are provided.
+		}
+		_, ok := allowedOriginsMap[origin]
+		return ok || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1")
+	}
+	cors := handlers.CORS(
 		handlers.ExposedHeaders([]string{
 			"Access-Control-Allow-Headers",
 			"Access-Control-Allow-Methods",
@@ -30,13 +37,7 @@ func CORS(allowedOrigins ...string) func(http.Handler) http.Handler {
 			"X-RateLimit-Remaining",
 			"X-RateLimit-Reset",
 		}),
-		handlers.AllowedOriginValidator(func(o string) bool {
-			if len(allowedOriginsMap) == 0 {
-				return true // Allow all origins if no specific allowed origins are provided
-			}
-			_, ok := allowedOriginsMap[o]
-			return ok || strings.HasPrefix(o, "http://localhost") || strings.HasPrefix(o, "http://127.0.0.1")
-		}),
+		handlers.AllowedOriginValidator(isOriginAllowed),
 		handlers.AllowedMethods([]string{
 			"DELETE",
 			"GET",
@@ -58,4 +59,17 @@ func CORS(allowedOrigins ...string) func(http.Handler) http.Handler {
 		}),
 		handlers.MaxAge(600),
 	)
+	return func(next http.Handler) http.Handler {
+		handler := cors(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if r.Method == http.MethodOptions && origin != "" && !isOriginAllowed(origin) {
+				// Gorilla returns without writing for rejected preflights. Native HTTP
+				// supplies an implicit 200, but Lambda's proxy writer requires a status.
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})
+	}
 }
