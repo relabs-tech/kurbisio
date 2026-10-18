@@ -148,6 +148,9 @@ func (e DynamicAuth) UpdateMux(router *mux.Router) error {
 				}
 			}
 			if hasTargetCollectionAsPrefix {
+				if auth := access.AuthorizationFromContext(r.Context()); auth != nil {
+					r = r.WithContext(access.ContextWithAuthorization(r.Context(), auth.Clone()))
+				}
 				e.addAuth(router, lastResource, targetSelector, r)
 			}
 			h.ServeHTTP(w, r)

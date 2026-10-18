@@ -10,7 +10,9 @@ package access
 
 import (
 	"context"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/goccy/go-json"
@@ -58,6 +60,14 @@ For the benefit of simple frontend development, it also supports a Kurbisio-JWT 
 type Authorization struct {
 	Roles     []string          `json:"roles"`
 	Selectors map[string]string `json:"selectors,omitempty"`
+}
+
+// Clone returns an independent copy, preserving nil fields and nil receivers.
+func (a *Authorization) Clone() *Authorization {
+	if a == nil {
+		return nil
+	}
+	return &Authorization{Roles: slices.Clone(a.Roles), Selectors: maps.Clone(a.Selectors)}
 }
 
 // HasRole returns true if the authorization contains the requested role;
@@ -217,25 +227,21 @@ func NewAuthorizationCache() *AuthorizationCache {
 	return &AuthorizationCache{cache: make(map[string]*Authorization)}
 }
 
-// Read returns an authorization from in-process cache.
+// Read returns an independent copy of the cached authorization.
 // Token should be the temporary token the authorization was derived from, not any of the ids.
 // This function is go-routine safe
 func (a *AuthorizationCache) Read(token string) *Authorization {
 	a.mutex.RLock()
-	auth, ok := a.cache[token]
-	a.mutex.RUnlock()
-	if ok {
-		return auth
-	}
-	return nil
+	defer a.mutex.RUnlock()
+	return a.cache[token].Clone()
 }
 
-// Write stores an authorization in the in-memory cache.
+// Write stores an independent snapshot of the authorization in the in-memory cache.
 // Token should be the temporary token it was derived from, not any of the ids.
 // This function is go-routine safe
 func (a *AuthorizationCache) Write(token string, auth *Authorization) {
 	a.mutex.Lock()
-	a.cache[token] = auth
+	a.cache[token] = auth.Clone()
 	a.mutex.Unlock()
 }
 

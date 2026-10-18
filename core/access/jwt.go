@@ -126,8 +126,6 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				return
 			}
 
-			rlog = logger.FromContext(r.Context())
-
 			tokenString := ""
 			bearer := r.Header.Get("Authorization")
 			if len(bearer) > 0 && bearer != "null" {
@@ -176,7 +174,7 @@ func NewJwtMiddelware(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 
 			// now that we have authenticated the requester, we store their identity in the context
 			ctx := ContextWithIdentity(r.Context(), identity)
-			ctx, rlog = logger.ContextWithLoggerIdentity(ctx, identity)
+			ctx, rlog := logger.ContextWithLoggerIdentity(ctx, identity)
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by identity, so the frontend can enforce a new database lookup with a new token.
@@ -297,8 +295,6 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 				return
 			}
 
-			rlog = logger.FromContext(r.Context())
-
 			tokenString := ""
 			bearer := r.Header.Get("Authorization")
 
@@ -358,7 +354,7 @@ func NewJwtMiddelware2(jmb *JwtMiddlewareBuilder) mux.MiddlewareFunc {
 			if emailIdentity != "" {
 				ctx = ContextWithEmail(ctx, emailIdentity)
 			}
-			ctx, rlog = logger.ContextWithLoggerIdentity(ctx, identity)
+			ctx, rlog := logger.ContextWithLoggerIdentity(ctx, identity)
 
 			// look up authorization for the token. We do this by tokenString, and not
 			// by identity, so the frontend can enforce a new database lookup with a new token.

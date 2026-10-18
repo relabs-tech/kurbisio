@@ -12,6 +12,7 @@ import (
 
 type TestService struct {
 	backend *backend.Backend
+	db      *csql.DB
 	client  client.Client
 	close   func() error
 
@@ -61,6 +62,7 @@ func createTestService(config, schemaName string, extensions ...backend.KExtensi
 
 	db := csql.OpenWithSchema(s.PostgresConfigString(), "_test_"+schemaName)
 	db.ClearSchema()
+	s.db = db
 
 	builder := backend.Builder{
 		Config:               config,
