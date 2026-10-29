@@ -199,7 +199,7 @@ func (a AuthToken) UpdateMux(router *mux.Router) error {
 
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprintf(w, `{"token": "%s"}`, metadata.Token)
+			json.NewEncoder(w).Encode(map[string]any{"token": metadata.Token, "token_id": metadata.TokenID})
 		},
 	).Methods("POST")
 	router.Use(authTokenMiddleware(router))

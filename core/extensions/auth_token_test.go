@@ -110,6 +110,9 @@ func TestAuthToken(t *testing.T) {
 	if len(tokens) != 1 {
 		t.Fatalf("Should have been able to list tokens: %v", err)
 	}
+	if res["token_id"] == "" || tokens[0].(map[string]any)["token_id"] != res["token_id"] {
+		t.Fatalf("create_token should return the stored token_id, got %q, stored %v", res["token_id"], tokens[0])
+	}
 	if tokens[0].(map[string]any)["token"] != nil {
 		t.Fatalf("Should not have been able to list tokens: %v", err)
 	}
