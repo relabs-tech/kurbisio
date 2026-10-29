@@ -1857,6 +1857,15 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
 		}
+		// Verify the stored scope before exposing it in a revision conflict.
+		// The lookup key alone does not establish that URL parents own this row.
+		for i := 0; i < propertiesIndex; i++ {
+			if params[columns[i]] != "all" && params[columns[i]] != current[i].(*uuid.UUID).String() {
+				tx.Rollback(context.Background())
+				http.Error(w, "no such "+this, http.StatusNotFound)
+				return
+			}
+		}
 		if revision != 0 && revision != currentRevision {
 			tx.Rollback(context.Background())
 			// revision does not match, return conflict status with the conflicting object

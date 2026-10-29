@@ -200,3 +200,52 @@ func TestRelationAscendingCursorVisitsEveryItemOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestRevisionConflictRequiresMatchingParents(t *testing.T) {
+	f := newSafetyFixture(t)
+	player := f.players[0].PlayerID.String()
+	member := f.teams[0].TeamID.String() + ":" + player
+
+	for _, path := range []string{
+		f.org(1) + "/players/" + player,
+		f.org(1) + "/members/" + member,
+	} {
+		for _, method := range []string{http.MethodPut, http.MethodPatch} {
+			rec := f.do(method, path, `{"name":"changed","revision":999}`)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s under another parent: %d %s", method, path, rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), player) {
+				t.Errorf("%s %s exposed the stored resource: %s", method, path, rec.Body.String())
+			}
+		}
+	}
+
+	// Within the owning parent the conflict still returns the current resource.
+	for _, path := range []string{
+		f.org(0) + "/players/" + player,
+		f.org(0) + "/members/" + member,
+	} {
+		rec := f.do(http.MethodPut, path, `{"name":"changed","revision":999}`)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), player) {
+			t.Errorf("PUT %s conflict: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestMultiGetRequiresUUIDArray(t *testing.T) {
+	f := newSafetyFixture(t)
+	path := f.org(0) + "/players/mget"
+
+	for _, body := range []string{`null`, `[null]`, `[1]`, `{}`, `["not-a-uuid"]`} {
+		if rec := f.do(http.MethodPost, path, body); rec.Code != http.StatusBadRequest {
+			t.Errorf("mget %s: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	for _, body := range []string{`["00000000-0000-0000-0000-000000000000"]`} {
+		rec := f.do(http.MethodPost, path, body)
+		if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+			t.Errorf("mget %s: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+}

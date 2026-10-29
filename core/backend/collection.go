@@ -873,11 +873,18 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			}
 		}
 
-		var bodyJSON []uuid.UUID
-		err = json.NewDecoder(body).Decode(&bodyJSON)
-		if err != nil {
-			http.Error(w, "invalid json data: "+err.Error(), http.StatusBadRequest)
+		var rawIDs []json.RawMessage
+		err = json.NewDecoder(body).Decode(&rawIDs)
+		if err != nil || rawIDs == nil {
+			http.Error(w, "expected a UUID array", http.StatusBadRequest)
 			return
+		}
+		bodyJSON := make([]uuid.UUID, len(rawIDs))
+		for i, raw := range rawIDs {
+			if string(raw) == "null" || json.Unmarshal(raw, &bodyJSON[i]) != nil {
+				http.Error(w, "expected UUID strings", http.StatusBadRequest)
+				return
+			}
 		}
 
 		// convert bodyJSON list to a list of strings
@@ -2049,6 +2056,15 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			rlog.WithError(err).Error("Error 4737: Rollback")
 			http.Error(w, "Error 4737", http.StatusInternalServerError)
 			return
+		}
+		// Verify the stored scope before exposing it in a revision conflict.
+		// The lookup key alone does not establish that URL parents own this row.
+		for i := 0; i < propertiesIndex; i++ {
+			if params[columns[i]] != "all" && params[columns[i]] != current[i].(*uuid.UUID).String() {
+				tx.Rollback(context.Background())
+				http.Error(w, "no such "+this, http.StatusNotFound)
+				return
+			}
 		}
 		if revision != 0 && revision != currentRevision {
 			tx.Rollback(context.Background())
