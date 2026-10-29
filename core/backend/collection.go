@@ -551,7 +551,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					queryParameters[propertiesIndex-ownerIndex+5+i] = externalValues[i]
 				}
 				for i := range filterJSONValues {
-					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+6+i+len(externalValues))
+					sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex-ownerIndex+6+i+len(externalValues))
+					queryParameters = append(queryParameters, filterJSONColumns[i])
 					queryParameters[propertiesIndex-ownerIndex+5+i+len(externalValues)] = filterJSONValues[i]
 				}
 			}
@@ -565,7 +566,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 					queryParameters[propertiesIndex-ownerIndex+6+i] = externalValues[i]
 				}
 				for i := range filterJSONValues {
-					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+7+i+len(externalValues))
+					sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex-ownerIndex+7+i+len(externalValues))
+					queryParameters = append(queryParameters, filterJSONColumns[i])
 					queryParameters[propertiesIndex-ownerIndex+6+i+len(externalValues)] = filterJSONValues[i]
 				}
 			}
@@ -904,11 +906,12 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 			queryParameters = make([]interface{}, propertiesIndex-ownerIndex+len(externalValues)+len(filterJSONValues))
 			for i := range externalValues {
 				sqlQuery += fmt.Sprintf("AND (%s%s$%d) ", externalColumns[i], externalOperators[i], propertiesIndex-ownerIndex+1+i)
-				queryParameters[propertiesIndex-ownerIndex+1+i] = externalValues[i]
+				queryParameters[propertiesIndex-ownerIndex+i] = externalValues[i]
 			}
 			for i := range filterJSONValues {
-				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+1+i+len(externalValues))
-				queryParameters[propertiesIndex-ownerIndex+1+i+len(externalValues)] = filterJSONValues[i]
+				sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex-ownerIndex+1+i+len(externalValues))
+				queryParameters = append(queryParameters, filterJSONColumns[i])
+				queryParameters[propertiesIndex-ownerIndex+i+len(externalValues)] = filterJSONValues[i]
 			}
 		}
 
@@ -1551,7 +1554,8 @@ func (b *Backend) createCollectionResource(router *mux.Router, rc CollectionConf
 				queryParameters[propertiesIndex-ownerIndex+4+i] = externalValues[i]
 			}
 			for i := range filterJSONValues {
-				sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex-ownerIndex+1+4+i+len(externalValues))
+				sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex-ownerIndex+1+4+i+len(externalValues))
+				queryParameters = append(queryParameters, filterJSONColumns[i])
 				queryParameters[propertiesIndex-ownerIndex+4+i+len(externalValues)] = filterJSONValues[i]
 			}
 		}

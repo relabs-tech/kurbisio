@@ -598,7 +598,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 					queryParameters[propertiesIndex+5+i] = externalValues[i]
 				}
 				for i := range filterJSONValues {
-					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex+6+i+len(externalValues))
+					sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex+6+i+len(externalValues))
+					queryParameters = append(queryParameters, filterJSONColumns[i])
 					queryParameters[propertiesIndex+5+i+len(externalValues)] = filterJSONValues[i]
 				}
 			}
@@ -612,7 +613,8 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 					queryParameters[propertiesIndex+6+i] = externalValues[i]
 				}
 				for i := range filterJSONValues {
-					sqlQuery += fmt.Sprintf("AND (properties->>'%s'%s$%d) ", filterJSONColumns[i], filterJSONOperators[i], propertiesIndex+7+i+len(externalValues))
+					sqlQuery += fmt.Sprintf("AND ((properties->>$%d::text)%s$%d) ", len(queryParameters)+1, filterJSONOperators[i], propertiesIndex+7+i+len(externalValues))
+					queryParameters = append(queryParameters, filterJSONColumns[i])
 					queryParameters[propertiesIndex+6+i+len(externalValues)] = filterJSONValues[i]
 				}
 			}
