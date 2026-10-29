@@ -155,3 +155,48 @@ func TestMultiGetCombinesColumnAndPropertyFilters(t *testing.T) {
 		t.Fatalf("mget returned the wrong items: %s", rec.Body.String())
 	}
 }
+
+func TestRelationAscendingCursorVisitsEveryItemOnce(t *testing.T) {
+	f := newSafetyFixture(t)
+	org := f.org(0)
+	player := f.players[0].PlayerID
+	timestamp := "2026-01-02T03:04:05Z"
+
+	want := map[uuid.UUID]bool{}
+	for i := 0; i < 5; i++ {
+		var team safetyTeam
+		if _, err := f.client.RawPost(org+"/teams", &safetyTeam{}, &team); err != nil {
+			t.Fatal(err)
+		}
+		body := map[string]any{"team_id": team.TeamID, "player_id": player, "timestamp": timestamp}
+		if _, err := f.client.RawPut(org+"/members", body, nil); err != nil {
+			t.Fatal(err)
+		}
+		want[team.TeamID] = true
+	}
+
+	seen := map[uuid.UUID]int{}
+	path := org + "/members?order=asc&limit=1&from=" + timestamp + "&until=" + timestamp
+	for pages := 0; path != ""; pages++ {
+		if pages > 10 {
+			t.Fatal("cursor did not terminate")
+		}
+		var page []safetyMember
+		_, header, err := f.client.RawGetWithHeader(path, nil, &page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range page {
+			seen[m.TeamID]++
+		}
+		path = ""
+		if next := header.Get("Pagination-Next-Token"); next != "" {
+			path = org + "/members?order=asc&limit=1&next_token=" + url.QueryEscape(next)
+		}
+	}
+	for team := range want {
+		if seen[team] != 1 {
+			t.Errorf("team %s seen %d times, want once: %v", team, seen[team], seen)
+		}
+	}
+}

@@ -261,7 +261,7 @@ func (b *Backend) createRelationResource(router *mux.Router, rc RelationConfigur
 	sqlCursorPaginationDesc := fmt.Sprintf("ORDER BY timestamp DESC,%s DESC,%s DESC LIMIT $%d;",
 		columns[0], columns[1], propertiesIndex+1+4)
 
-	sqlCursorPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s DESC,%s ASC LIMIT $%d;",
+	sqlCursorPaginationAsc := fmt.Sprintf("ORDER BY timestamp ASC,%s ASC,%s ASC LIMIT $%d;",
 		columns[0], columns[1], propertiesIndex+1+4)
 
 	clearQuery := fmt.Sprintf("DELETE FROM %s.\"%s\" ", schema, resource)
